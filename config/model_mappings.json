@@ -1,0 +1,10 @@
+{
+  "hy3": {
+    "china": "hy3",
+    "overseas": "hy3 overseas"
+  },
+  "qwen2.5-7b": {
+    "china": "qwen2.5-7b",
+    "overseas": "qwen2.5-7b-instruct"
+  }
+}
