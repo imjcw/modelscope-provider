@@ -19,7 +19,6 @@ def database(test_db_url):
     db.initialize_tables()
     yield db
     # Cleanup
-    db.close()
     db_path = Path(test_db_url)
     if db_path.exists():
         db_path.unlink()
@@ -27,5 +26,6 @@ def database(test_db_url):
 
 @pytest.fixture
 def db_connection(database):
-    """Database connection fixture."""
-    return database.connect()
+    """Database connection fixture via context manager."""
+    with database.get_connection() as conn:
+        yield conn
