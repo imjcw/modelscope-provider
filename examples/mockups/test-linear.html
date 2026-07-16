@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModelScope Proxy — 在线测试 (Linear Style)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { font-family: 'Inter', system-ui, sans-serif; }
+  .code-block { font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace; }
+</style>
+</head>
+<body class="bg-[#0e0e10] text-white">
+
+<div class="flex min-h-screen">
+  <!-- Sidebar -->
+  <aside class="w-56 bg-[#0e0e10] border-r border-gray-800 flex flex-col flex-shrink-0">
+    <div class="px-5 py-5">
+      <div class="flex items-center gap-2.5">
+        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-[#5e6ad2] to-[#6b7bf2] flex items-center justify-center">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </div>
+        <span class="font-semibold tracking-tight text-white text-sm">ModelScope Proxy</span>
+      </div>
+    </div>
+    <nav class="px-2 mt-2 space-y-0.5">
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>仪表盘</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>账户管理</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54 .54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/></svg>模型映射</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>请求日志</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>使用统计</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>告警历史</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm bg-[#1a1a1e] rounded-md text-white"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>在线测试</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06"/></svg>系统配置</a>
+    </nav>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 bg-[#0e0e10]">
+    <header class="bg-[#0e0e10]/80 backdrop-blur-md border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+      <div>
+        <h1 class="text-lg font-semibold tracking-tight text-white">在线测试</h1>
+        <p class="text-xs text-gray-500 mt-0.5">直接发送请求测试 API 代理</p>
+      </div>
+    </header>
+
+    <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Request Panel -->
+      <div class="bg-[#1a1a1e] rounded-lg border border-gray-800">
+        <div class="px-5 py-3.5 border-b border-gray-800 flex items-center gap-2">
+          <span class="text-xs font-mono text-[#5e6ad2]">POST</span>
+          <span class="text-xs font-mono text-gray-400">/api/v1/chat/completions</span>
+        </div>
+        <div class="p-5 space-y-4">
+          <!-- Model -->
+          <div>
+            <label class="block text-xs text-gray-500 mb-1.5">模型</label>
+            <select class="w-full bg-[#0e0e10] rounded-lg border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-[#5e6ad2] font-mono">
+              <option>hy3</option>
+              <option>qwen2.5-7b</option>
+              <option>qwen2.5-14b</option>
+            </select>
+          </div>
+          <!-- Temperature -->
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1.5">Temperature</label>
+              <input type="number" value="0.7" step="0.1" class="w-full bg-[#0e0e10] rounded-lg border border-gray-800 px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-[#5e6ad2]">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1.5">Max Tokens</label>
+              <input type="number" value="2048" class="w-full bg-[#0e0e10] rounded-lg border border-gray-800 px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-[#5e6ad2]">
+            </div>
+          </div>
+          <!-- Stream toggle -->
+          <div class="flex items-center justify-between">
+            <label class="text-xs text-gray-500">Stream</label>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" checked class="sr-only peer">
+              <div class="w-9 h-5 bg-gray-700 rounded-full peer peer-checked:bg-[#5e6ad2] transition-all after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
+            </label>
+          </div>
+          <!-- Messages -->
+          <div>
+            <label class="block text-xs text gray-500 mb-1.5">Messages (JSON)</label>
+            <textarea class="w-full bg-[#0e0e10] rounded-lg border border-gray-800 px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-[#5e6ad2] resize-none" rows="8">[
+  {
+    "role": "system",
+    "content": "You are a helpful assistant."
+  },
+  {
+    "role": "user",
+    "content": "Hello, what can you do?"
+  }
+]</textarea>
+          </div>
+          <!-- Send button -->
+          <div class="flex items-center justify-between">
+            <p class="text-xs text-gray-600">发送请求将消耗配额</p>
+            <button class="bg-[#5e6ad2] text-white font-medium rounded-lg h-9 px-6 text-sm hover:bg-[#6b7bf2] transition-all">发送请求 →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Response Panel -->
+      <div class="bg-[#1a1a1e] rounded-lg border border-gray-800">
+        <div class="px-5 py-3.5 border-b border-gray-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-green-500/10 text-green-400 text-xs font-mono">200 OK</span>
+            <span class="text-xs text-gray-500">→ account-1</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-500">342ms</span>
+            <span class="text-xs text-gray-500">1,240 tokens</span>
+            <button class="text-xs text-gray-400 hover:text-white">复制</button>
+          </div>
+        </div>
+        <div class="p-5">
+          <pre class="bg-[#0e0e10] rounded-lg p-4 text-xs text-gray-300 overflow-x-auto leading-relaxed"><span class="text-[#5e6ad2]">{"</span>id<span class="text-[#5e6ad2]">": "</span>chatcmpl-abc123<span class="text-[#5e6ad2]">",</span>
+<span class="text-[#5e6ad2]">"</span>object<span class="text-[#5e6ad2]">": "</span>chat.completion<span class="text-[#5e6ad2]">",</span>
+<span class="text-[#5e6ad2]">"</span>created<span class="text-[#5e6ad2]">": </span>1718460000<span class="text-[#5e6ad2]">,</span>
+<span class="text-[#5e6ad2]">"</span>model<span class="text-[#5e6ad2]">": "</span>hy3<span class="text-[#5e6ad2]">",</span>
+<span class="text-[#5e6ad2]">"</span>choices<span class="text-[#5e6ad2]">": [
+    {
+      <span class="text-[#5e6ad2]">"</span>index<span class="text-[#5e6ad2]">": </span>0<span class="text-[#5e6ad2]">,</span>
+      <span class="text-[#5e6ad2]">"</span>message<span class="text-[#5e6ad2]">": {
+        <span class="text-[#5e6ad2]">"</span>role<span class="text-[#5e6ad2]">": "</span>assistant<span class="text-[#5e6ad2]">",</span>
+        <span class="text-[#5e6ad2]">"</span>content<span class="text-[#5e6ad2]">": "</span>Hi! I can help with writing, analysis, coding, and more. What would you like to explore?<span class="text-[#5e6ad2]">"</span>
+      },
+      <span class="text-[#5e6ad2]">"</span>finish_reason<span class="text-[#5e6ad2]">": "</span>stop<span class="text-[#5e6ad2]">"
+    }
+  ],</span>
+<span class="text-[#5e6ad2]">"</span>usage<span class="text-[#5e6ad2]">": {
+    <span class="text-[#5e6ad2]">"</span>prompt_tokens<span class="text-[#5e6ad2]">": </span>24<span class="text-[#5e6ad2]">,</span>
+    <span class="text-[#5e6ad2]">"</span>completion_tokens<span class="text-[#5e6ad2]">": </span>1216<span class="text-[#5e6ad2]">,</span>
+    <span class="text-[#5e6ad2]">"</span>total_tokens<span class="text-[#5e6ad2]">": </span>1240<span class="text-[#5e6ad2]">
+  }
+}</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- curl example -->
+    <div class="p-6 pt-0">
+      <div class="bg-[#1a1a1e] rounded-lg border border-gray-800">
+        <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+          <h2 class="font-semibold tracking-tight text-sm">curl 示例</h2>
+          <button class="text-xs text-gray-400 hover:text-white">复制</button>
+        </div>
+        <pre class="p-5 text-xs text-gray-300 font-mono overflow-x-auto"><span class="text-green-400">$</span> curl http://localhost:8000/api/v1/chat/completions \
+  -H <span class="text-[#5e6ad2]">"Content-Type: application/json"</span> \
+  -d <span class="text-[#5e6ad2]">'{
+    "model": "hy3",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'</span></pre>
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

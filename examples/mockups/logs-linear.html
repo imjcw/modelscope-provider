@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModelScope Proxy — 请求日志 (Linear Style)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { font-family: 'Inter', system-ui, sans-serif; }
+</style>
+</head>
+<body class="bg-[#0e0e10] text-white">
+
+<div class="flex min-h-screen">
+  <!-- Sidebar -->
+  <aside class="w-56 bg-[#0e0e10] border-r border-gray-800 flex flex-col flex-shrink-0">
+    <div class="px-5 py-5">
+      <div class="flex items-center gap-2.5">
+        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-[#5e6ad2] to-[#6b7bf2] flex items-center justify-center">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </div>
+        <span class="font-semibold tracking-tight text-white text-sm">ModelScope Proxy</span>
+      </div>
+    </div>
+    <nav class="px-2 mt-2 space-y-0.5">
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>仪表盘</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>账户管理</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54 .54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/></svg>模型映射</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm bg-[#1a1a1e] rounded-md text-white"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>请求日志</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>使用统计</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>告警历史</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>在线测试</a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#1a1a1e] rounded-md"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06"/></svg>系统配置</a>
+    </nav>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 bg-[#0e0e10]">
+    <header class="bg-[#0e0e10]/80 backdrop-blur-md border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <h1 class="text-lg font-semibold tracking-tight text-white">日志</h1>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-600"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="bg-[#5e6ad2] text-white font-medium rounded-lg h-8 px-4 text-sm hover:bg-[#6b7bf2] transition-all">↻ 刷新</button>
+      </div>
+    </header>
+
+    <div class="p-6">
+      <!-- Filters (2 rows, matching screenshot structure) -->
+      <div class="flex flex-wrap gap-3 mb-5">
+        <!-- Row 1 -->
+        <div class="flex items-center gap-2 bg-[#1a1a1e] rounded-lg border border-gray-800 px-3 py-2">
+          <label class="text-xs text-gray-500 flex-shrink-0">时间</label>
+          <input type="text" value="2026-07-09" class="bg-transparent text-sm text-white border-0 focus:outline-none w-24">
+          <span class="text-gray-600 text-xs">~</span>
+          <input type="text" value="2026-07-16" class="bg-transparent text-sm text-white border-0 focus:outline-none w-24">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-500 ml-1"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </div>
+        <div class="flex items-center gap-2 bg-[#1a1a1e] rounded-lg border border-gray-800 px-3 py-2">
+          <label class="text-xs text-gray-500 flex-shrink-0">账户</label>
+          <select class="bg-transparent text-sm text-gray-400 border-0 focus:outline-none focus:text-white min-w-[140px]">
+            <option>选择账户</option>
+            <option>account-1</option>
+            <option>account-2</option>
+            <option>account-3</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2 bg-[#1a1a1e] rounded-lg border border-gray-800 px-3 py-2 flex-1 min-w-[200px]">
+          <label class="text-xs text-gray-500 flex-shrink-0">请求 ID</label>
+          <input type="text" placeholder="输入请求 ID" class="bg-transparent text-sm text-white placeholder:text-gray-600 border-0 focus:outline-none flex-1">
+        </div>
+        <div class="flex items-center gap-2 bg-[#1a1a1e] rounded-lg border border-gray-800 px-3 py-2">
+          <label class="text-xs text-gray-500 flex-shrink-0">状态</label>
+          <select class="bg-transparent text-sm text-gray-400 border-0 focus:outline-none focus:text-white min-w-[100px]">
+            <option>选择状态</option>
+            <option>成功</option>
+            <option>失败</option>
+            <option>配额不足</option>
+          </select>
+        </div>
+        <!-- Row 2 -->
+        <div class="flex items-center gap-2 bg-[#1a1a1e] rounded-lg border border-gray-800 px-3 py-2">
+          <label class="text-xs text-gray-500 flex-shrink-0">模型</label>
+          <select class="bg-transparent text-sm text-gray-400 border-0 focus:outline-none focus:text-white min-w-[140px]">
+            <option>选择模型</option>
+            <option>hy3</option>
+            <option>qwen2.5-7b</option>
+            <option>qwen2.5-14b</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2 bg-[#1a1a1e] rounded-lg border border-gray-800 px-3 py-2">
+          <label class="text-xs text-gray-500 flex-shrink-0">流式</label>
+          <select class="bg-transparent text-sm text-gray-400 border-0 focus:outline-none focus:text-white min-w-[100px]">
+            <option>全部</option>
+            <option>是</option>
+            <option>否</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="bg-[#1a1a1e] rounded-lg border border-gray-800 overflow-hidden">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-gray-500 border-b border-gray-800 bg-[#0e0e10]">
+              <th class="text-left px-4 py-2.5 font-medium"><span class="flex items-center gap-1">时间戳 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span></th>
+              <th class="text-left px-4 py-2.5 font-medium">请求 ID</th>
+              <th class="text-left px-4 py-2.5 font-medium"><span class="flex items-center gap-1">模型 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span></th>
+              <th class="text-left px-4 py-2.5 font-medium">账户</th>
+              <th class="text-left px-4 py-2.5 font-medium">状态</th>
+              <th class="text-left px-4 py-2.5 font-medium"><span class="flex items-center gap-1">输入 Token <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span></th>
+              <th class="text-left px-4 py-2.5 font-medium"><span class="flex items-center gap-1">输出 Token <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span></th>
+              <th class="text-left px-4 py-2.5 font-medium">延迟</th>
+              <th class="text-left px-4 py-2.5 font-medium">流式</th>
+              <th class="text-right px-4 py-2.5 font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-gray-800/50 hover:bg-[#232329] transition-colors group">
+              <td class="px-4 py-3 text-gray-400">Jul 16, 09:49 AM</td>
+              <td class="px-4 py-3 text-gray-300 font-mono">req_a1b2c3d4</td>
+              <td class="px-4 py-3">
+                <a href="#" class="text-white hover:underline inline-flex items-center gap-1.5">
+                  <span class="w-4 h-4 rounded bg-[#5e6ad2]/20 flex items-center justify-center"><span class="text-[#5e6ad2] text-[9px] font-bold">H</span></span>
+                  <span class="font-mono">hy3</span>
+                </a>
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center gap-1.5 text-gray-400">
+                  <span class="w-4 h-4 rounded bg-[#5e6ad2]/20 flex items-center justify-center"><span class="text-[#5e6ad2] text-[9px] font-bold">A</span></span>
+                  account-1
+                </span>
+              </td>
+              <td class="px-4 py-3"><span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-green-500/10 text-green-400">200</span></td>
+              <td class="px-4 py-3">
+                <div class="inline-flex items-center gap-1">
+                  <span class="font-mono text-white">30,766</span>
+                  <button class="text-gray-600 hover:text-gray-300 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                </div>
+              </td>
+              <td class="px-4 py-3">
+                <div class="inline-flex items-center gap-1">
+                  <span class="font-mono text-white">688</span>
+                  <button class="text-gray-600 hover:text-gray-300 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                </div>
+              </td>
+              <td class="px-4 py-3 font-mono text-white">342ms</td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-[#5e6ad2]/10 text-[#5e6ad2]">P</span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <a href="log-detail-linear.html" class="bg-[#232329] text-gray-300 hover:text-white rounded-md px-3 py-1 text-xs transition-colors">详情</a>
+              </td>
+            </tr>
+            <tr class="border-b border-gray-800/50 hover:bg-[#232329] transition-colors group">
+              <td class="px-4 py-3 text-gray-400">Jul 16, 09:47 AM</td>
+              <td class="px-4 py-3 text-gray-300 font-mono">req_e5f6g7h8</td>
+              <td class="px-4 py-3">
+                <a href="#" class="text-white hover:underline inline-flex items-center gap-1.5">
+                  <span class="w-4 h-4 rounded bg-[#5e6ad2]/20 flex items-center justify-center"><span class="text-[#5e6ad2] text-[9px] font-bold">H</span></span>
+                  <span class="font-mono">hy3</span>
+                </a>
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center gap-1.5 text-gray-400">
+                  <span class="w-4 h-4 rounded bg-[#5e6ad2]/20 flex items-center justify-center"><span class="text-[#5e6ad2] text-[9px] font-bold">A</span></span>
+                  account-1
+                </span>
+              </td>
+              <td class="px-4 py-3"><span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-green-500/10 text-green-400">200</span></td>
+              <td class="px-4 py-3">
+                <div class="inline-flex items-center gap-1">
+                  <span class="font-mono text-white">30,194</span>
+                  <button class="text-gray-600 hover:text-gray-300 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                </div>
+              </td>
+              <td class="px-4 py-3">
+                <div class="inline-flex items-center gap-1">
+                  <span class="font-mono text-white">625</span>
+                  <button class="text-gray-600 hover:text-gray-300 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                </div>
+              </td>
+              <td class="px-4 py-3 font-mono text-white">298ms</td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-[#5e6ad2]/10 text-[#5e6ad2]">P</span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <a href="log-detail-linear.html" class="bg-[#232329] text-gray-300 hover:text-white rounded-md px-3 py-1 text-xs transition-colors">详情</a>
+              </td>
+            </tr>
+            <tr class="border-b border-gray-800/50 hover:bg-[#232329] transition-colors group">
+              <td class="px-4 py-3 text-gray-400">Jul 16, 09:46 AM</td>
+              <td class="px-4 py-3 text-gray-300 font-mono">req_i9j0k1l2</td>
+              <td class="px-4 py-3">
+                <a href="#" class="text-white hover:underline inline-flex items-center gap-1.5">
+                  <span class="w-4 h-4 rounded bg-gray-700 flex items-center justify-center"><span class="text-gray-300 text-[9px] font-bold">Q</span></span>
+                  <span class="font-mono">qwen2.5-7b</span>
+                </a>
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center gap-1.5 text-gray-400">
+                  <span class="w-4 h-4 rounded bg-yellow-500/20 flex items-center justify-center"><span class="text-yellow-400 text-[9px] font-bold">C</span></span>
+                  account-3
+                </span>
+              </td>
+              <td class="px-4 py-3"><span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-green-500/10 text-green-400">200</span></td>
+              <td class="px-4 py-3">
+                <div class="inline-flex items-center gap-1">
+                  <span class="font-mono text-white">29,650</span>
+                  <button class="text-gray-600 hover:text-gray-300 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                </div>
+              </td>
+              <td class="px-4 py-3">
+                <div class="inline-flex items-center gap-1">
+                  <span class="font-mono text-white">804</span>
+                  <button class="text-gray-600 hover:text-gray-300 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                </div>
+              </td>
+              <td class="px-4 py-3 font-mono text-white">1.2s</td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-[#5e6ad2]/10 text-[#5e6ad2]">P</span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <a href="log-detail-linear.html" class="bg-[#232329] text-gray-300 hover:text-white rounded-md px-3 py-1 text-xs transition-colors">详情</a>
+              </td>
+            </tr>
+            <tr class="border-b border-gray-800/50 hover:bg-[#232329] transition-colors group">
+              <td class="px-4 py-3 text-gray-400">Jul 15, 05:32 PM</td>
+              <td class="px-4 py-3 text-gray-300 font-mono">req_m3n4o5p6</td>
+              <td class="px-4 py-3">
+                <a href="#" class="text-white hover:underline inline-flex items-center gap-1.5">
+                  <span class="w-4 h-4 rounded bg-[#5e6ad2]/20 flex items-center justify-center"><span class="text-[#5e6ad2] text-[9px] font-bold">H</span></span>
+                  <span class="font-mono">hy3</span>
+                </a>
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center gap-1.5 text-gray-400">
+                  <span class="w-4 h-4 rounded bg-green-500/20 flex items-center justify-center"><span class="text-green-400 text-[9px] font-bold">U</span></span>
+                  account-2
+                </span>
+              </td>
+              <td class="px-4 py-3"><span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-green-500/10 text-green-400">200</span></td>
+              <td class="px-4 py-3">
+                <div class="inline-flex items-center gap-1">
+                  <span class="font-mono text-white">28,590</span>
+                  <button class="text-gray-600 hover:text-gray-300 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                </div>
+              </td>
+              <td class="px-4 py-3">
+                <div class="inline-flex items-center gap-1">
+                  <span class="font-mono text-white">916</span>
+                  <button class="text-gray-600 hover:text-gray-300 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                </div>
+              </td>
+              <td class="px-4 py-3 font-mono text-white">187ms</td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-[#5e6ad2]/10 text-[#5e6ad2]">P</span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <a href="log-detail-linear.html" class="bg-[#232329] text-gray-300 hover:text-white rounded-md px-3 py-1 text-xs transition-colors">详情</a>
+              </td>
+            </tr>
+            <tr class="border-b border-gray-800/50 hover:bg-[#232329] transition-colors group">
+              <td class="px-4 py-3 text-gray-400">Jul 15, 10:00 AM</td>
+              <td class="px-4 py-3 text-gray-300 font-mono">req_q7r8s9t0</td>
+              <td class="px-4 py-3">
+                <a href="#" class="text-white hover:underline inline-flex items-center gap-1.5">
+                  <span class="w-4 h-4 rounded bg-gray-700 flex items-center justify-center"><span class="text-gray-300 text-[9px] font-bold">Q</span></span>
+                  <span class="font-mono">qwen2.5-7b</span>
+                </a>
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center gap-1.5 text-gray-400">
+                  <span class="w-4 h-4 rounded bg-yellow-500/20 flex items-center justify-center"><span class="text-yellow-400 text-[9px] font-bold">C</span></span>
+                  account-3
+                </span>
+              </td>
+              <td class="px-4 py-3"><span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-red-500/10 text-red-400">500</span></td>
+              <td class="px-4 py-3"><span class="font-mono text-gray-600">—</span></td>
+              <td class="px-4 py-3"><span class="font-mono text-gray-600">—</span></td>
+              <td class="px-4 py-3"><span class="font-mono text-gray-500">—</span></td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-gray-700 text-gray-400">N</span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <a href="log-detail-linear.html" class="bg-[#232329] text-gray-300 hover:text-white rounded-md px-3 py-1 text-xs transition-colors">详情</a>
+              </td>
+            </tr>
+            <tr class="hover:bg-[#232329] transition-colors group">
+              <td class="px-4 py-3 text-gray-400">Jul 15, 09:51 AM</td>
+              <td class="px-4 py-3 text-gray-300 font-mono">req_u1v2w3x4</td>
+              <td class="px-4 py-3">
+                <a href="#" class="text-white hover:underline inline-flex items-center gap-1.5">
+                  <span class="w-4 h-4 rounded bg-[#5e6ad2]/20 flex items-center justify-center"><span class="text-[#5e6ad2] text-[9px] font-bold">H</span></span>
+                  <span class="font-mono">hy3</span>
+                </a>
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center gap-1.5 text-gray-400">
+                  <span class="w-4 h-4 rounded bg-[#5e6ad2]/20 flex items-center justify-center"><span class="text-[#5e6ad2] text-[9px] font-bold">A</span></span>
+                  account-1
+                </span>
+              </td>
+              <td class="px-4 py-3"><span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-yellow-500/10 text-yellow-400">429</span></td>
+              <td class="px-4 py-3"><span class="font-mono text-gray-600">—</span></td>
+              <td class="px-4 py-3"><span class="font-mono text-gray-600">—</span></td>
+              <td class="px-4 py-3"><span class="font-mono text-gray-500">—</span></td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-gray-700 text-gray-400">N</span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <a href="log-detail-linear.html" class="bg-[#232329] text-gray-300 hover:text-white rounded-md px-3 py-1 text-xs transition-colors">详情</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="flex items-center justify-between mt-4">
+        <p class="text-xs text-gray-500">共 12,847 条记录</p>
+        <div class="flex items-center gap-2">
+          <button class="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-md hover:bg-[#1a1a1e]">← 上页</button>
+          <span class="text-xs text-gray-500">1 / 257</span>
+          <button class="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-md hover:bg-[#1a1a1e]">下页 →</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>
