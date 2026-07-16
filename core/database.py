@@ -9,10 +9,11 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
-    """Manage SQLite database for quota and alias caching."""
+    """Manage SQLite database for quota, alias caching, accounts, and admin."""
 
     def __init__(self, db_url: str):
-        self.db_url = db_url
+        # Strip sqlite:/// prefix for sqlite3.connect
+        self.db_url = db_url.replace("sqlite:///", "") if db_url.startswith("sqlite:///") else db_url
 
     @contextmanager
     def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -31,9 +32,11 @@ class DatabaseManager:
             conn.close()
 
     def initialize_tables(self):
-        """Initialize database tables."""
+        """Initialize all database tables."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+
+            # ── Existing tables ──
 
             # Account quotas table - composite primary key
             cursor.execute("""
@@ -63,7 +66,65 @@ class DatabaseManager:
                 )
             """)
 
-            # Create indexes
+            # ── New tables for admin panel ──
+
+            # Accounts table - account configuration
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL UNIQUE,
+                    api_key TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    region TEXT NOT NULL DEFAULT 'china',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Model mappings table - alias to actual model id
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS model_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alias_name TEXT NOT NULL,
+                    region TEXT NOT NULL DEFAULT 'china',
+                    actual_model_id TEXT NOT NULL,
+                    UNIQUE(alias_name, region)
+                )
+            """)
+
+            # System config table - key-value storage
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    description TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Request logs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS request_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT NOT NULL UNIQUE,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    model TEXT NOT NULL,
+                    actual_model_id TEXT,
+                    account_id TEXT,
+                    status_code INTEGER,
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    latency_ms INTEGER,
+                    is_stream BOOLEAN DEFAULT 0,
+                    error_message TEXT,
+                    raw_request TEXT,
+                    raw_response TEXT
+                )
+            """)
+
+            # ── Indexes ──
+
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_quota_date
                 ON account_quotas(quota_date)
@@ -74,7 +135,40 @@ class DatabaseManager:
                 ON model_alias_cache(alias_name, cache_date)
             """)
 
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_logs_time
+                ON request_logs(timestamp)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_logs_account
+                ON request_logs(account_id)
+            """)
+
             logger.info("Database tables initialized")
+
+    def seed_default_config(self):
+        """Insert default system config values if not present."""
+        defaults = [
+            ("log_level", "INFO", "日志级别: DEBUG/INFO/WARNING/ERROR"),
+            ("load_balancer_strategy", "round_robin", "负载均衡策略: round_robin/least_conn/random"),
+            ("request_timeout_ms", "30000", "请求超时毫秒数"),
+            ("retry_count", "0", "失败重试次数"),
+            ("auto_disable_on_quota", "true", "配额耗尽时自动禁用账户"),
+            ("auto_reset_daily", "true", "每日自动重置配额"),
+        ]
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            existing = {
+                row[0] for row in cursor.execute("SELECT key FROM system_config")
+            }
+            for key, value, desc in defaults:
+                if key not in existing:
+                    cursor.execute(
+                        "INSERT INTO system_config (key, value, description) VALUES (?, ?, ?)",
+                        (key, value, desc),
+                    )
+            logger.info(f"Seeded {len(defaults) - len(existing)} default config values")
 
     def get_today_date(self) -> str:
         """Get current date in YYYY-MM-DD format."""

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from provider.core.config import ConfigManager
 from provider.core.database import DatabaseManager
 from provider.core.http_client import HttpClient
@@ -18,9 +18,13 @@ class ServiceInitializer:
 
     async def initialize_all(
         self,
-        accounts: List[ModelScopeAccount]
+        accounts: Optional[List[ModelScopeAccount]] = None,
     ) -> dict:
         """Initialize all services.
+
+        Args:
+            accounts: If provided, use these accounts. Otherwise load from
+                      config (DB preferred, .env fallback).
 
         Returns:
             Dictionary containing initialized services
@@ -28,6 +32,12 @@ class ServiceInitializer:
         # Initialize database
         database = DatabaseManager(self.config.get_database_url())
         database.initialize_tables()
+        database.seed_default_config()
+
+        # Load accounts if not provided
+        if accounts is None:
+            self.config.db = database
+            accounts = self.config.load_accounts(migrate_from_env=True)
 
         # Initialize HTTP client
         http_client = HttpClient()

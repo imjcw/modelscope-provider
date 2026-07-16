@@ -3,5 +3,6 @@
 __all__ = [
     "LoadBalancer",
     "ResponseConverter",
-    "QuotaUpdater"
+    "QuotaUpdater",
+    "AdminService",
 ]
