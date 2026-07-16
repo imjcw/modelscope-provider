@@ -1,5 +1,6 @@
 import datetime
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,7 +14,25 @@ class DatabaseManager:
 
     def __init__(self, db_url: str):
         # Strip sqlite:/// prefix for sqlite3.connect
-        self.db_url = db_url.replace("sqlite:///", "") if db_url.startswith("sqlite:///") else db_url
+        db_path = db_url.replace("sqlite:///", "") if db_url.startswith("sqlite:///") else db_url
+
+        # If the parent directory doesn't exist (e.g. Windows path on WSL),
+        # fall back to a database file in the project root.
+        parent = Path(db_path).parent
+        if not parent.exists():
+            fallback = Path(__file__).resolve().parent.parent / "modelscope_proxy.db"
+            logger.warning(
+                f"Database path '{db_path}' is not accessible (parent dir '{parent}' does not exist). "
+                f"Falling back to '{fallback}'"
+            )
+            db_path = str(fallback)
+
+        # Ensure the parent directory exists for the fallback path too
+        parent = Path(db_path).parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+
+        self.db_url = db_path
 
     @contextmanager
     def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
