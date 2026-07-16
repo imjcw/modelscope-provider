@@ -47,3 +47,4 @@ htmlcov/
 
 # Logs
 *.log
+web/node_modules/
