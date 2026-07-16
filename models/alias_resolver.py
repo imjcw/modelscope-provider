@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 import httpx
 from provider.models.account import ModelScopeAccount
 
@@ -13,8 +12,13 @@ class ModelAliasResolver:
         self.http_client = http_client
 
     async def resolve_alias(self, account: ModelScopeAccount, alias: str) -> str:
-        """Resolve model alias to actual model ID."""
-        return await self._fetch_model_id(account, alias)
+        """Resolve model alias to actual model ID.
+        
+        For now, just return the alias as-is since ModelScope API doesn't have a separate alias endpoint.
+        The model name is used directly.
+        """
+        logger.info(f"Using model '{alias}' for account {account.account_id}")
+        return alias
 
     async def _fetch_model_id(self, account: ModelScopeAccount, alias: str) -> str:
         """Fetch model ID from ModelScope API."""
@@ -34,8 +38,12 @@ class ModelAliasResolver:
             logger.info(f"Resolved alias '{alias}' to model ID '{actual_id}'")
             return actual_id
         except httpx.HTTPStatusError as e:
+            # If model alias API doesn't exist or returns 404, just use the alias as-is
+            if e.response.status_code == 404:
+                logger.warning(f"Model alias API not found for '{alias}', using as-is")
+                return alias
             logger.error(f"Failed to fetch model ID: {e}")
-            raise ValueError(f"Failed to resolve model alias '{alias}': {e.status_code}")
+            raise ValueError(f"Failed to resolve model alias '{alias}': {e.response.status_code}")
         except Exception as e:
             logger.error(f"Unexpected error fetching model ID: {e}")
             raise ValueError(f"Failed to resolve model alias '{alias}': {str(e)}")
