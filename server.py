@@ -1,6 +1,8 @@
 # FastAPI wrapper for OpenAI-compatible ModelScope proxy
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, AsyncIterator
 import json
@@ -143,6 +145,16 @@ async def quota_info():
     return await proxy.get_quota_info()
 
 
+# Serve static frontend files
+_dist_dir = Path(__file__).parent / "web" / "dist"
+if _dist_dir.exists():
+    app.mount("/", StaticFiles(directory=str(_dist_dir), html=True), name="static")
+    logger.info(f"Serving static files from {_dist_dir}")
+else:
+    logger.warning("Frontend dist directory not found, static files not served")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
