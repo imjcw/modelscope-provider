@@ -31,7 +31,7 @@ let escId = null
 watch(
   () => props.modelValue,
   (val) => {
-    if (val) escId = register(close)
+    if (val) escId = register({ close, confirm: handleConfirm })
     else { unregister(escId); escId = null }
   }
 )

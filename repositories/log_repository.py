@@ -14,7 +14,8 @@ class LogRepository:
         self.db = db
 
     def create(self, request_id: str, model: str, actual_model_id: str = None,
-               account_id: str = None, status_code: int = None,
+               account_id: str = None, account_name: str = None,
+               status_code: int = None,
                input_tokens: int = 0, output_tokens: int = 0,
                latency_ms: int = None, is_stream: bool = False,
                error_message: str = None, raw_request: str = None,
@@ -23,11 +24,11 @@ class LogRepository:
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO request_logs
-                   (request_id, model, actual_model_id, account_id, status_code,
+                   (request_id, model, actual_model_id, account_id, account_name, status_code,
                     input_tokens, output_tokens, latency_ms, is_stream,
                     error_message, raw_request, raw_response)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (request_id, model, actual_model_id, account_id, status_code,
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (request_id, model, actual_model_id, account_id, account_name, status_code,
                  input_tokens, output_tokens, latency_ms, is_stream,
                  error_message, raw_request, raw_response),
             )

@@ -1,40 +1,40 @@
 /**
- * Centralized ESC handler — closes only the topmost overlay.
+ * Centralized overlay key handler — ESC closes topmost, Enter confirms topmost.
  *
- * Usage in a component:
+ * Usage:
  *   const { register, unregister } = useOverlayEsc()
- *   // when opening:
- *   const id = register(closeFn)   // closeFn() is called on ESC
- *   // when closing (normally or by ESC):
+ *   const id = register({ close: () => {}, confirm: () => {} })
  *   unregister(id)
  */
 
 const stack = []
 let bound = null
 
-function handleEsc(e) {
-  if (e.key !== 'Escape') return
+function handleKey(e) {
   if (stack.length === 0) return
-  // Pop and call the topmost handler
-  const id = stack[stack.length - 1]
-  const handler = stack.find(h => h.id === id)
-  if (handler) {
-    handler.close()
-    // Remove from stack after calling
-    const idx = stack.indexOf(handler)
-    stack.splice(idx, 1)
+
+  const top = stack[stack.length - 1]
+
+  if (e.key === 'Escape') {
+    top.close()
+    stack.pop()
+  } else if (e.key === 'Enter') {
+    // Only handle Enter if the topmost overlay has a confirm handler
+    if (top.confirm) {
+      e.preventDefault()
+      top.confirm()
+    }
   }
 }
 
 export function useOverlayEsc() {
-  function register(closeFn) {
-    // Ensure global listener is installed
+  function register(handlers) {
     if (!bound) {
-      bound = handleEsc
+      bound = handleKey
       document.addEventListener('keydown', bound)
     }
     const id = Date.now() + '-' + Math.random().toString(36).slice(2, 6)
-    stack.push({ id, close: closeFn })
+    stack.push({ id, close: handlers.close, confirm: handlers.confirm || null })
     return id
   }
 

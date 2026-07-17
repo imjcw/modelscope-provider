@@ -121,6 +121,21 @@ class DatabaseManager:
                 )
             """)
 
+            # Mapping models table - models bound to each alias
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mapping_models (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alias_name TEXT NOT NULL,
+                    supplier_id INTEGER NOT NULL,
+                    model_name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (alias_name) REFERENCES model_mappings(alias_name) ON DELETE CASCADE,
+                    FOREIGN KEY (supplier_id) REFERENCES accounts(id) ON DELETE CASCADE,
+                    UNIQUE(alias_name, supplier_id, model_name)
+                )
+            """)
+
             # System config table - key-value storage
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS system_config (
@@ -182,6 +197,16 @@ class DatabaseManager:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_supplier_models_supplier
                 ON supplier_models(supplier_id)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_mapping_models_alias
+                ON mapping_models(alias_name)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_mapping_models_supplier
+                ON mapping_models(supplier_id)
             """)
 
             # ── Migration: add `name` column to accounts if missing ──
