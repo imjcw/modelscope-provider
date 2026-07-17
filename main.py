@@ -10,10 +10,18 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from core.config import ConfigManager
-from core.service_init import ServiceInitializer
-from api.routes import router
-from api.admin_routes import router as admin_router
+# When imported as a module (e.g. via uvicorn), use 'provider.' prefix;
+# when run as a script from the provider/ dir, bare imports work.
+try:
+    from provider.core.config import ConfigManager
+    from provider.core.service_init import ServiceInitializer
+    from provider.api.routes import router
+    from provider.api.admin_routes import router as admin_router
+except ImportError:
+    from core.config import ConfigManager
+    from core.service_init import ServiceInitializer
+    from api.routes import router
+    from api.admin_routes import router as admin_router
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,11 +41,22 @@ async def initialize_services():
     _services = await initializer.initialize_all(accounts=None)
 
     # Initialize admin service
-    from services.admin_service import AdminService
-    from repositories.account_repository import AccountRepository
-    from repositories.mapping_repository import MappingRepository
-    from repositories.config_repository import ConfigRepository
-    from repositories.log_repository import LogRepository
+    try:
+        from provider.services.admin_service import AdminService
+        from provider.repositories.account_repository import AccountRepository
+        from provider.repositories.mapping_repository import MappingRepository
+        from provider.repositories.config_repository import ConfigRepository
+        from provider.repositories.log_repository import LogRepository
+        from provider.repositories.quota_repository import QuotaRepository
+        from provider.repositories.supplier_model_repository import SupplierModelRepository
+    except ImportError:
+        from services.admin_service import AdminService
+        from repositories.account_repository import AccountRepository
+        from repositories.mapping_repository import MappingRepository
+        from repositories.config_repository import ConfigRepository
+        from repositories.log_repository import LogRepository
+        from repositories.quota_repository import QuotaRepository
+        from repositories.supplier_model_repository import SupplierModelRepository
 
     db = _services["database"]
     admin_service = AdminService(
@@ -45,6 +64,8 @@ async def initialize_services():
         mapping_repo=MappingRepository(db),
         config_repo=ConfigRepository(db),
         log_repo=LogRepository(db),
+        quota_repo=QuotaRepository(db),
+        supplier_model_repo=SupplierModelRepository(db),
     )
     _admin_service = admin_service
     logger.info(f"Loaded {len(_services['accounts'])} accounts, admin service initialized")
@@ -86,10 +107,19 @@ def create_app():
     app.include_router(router, prefix="/api", tags=["API"])
     app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 
-    # Serve static frontend files
+    # Disable cache for static assets (dev convenience — prevents browser caching old JS)
+    @app.middleware("http")
+    async def disable_static_cache(request, call_next):
+        response = await call_next(request)
+        if request.url.path.endswith((".js", ".css", ".html")):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Expires"] = "0"
+        return response
+
+    # Serve static frontend files (no cache in dev for hot refresh)
     dist_dir = Path(__file__).parent / "web" / "dist"
     if dist_dir.exists():
-        app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="static")
+        app.mount("/", StaticFiles(directory=str(dist_dir), html=True, check_dir=False), name="static")
         logger.info(f"Serving static files from {dist_dir}")
     else:
         logger.warning("Frontend dist directory not found, static files not served")
