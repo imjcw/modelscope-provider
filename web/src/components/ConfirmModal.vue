@@ -59,7 +59,7 @@ onBeforeUnmount(() => {
         <p class="modal-message" v-html="message"></p>
         <div class="modal-actions">
           <button @click="close" class="btn btn-secondary btn-esc">{{ cancelText }}</button>
-          <button @click="handleConfirm" class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" :disabled="disabled">
+          <button @click="handleConfirm" class="btn btn-enter" :class="danger ? 'btn-danger' : 'btn-primary'" :disabled="disabled">
             {{ confirmText }}
           </button>
         </div>

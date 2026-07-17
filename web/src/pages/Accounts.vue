@@ -244,7 +244,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, inject } from 'vue'
+import { ref, computed, onMounted, nextTick, inject } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import Drawer from '@/components/Drawer.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
@@ -515,28 +515,7 @@ const confirmDelete = async () => {
   }
 }
 
-// ── ESC / Enter keyboard shortcuts ──
-const handleKeyDown = (e) => {
-  if (e.key === 'Escape') {
-    if (showModelDeleteModal.value) {
-      closeModelDeleteConfirm()
-    } else if (showAddDrawer.value) {
-      closeAdd()
-    } else if (showEditDrawer.value) {
-      closeEdit()
-    }
-  }
-  if (e.key === 'Enter' && showModelDeleteModal.value) {
-    confirmModelDelete()
-  }
-}
-
 onMounted(() => {
   loadData()
-  document.addEventListener('keydown', handleKeyDown)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleKeyDown)
 })
 </script>
