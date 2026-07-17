@@ -11,6 +11,10 @@
     </header>
 
     <div class="p-6">
+      <div v-if="loading" class="flex items-center justify-center h-64">
+        <div class="text-gray-500">Loading...</div>
+      </div>
+      <div v-else>
       <!-- Filters (2 rows) -->
       <div class="flex flex-wrap gap-3 mb-5">
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
@@ -22,11 +26,8 @@
             class="bg-transparent text-sm text-white border-0 focus:outline-none w-24 placeholder:text-gray-600">
         </div>
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
-          <label class="text-xs text-gray-500 flex-shrink-0">账户</label>
-          <select v-model="filters.accountId" class="bg-transparent text-sm text-white border-0 focus:outline-none min-w-[120px]">
-            <option value="">选择账户</option>
-            <option>account-1</option><option>account-2</option><option>account-3</option>
-          </select>
+          <label class="text-xs text-gray-500 flex-shrink-0">供应商</label>
+          <div class="w-36"><CSelect v-model="filters.accountId" :options="ACCOUNT_OPTIONS" size="sm" placeholder="选择供应商" /></div>
         </div>
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2 flex-1 min-w-[200px]">
           <label class="text-xs text-gray-500 flex-shrink-0">请求 ID</label>
@@ -35,33 +36,30 @@
         </div>
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
           <label class="text-xs text-gray-500 flex-shrink-0">状态</label>
-          <select v-model="filters.statusCode" class="bg-transparent text-sm text-white border-0 focus:outline-none min-w-[80px]">
-            <option value="">全部</option><option value="200">200</option><option value="429">429</option><option value="500">500</option>
-          </select>
+          <div class="w-20"><CSelect v-model="filters.statusCode" :options="STATUS_CODE_OPTIONS" size="sm" placeholder="全部" /></div>
         </div>
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
           <label class="text-xs text-gray-500 flex-shrink-0">模型</label>
-          <select v-model="filters.model" class="bg-transparent text-sm text-white border-0 focus:outline-none min-w-[120px]">
-            <option value="">选择模型</option><option>hy3</option><option>qwen2.5-7b</option><option>qwen2.5-14b</option>
-          </select>
+          <div class="w-36"><CSelect v-model="filters.model" :options="MODEL_OPTIONS" size="sm" placeholder="选择模型" /></div>
         </div>
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
           <label class="text-xs text-gray-500 flex-shrink-0">流式</label>
-          <select v-model="filters.isStream" class="bg-transparent text-sm text-white border-0 focus:outline-none min-w-[80px]">
-            <option value="">全部</option><option :value="true">是</option><option :value="false">否</option>
-          </select>
+          <div class="w-20"><CSelect v-model="filters.isStream" :options="STREAM_OPTIONS" size="sm" placeholder="全部" /></div>
         </div>
       </div>
 
       <!-- Table -->
-      <div class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
+      <div v-if="filteredLogs.length === 0 && !loading" class="text-center text-gray-500 py-12">
+        暂无日志记录
+      </div>
+      <div v-else class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
         <table class="w-full text-xs">
           <thead>
             <tr class="text-gray-500 border-b border-ls-border bg-ls-bg">
               <th class="text-left px-4 py-2.5 font-medium">时间戳</th>
               <th class="text-left px-4 py-2.5 font-medium">请求 ID</th>
               <th class="text-left px-4 py-2.5 font-medium">模型</th>
-              <th class="text-left px-4 py-2.5 font-medium">账户</th>
+              <th class="text-left px-4 py-2.5 font-medium">供应商</th>
               <th class="text-left px-4 py-2.5 font-medium">状态</th>
               <th class="text-left px-4 py-2.5 font-medium">输入 Token</th>
               <th class="text-left px-4 py-2.5 font-medium">输出 Token</th>
@@ -84,8 +82,8 @@
               </td>
               <td class="px-4 py-3">
                 <span class="inline-flex items-center gap-1.5 text-gray-400">
-                  <span class="w-4 h-4 rounded bg-ls-elevated flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ log.account_id[0].toUpperCase() }}</span>
-                  {{ log.account_id }}
+                  <span class="w-4 h-4 rounded bg-ls-elevated flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ (log.account_name || log.account_id || '')[0].toUpperCase() }}</span>
+                  {{ log.account_name || log.account_id }}
                 </span>
               </td>
               <td class="px-4 py-3">
@@ -192,45 +190,58 @@
         </div>
       </div>
     </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import { getLogs, getLogDetail } from '@/api'
+import CSelect from '@/components/CSelect.vue'
 
-const page = ref(0)
-const pageSize = 50
-const total = ref(12847)
-const totalPages = computed(() => Math.ceil(total.value / pageSize))
-
-const filters = ref({ startTime: '', endTime: '', accountId: '', requestId: '', statusCode: '', model: '', isStream: '' })
-
-const sampleLogs = [
-  { request_id: 'req_a1b2c3d4', timestamp: '2026-07-16 09:49:14', model: 'hy3', account_id: 'account-1', status_code: 200, input_tokens: 30766, output_tokens: 688, latency_ms: 342, is_stream: true, raw_response: '{"id": "chatcmpl-abc123", "model": "hy3", "choices": [{"message": {"role": "assistant", "content": "Hi! I can help..."}, "finish_reason": "stop"}], "usage": {"total_tokens": 31454}}' },
-  { request_id: 'req_e5f6g7h8', timestamp: '2026-07-16 09:47:11', model: 'hy3', account_id: 'account-1', status_code: 200, input_tokens: 30194, output_tokens: 625, latency_ms: 298, is_stream: true, raw_response: '{"id": "chatcmpl-def456", "model": "hy3", "choices": [{"message": {"role": "assistant", "content": "Sure, here is the answer..."}, "finish_reason": "stop"}], "usage": {"total_tokens": 30819}}' },
-  { request_id: 'req_i9j0k1l2', timestamp: '2026-07-16 09:46:08', model: 'qwen2.5-7b', account_id: 'account-3', status_code: 200, input_tokens: 29650, output_tokens: 804, latency_ms: 1200, is_stream: true, raw_response: '{"id": "chatcmpl-ghi789", "model": "qwen2.5-7b-instruct", "choices": [{"message": {"role": "assistant", "content": "Based on your query..."}, "finish_reason": "stop"}], "usage": {"total_tokens": 30454}}' },
-  { request_id: 'req_m3n4o5p6', timestamp: '2026-07-15 17:32:00', model: 'hy3', account_id: 'account-2', status_code: 200, input_tokens: 28590, output_tokens: 916, latency_ms: 187, is_stream: true, raw_response: '{"id": "chatcmpl-jkl012", "model": "hy3", "choices": [{"message": {"role": "assistant", "content": "That is interesting..."}, "finish_reason": "stop"}], "usage": {"total_tokens": 29506}}' },
-  { request_id: 'req_q7r8s9t0', timestamp: '2026-07-15 10:00:00', model: 'qwen2.5-7b', account_id: 'account-3', status_code: 500, input_tokens: 0, output_tokens: 0, latency_ms: 0, is_stream: false, raw_response: '{"error": {"message": "Internal Server Error", "type": "server_error"}}' },
-  { request_id: 'req_u1v2w3x4', timestamp: '2026-07-15 09:51:00', model: 'hy3', account_id: 'account-1', status_code: 429, input_tokens: 0, output_tokens: 0, latency_ms: 0, is_stream: false, raw_response: '{"error": {"message": "Rate limit exceeded", "type": "rate_limit"}}' },
-  { request_id: 'req_y5z6a7b8', timestamp: '2026-07-15 09:45:30', model: 'hy3', account_id: 'account-1', status_code: 200, input_tokens: 15420, output_tokens: 1200, latency_ms: 256, is_stream: false, raw_response: '{"id": "chatcmpl-mno345", "model": "hy3", "choices": [{"message": {"role": "assistant", "content": "Here is the summary..."}, "finish_reason": "stop"}], "usage": {"total_tokens": 16620}}' },
-  { request_id: 'req_c9d0e1f2', timestamp: '2026-07-15 08:22:15', model: 'qwen2.5-14b', account_id: 'account-2', status_code: 200, input_tokens: 42000, output_tokens: 3500, latency_ms: 890, is_stream: true, raw_response: '{"id": "chatcmpl-pqr678", "model": "qwen2.5-14b", "choices": [{"message": {"role": "assistant", "content": "Analysis complete..."}, "finish_reason": "stop"}], "usage": {"total_tokens": 45500}}' },
+const ACCOUNT_OPTIONS = [
+  { label: '选择供应商', value: '' },
+  { label: 'account-1', value: 'account-1' },
+  { label: 'account-2', value: 'account-2' },
+  { label: 'account-3', value: 'account-3' },
+]
+const STATUS_CODE_OPTIONS = [
+  { label: '全部', value: '' },
+  { label: '200', value: '200' },
+  { label: '429', value: '429' },
+  { label: '500', value: '500' },
+]
+const MODEL_OPTIONS = [
+  { label: '选择模型', value: '' },
+  { label: 'hy3', value: 'hy3' },
+  { label: 'qwen2.5-7b', value: 'qwen2.5-7b' },
+  { label: 'qwen2.5-14b', value: 'qwen2.5-14b' },
+]
+const STREAM_OPTIONS = [
+  { label: '全部', value: '' },
+  { label: '是', value: true },
+  { label: '否', value: false },
 ]
 
+const page = ref(0)
+const pageSize = 20
+const total = ref(0)
+const totalPages = computed(() => Math.ceil(total.value / pageSize))
+const loading = ref(true)
+
+const logs = ref([])
+const filters = ref({ model: '', accountId: '', statusCode: '', isStream: '' })
+
 const filteredLogs = computed(() => {
-  let logs = [...sampleLogs]
-  if (filters.value.model) logs = logs.filter(l => l.model === filters.value.model)
-  if (filters.value.accountId) logs = logs.filter(l => l.account_id === filters.value.accountId)
-  if (filters.value.statusCode) logs = logs.filter(l => l.status_code === Number(filters.value.statusCode))
-  if (filters.value.isStream !== '' && filters.value.isStream !== undefined) logs = logs.filter(l => l.is_stream === filters.value.isStream)
-  return logs
+  let r = [...logs.value]
+  if (filters.value.model) r = r.filter(l => l.model === filters.value.model)
+  if (filters.value.accountId) r = r.filter(l => l.account_id === filters.value.accountId)
+  if (filters.value.statusCode) r = r.filter(l => l.status_code === Number(filters.value.statusCode))
+  if (filters.value.isStream !== '' && filters.value.isStream !== undefined) r = r.filter(l => l.is_stream === filters.value.isStream)
+  return r
 })
 
 const selectedLog = ref(null)
-const sampleMessages = ref([
-  { role: 'system', content: 'You are a helpful assistant.' },
-  { role: 'user', content: 'Hello, what can you do? Please tell me in a friendly way.' },
-  { role: 'assistant', content: 'Hi! I can help with writing, analysis, coding, and more. What would you like to explore? I am here to assist you with any task you have in mind.' },
-])
 
 const formatTime = (ts) => {
   if (!ts) return ''
@@ -247,14 +258,40 @@ const logMeta = computed(() => {
     '时间': l.timestamp,
     '模型': l.model,
     '实际模型': l.actual_model_id || l.model,
-    '账户': l.account_id,
+    '供应商': l.account_name || l.account_id || '',
     '状态': l.status_code >= 400 ? l.status_code + ' Error' : '200 OK',
     '流式': l.is_stream ? '是' : '否',
     '延迟': l.latency_ms + 'ms',
   }
 })
 
-const showDetail = (log) => {
-  selectedLog.value = log
+const loadLogs = async () => {
+  loading.value = true
+  try {
+    const params = { page: page.value, page_size: pageSize }
+    if (filters.value.model) params.model = filters.value.model
+    if (filters.value.accountId) params.account_id = filters.value.accountId
+    if (filters.value.statusCode) params.status_code = filters.value.statusCode
+    if (filters.value.isStream !== '' && filters.value.isStream !== undefined) params.is_stream = filters.value.isStream
+    const res = await getLogs(params)
+    logs.value = res.data.records || []
+    total.value = res.data.total || 0
+  } catch (e) {
+    console.error('Failed to load logs:', e)
+  }
+  loading.value = false
 }
+
+const showDetail = async (log) => {
+  selectedLog.value = log
+  try {
+    const res = await getLogDetail(log.id || log.request_id)
+    Object.assign(log, res.data)
+  } catch (e) {
+    console.error('Failed to load log detail:', e)
+  }
+}
+
+watch(page, () => loadLogs())
+onMounted(() => loadLogs())
 </script>

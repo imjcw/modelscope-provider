@@ -53,11 +53,7 @@
         <div class="p-5 space-y-4">
           <div>
             <label class="block text-xs text-gray-500 mb-1.5">日志级别</label>
-            <select v-model="config.logLevel"
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white focus:outline-none focus:border-ls-accent appearance-none"
-              style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpolyline points=%276 9 12 15 18 9%27%3E%3C/polyline%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
-              <option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option>
-            </select>
+            <CSelect v-model="config.logLevel" :options="LOG_LEVEL_OPTIONS" placeholder="日志级别" />
           </div>
           <div class="flex items-center justify-between">
             <div>
@@ -78,11 +74,7 @@
         <div class="p-5 space-y-4">
           <div>
             <label class="block text-xs text-gray-500 mb-1.5">策略</label>
-            <select v-model="config.lbStrategy"
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white focus:outline-none focus:border-ls-accent appearance-none"
-              style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpolyline points=%276 9 12 15 18 9%27%3E%3C/polyline%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
-              <option>round_robin</option><option>least_conn</option><option>random</option>
-            </select>
+            <CSelect v-model="config.lbStrategy" :options="LB_STRATEGY_OPTIONS" placeholder="策略" />
           </div>
           <div>
             <label class="block text-xs text-gray-500 mb-1.5">超时 (ms)</label>
@@ -151,6 +143,20 @@
 
 <script setup>
 import { ref } from 'vue'
+import CSelect from '@/components/CSelect.vue'
+
+// ── Select options ──
+const LOG_LEVEL_OPTIONS = [
+  { label: 'DEBUG', value: 'DEBUG' },
+  { label: 'INFO', value: 'INFO' },
+  { label: 'WARNING', value: 'WARNING' },
+  { label: 'ERROR', value: 'ERROR' },
+]
+const LB_STRATEGY_OPTIONS = [
+  { label: '轮询 (round_robin)', value: 'round_robin' },
+  { label: '最少连接 (least_conn)', value: 'least_conn' },
+  { label: '随机 (random)', value: 'random' },
+]
 
 const originalConfig = () => ({
   listenHost: '0.0.0.0', listenPort: 8000, apiPrefix: '/api',

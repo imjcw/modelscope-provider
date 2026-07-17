@@ -17,11 +17,7 @@
         <div class="p-5 space-y-4">
           <div>
             <label class="block text-xs text-gray-500 mb-1.5">模型</label>
-            <select v-model="form.model" class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-ls-accent">
-              <option>hy3</option>
-              <option>qwen2.5-7b</option>
-              <option>qwen2.5-14b</option>
-            </select>
+            <CSelect v-model="form.model" :options="MODEL_OPTIONS" placeholder="选择模型" />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -99,6 +95,13 @@
 
 <script setup>
 import { ref } from 'vue'
+import CSelect from '@/components/CSelect.vue'
+
+const MODEL_OPTIONS = [
+  { label: 'hy3', value: 'hy3' },
+  { label: 'qwen2.5-7b', value: 'qwen2.5-7b' },
+  { label: 'qwen2.5-14b', value: 'qwen2.5-14b' },
+]
 
 const loading = ref(false)
 

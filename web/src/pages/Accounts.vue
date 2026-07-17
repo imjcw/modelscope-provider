@@ -126,13 +126,7 @@
                     <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_28px] gap-3 items-center">
                       <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
                         class="form-input h-10 px-3 font-mono text-sm" />
-                      <select v-model="m.model_type"
-                        class="form-input select h-10 w-28 text-sm px-3 py-1">
-                        <option value="text">📝 文本</option>
-                        <option value="image">🖼️ 图像</option>
-                        <option value="code">💻 代码</option>
-                        <option value="voice">🔊 语音</option>
-                      </select>
+                      <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
                       <input v-model.number="m.context_length" type="number" placeholder="上下文"
                         class="form-input h-10 w-28 px-3 text-sm font-mono" />
                       <button type="button" @click="removeNewModel(idx)"
@@ -207,10 +201,7 @@
               </div>
               <div>
                 <label class="form-label">状态</label>
-                <select v-model="editingSupplier.status" class="form-input select">
-                  <option value="active">活跃</option>
-                  <option value="disabled">已禁用</option>
-                </select>
+                <CSelect v-model="editingSupplier.status" :options="STATUS_OPTIONS" placeholder="状态" />
               </div>
 
               <!-- ── 支持模型 ── -->
@@ -229,13 +220,7 @@
                     <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_28px] gap-3 items-center">
                       <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
                         class="form-input h-10 px-3 font-mono text-sm" />
-                      <select v-model="m.model_type"
-                        class="form-input select h-10 w-28 text-sm px-3 py-1">
-                        <option value="text">📝 文本</option>
-                        <option value="image">🖼️ 图像</option>
-                        <option value="code">💻 代码</option>
-                        <option value="voice">🔊 语音</option>
-                      </select>
+                      <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
                       <input v-model.number="m.context_length" type="number" placeholder="上下文"
                         class="form-input h-10 w-28 px-3 text-sm font-mono" />
                       <button type="button" @click="removeEditModel(idx)"
@@ -297,6 +282,19 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels } from '@/api'
+import CSelect from '@/components/CSelect.vue'
+
+// ── Select options ──
+const MODEL_TYPE_OPTIONS = [
+  { label: '📝 文本', value: 'text' },
+  { label: '🖼️ 图像', value: 'image' },
+  { label: '💻 代码', value: 'code' },
+  { label: '🔊 语音', value: 'voice' },
+]
+const STATUS_OPTIONS = [
+  { label: '活跃', value: 'active' },
+  { label: '已禁用', value: 'disabled' },
+]
 
 // ── State ──
 const loading = ref(true)

@@ -5,15 +5,16 @@
         <h1 class="text-lg font-semibold tracking-tight text-white">告警历史</h1>
         <p class="text-xs text-gray-500 mt-0.5">配额耗尽、请求失败等告警记录</p>
       </div>
-      <select v-model="alertFilter" class="bg-ls-card border border-ls-border rounded-md px-2.5 py-1 text-sm text-white focus:outline-none focus:border-ls-accent">
-        <option value="all">全部类型</option>
-        <option value="quota_exhausted">配额耗尽</option>
-        <option value="api_error">请求失败</option>
-        <option value="account_disabled">账户禁用</option>
-      </select>
+      <div class="w-48">
+        <CSelect v-model="alertFilter" :options="ALERT_TYPE_OPTIONS" size="sm" placeholder="全部类型" />
+      </div>
     </header>
 
     <div class="p-6">
+      <div v-if="loading" class="flex items-center justify-center h-64">
+        <div class="text-gray-500">Loading...</div>
+      </div>
+      <div v-else>
       <!-- Summary cards -->
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mb-6">
         <div class="bg-ls-card rounded-lg border border-ls-border p-5">
@@ -70,27 +71,44 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { getAlerts } from '@/api'
+import CSelect from '@/components/CSelect.vue'
+
+const ALERT_TYPE_OPTIONS = [
+  { label: '全部类型', value: 'all' },
+  { label: '配额耗尽', value: 'quota_exhausted' },
+  { label: '请求失败', value: 'api_error' },
+  { label: '供应商禁用', value: 'account_disabled' },
+]
 
 const alertFilter = ref('all')
+const loading = ref(true)
+const alerts = ref([])
 
-const alerts = ref([
-  { id: 1, timestamp: '09:28:14', type: 'quota_exhausted', level: 'warning', title: '账户配额耗尽', message: 'account-1 的 hy3 模型今日配额已耗尽（20,000/20,000），该模型已标记为不可用' },
-  { id: 2, timestamp: '09:31:42', type: 'api_error', level: 'error', title: 'API 请求失败', message: 'account-3 调用 qwen2.5-7b 返回 500 错误（Internal Server Error），请求 ID: req_q7r8s9t0' },
-  { id: 3, timestamp: '09:15:03', type: 'info', level: 'info', title: '模型不可用通知', message: 'account-2 的 qwen2.5-14b 因上游服务维护暂时不可用，预计 30 分钟后恢复' },
-  { id: 4, timestamp: '08:42:11', type: 'quota_exhausted', level: 'warning', title: '配额即将耗尽', message: 'account-3 剩余配额仅 12,200/20,000（61%），按当前使用速度预计今晚耗尽' },
-  { id: 5, timestamp: '07:10:00', type: 'account_disabled', level: 'critical', title: '账户被禁用', message: 'account-4 因连续多次配额耗尽，已被系统自动禁用。请补充配额后手动启用' },
-  { id: 6, timestamp: '00:00:01', type: 'recovered', level: 'recovered', title: '配额已恢复', message: '新日期配额重置完成：account-1、account-2、account-3 配额已恢复至每日上限' },
-])
+const loadData = async () => {
+  loading.value = true
+  try {
+    const res = await getAlerts(7)
+    const list = res.data || []
+    // Generate ID and map to our format
+    alerts.value = list.map((a, i) => ({ id: i, ...a }))
+  } catch (e) {
+    console.error('Failed to load alerts:', e)
+    alerts.value = []
+  }
+  loading.value = false
+}
 
 const filteredAlerts = computed(() => {
   if (alertFilter.value === 'all') return alerts.value
-  return alerts.value.filter(a => a.level === alertFilter.value)
+  return alerts.value.filter(a => a.type === alertFilter.value || a.level === alertFilter.value)
 })
 
 const levelClass = (level) => ({
@@ -104,4 +122,6 @@ const levelClass = (level) => ({
 const levelLabel = (level) => ({
   warning: '警告', error: '错误', info: '信息', critical: '严重', recovered: '恢复',
 }[level] || level)
+
+onMounted(() => loadData())
 </script>

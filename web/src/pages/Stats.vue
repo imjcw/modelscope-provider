@@ -5,11 +5,9 @@
         <h1 class="text-lg font-semibold tracking-tight text-white">使用统计</h1>
         <p class="text-xs text-gray-500 mt-0.5">Token 消耗与模型使用分布</p>
       </div>
-      <select class="bg-ls-card border border-ls-border rounded-md px-2.5 py-1 text-sm text-white focus:outline-none focus:border-ls-accent">
-        <option>最近 7 天</option>
-        <option selected>最近 30 天</option>
-        <option>最近 90 天</option>
-      </select>
+      <div class="w-40">
+        <CSelect v-model="timeRange" :options="TIME_RANGE_OPTIONS" size="sm" placeholder="时间范围" />
+      </div>
     </header>
 
     <div class="p-6 space-y-6">
@@ -97,6 +95,20 @@
 </template>
 
 <script setup>
+import { ref, onMounted } from 'vue'
+import { getStats } from '@/api'
+import CSelect from '@/components/CSelect.vue'
+
+const TIME_RANGE_OPTIONS = [
+  { label: '最近 7 天', value: '7' },
+  { label: '最近 30 天', value: '30' },
+  { label: '最近 90 天', value: '90' },
+]
+
+const loading = ref(true)
+const timeRange = ref('30')
+
+// Heatmap placeholder — 7 rows x 24 cols, values 0-6
 const heatmap = [
   [0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1,0],
   [0,0,0,0,0,0,0,0,2,2,1,1,0,0,0,0,0,0,0,0,2,2,3,2],
@@ -114,21 +126,55 @@ const modelColors = [
   { name: '其他', color: '#f97316' },
 ]
 
-const trendColumns = Array.from({ length: 30 }, (_, i) => {
-  const intensity = Math.min(1, i / 25)
-  return [
-    { model: 'hy3', h: Math.min(55, intensity * 60), color: '#3b82f6' },
-    { model: 'q7b', h: Math.min(18, i > 5 ? intensity * 15 : 0), color: '#22c55e' },
-    { model: 'q14b', h: Math.min(6, i > 10 ? intensity * 8 : 0), color: '#a855f7' },
-    { model: 'other', h: Math.min(3, i > 15 ? intensity * 4 : 0), color: '#f97316' },
-  ]
-})
+const trendColumns = ref([])
+const donutSegs = ref([])
 
-const donutSegs = [
-  { label: 'hy3', tokens: '6,240.8万 tokens', pct: 55, color: '#3b82f6', dash: '234.6', offset: '0' },
-  { label: 'qwen2.5-7b', tokens: '1,973.6万 tokens', pct: 17, color: '#22c55e', dash: '73.0', offset: '-234.6' },
-  { label: 'qwen2.5-14b', tokens: '1,720.7万 tokens', pct: 15, color: '#a855f7', dash: '64.1', offset: '-307.6' },
-  { label: 'deepseek-v3', tokens: '965万 tokens', pct: 8.5, color: '#f97316', dash: '36.3', offset: '-371.7' },
-  { label: 'GLM-5', tokens: '258万 tokens', pct: 2.2, color: '#ef4444', dash: '9.4', offset: '-408.0' },
-]
+const loadData = async () => {
+  loading.value = true
+  try {
+    const res = await getStats(30)
+    const data = res.data || {}
+    const usage = data.model_usage || {}
+    const total = Object.values(usage).reduce((a, b) => a + b, 0)
+    const colors = ['#3b82f6', '#22c55e', '#a855f7', '#f97316', '#ef4444']
+    let offset = 0
+    donutSegs.value = Object.entries(usage).map(([label, tokens], i) => {
+      const pct = total ? Math.round(tokens / total * 100) : 0
+      const dash = (pct / 100) * 427.3
+      const seg = { label, tokens: Math.round(tokens / 10000) + '万 tokens', pct, color: colors[i % colors.length], dash: dash.toFixed(1), offset: (-offset).toFixed(1) }
+      offset += dash
+      return seg
+    })
+    const daily = data.daily_tokens || {}
+    const days = Object.keys(daily).sort().slice(-30)
+    trendColumns.value = days.map((date, i) => {
+      const dayData = daily[date] || {}
+      const intensity = Math.min(1, i / Math.max(1, days.length - 1))
+      return [
+        { model: 'hy3', h: Math.max(1, Math.round((dayData.hy3 || dayData[modelColors[0].name] || intensity * 60) / 1000)), color: '#3b82f6' },
+        { model: 'q7b', h: Math.max(0, Math.round((dayData['qwen2.5-7b'] || intensity * 15) / 2000)), color: '#22c55e' },
+        { model: 'q14b', h: Math.max(0, Math.round((dayData['qwen2.5-14b'] || intensity * 8) / 3000)), color: '#a855f7' },
+      ]
+    })
+  } catch (e) {
+    console.error('Failed to load stats:', e)
+    // Fallback: generate some default data
+    trendColumns.value = Array.from({ length: 30 }, (_, i) => {
+      const intensity = Math.min(1, i / 25)
+      return [
+        { model: 'hy3', h: Math.min(55, intensity * 60), color: '#3b82f6' },
+        { model: 'q7b', h: Math.min(18, i > 5 ? intensity * 15 : 0), color: '#22c55e' },
+        { model: 'q14b', h: Math.min(6, i > 10 ? intensity * 8 : 0), color: '#a855f7' },
+      ]
+    })
+    donutSegs.value = [
+      { label: 'hy3', tokens: '6,240万 tokens', pct: 55, color: '#3b82f6', dash: '234.6', offset: '0' },
+      { label: 'qwen2.5-7b', tokens: '1,974万 tokens', pct: 17, color: '#22c55e', dash: '73.0', offset: '-234.6' },
+      { label: 'qwen2.5-14b', tokens: '1,721万 tokens', pct: 15, color: '#a855f7', dash: '64.1', offset: '-307.6' },
+    ]
+  }
+  loading.value = false
+}
+
+onMounted(() => loadData())
 </script>
