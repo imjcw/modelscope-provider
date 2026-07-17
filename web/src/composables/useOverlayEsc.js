@@ -17,7 +17,6 @@ function handleKey(e) {
 
   if (e.key === 'Escape') {
     top.close()
-    stack.pop()
   } else if (e.key === 'Enter') {
     // Only handle Enter if the topmost overlay has a confirm handler
     if (top.confirm) {
