@@ -1,6 +1,5 @@
 <script setup>
 import { ref, watch, onBeforeUnmount } from 'vue'
-import { useOverlayEsc } from '@/composables/useOverlayEsc'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -10,8 +9,6 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 
-const { register, unregister } = useOverlayEsc()
-
 const visible = ref(false)
 const exiting = ref(false)
 const exitingTimer = ref(null)
@@ -19,23 +16,12 @@ const exitingTimer = ref(null)
 const close = () => {
   if (exiting.value) return
   exiting.value = true
-  unregister(escId)
   exitingTimer.value = setTimeout(() => {
     visible.value = false
     exiting.value = false
     emit('update:modelValue', false)
   }, 250)
 }
-
-const closeImmediate = () => {
-  if (exitingTimer.value) clearTimeout(exitingTimer.value)
-  unregister(escId)
-  visible.value = false
-  exiting.value = false
-  emit('update:modelValue', false)
-}
-
-let escId = null
 
 // 监听 props.modelValue 变化
 watch(
@@ -44,7 +30,6 @@ watch(
     if (val) {
       visible.value = true
       exiting.value = false
-      escId = register(close)
     } else {
       close()
     }
@@ -52,7 +37,6 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  if (escId) unregister(escId)
   if (exitingTimer.value) clearTimeout(exitingTimer.value)
 })
 </script>
