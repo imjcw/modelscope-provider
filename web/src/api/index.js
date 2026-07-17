@@ -25,6 +25,11 @@ export const getMappings = () => api.get('/mappings')
 export const bulkUpdateMappings = (mappings) => api.put('/mappings/bulk', { mappings })
 export const deleteMapping = (alias) => api.delete(`/mappings/${alias}`)
 
+// ── Mapping Models ──
+export const getMappingModels = (aliasName) => api.get(`/mappings/${aliasName}/models`)
+export const addMappingModel = (aliasName, data) => api.post(`/mappings/${aliasName}/models`, data)
+export const removeMappingModel = (modelId) => api.delete(`/mappings/models/${modelId}`)
+
 // ── Config ──
 export const getConfig = () => api.get('/config')
 export const updateConfig = (config) => api.put('/config', { config })
