@@ -1,14 +1,12 @@
 <template>
   <div>
-    <header class="bg-ls-bg/80 backdrop-blur-md border-b border-ls-border px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight text-white">告警历史</h1>
-        <p class="text-xs text-gray-500 mt-0.5">配额耗尽、请求失败等告警记录</p>
-      </div>
-      <div class="w-48">
-        <CSelect v-model="alertFilter" :options="ALERT_TYPE_OPTIONS" size="sm" placeholder="全部类型" />
-      </div>
-    </header>
+    <PageHeader title="告警历史" subtitle="配额耗尽、请求失败等告警记录">
+      <template #action>
+        <div class="w-48">
+          <CSelect v-model="alertFilter" :options="ALERT_TYPE_OPTIONS" size="sm" placeholder="全部类型" />
+        </div>
+      </template>
+    </PageHeader>
 
     <div class="p-6">
       <div v-if="loading" class="flex items-center justify-center h-64">
@@ -78,6 +76,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
 import { getAlerts } from '@/api'
 import CSelect from '@/components/CSelect.vue'
 

@@ -1,14 +1,15 @@
 <template>
   <div>
-    <header class="bg-ls-bg/80 backdrop-blur-md border-b border-ls-border px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <div class="flex items-center gap-2">
-        <h1 class="text-lg font-semibold tracking-tight text-white">日志</h1>
+    <PageHeader title="日志">
+      <template #title-prefix>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-600">
           <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
         </svg>
-      </div>
-      <button class="bg-ls-accent text-white font-medium rounded-lg h-8 px-4 text-sm hover:bg-ls-accentHover transition-all">↻ 刷新</button>
-    </header>
+      </template>
+      <template #action>
+        <button class="btn btn-primary">↻ 刷新</button>
+      </template>
+    </PageHeader>
 
     <div class="p-6">
       <div v-if="loading" class="flex items-center justify-center h-64">
@@ -196,27 +197,22 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { getLogs, getLogDetail } from '@/api'
+import PageHeader from '@/components/PageHeader.vue'
+import { getLogs, getLogDetail, getSuppliers, getSupplierModels } from '@/api'
 import CSelect from '@/components/CSelect.vue'
 
-const ACCOUNT_OPTIONS = [
+const ACCOUNT_OPTIONS = ref([
   { label: '选择供应商', value: '' },
-  { label: 'account-1', value: 'account-1' },
-  { label: 'account-2', value: 'account-2' },
-  { label: 'account-3', value: 'account-3' },
-]
+])
 const STATUS_CODE_OPTIONS = [
   { label: '全部', value: '' },
   { label: '200', value: '200' },
   { label: '429', value: '429' },
   { label: '500', value: '500' },
 ]
-const MODEL_OPTIONS = [
+const MODEL_OPTIONS = ref([
   { label: '选择模型', value: '' },
-  { label: 'hy3', value: 'hy3' },
-  { label: 'qwen2.5-7b', value: 'qwen2.5-7b' },
-  { label: 'qwen2.5-14b', value: 'qwen2.5-14b' },
-]
+])
 const STREAM_OPTIONS = [
   { label: '全部', value: '' },
   { label: '是', value: true },
@@ -293,5 +289,34 @@ const showDetail = async (log) => {
 }
 
 watch(page, () => loadLogs())
-onMounted(() => loadLogs())
+
+const loadFilterOptions = async () => {
+  try {
+    const res = await getSuppliers()
+    const sups = res.data || []
+    ACCOUNT_OPTIONS.value = [
+      { label: '选择供应商', value: '' },
+      ...sups.map(s => ({ label: s.name || s.account_id, value: s.account_id || s.id })),
+    ]
+    // Collect all model names from all suppliers
+    const modelNames = new Set()
+    for (const s of sups) {
+      try {
+        const mRes = await getSupplierModels(s.id)
+        ;(mRes.data || []).forEach(m => {
+          if (m.model_name) modelNames.add(m.model_name)
+        })
+      } catch { /* skip */ }
+    }
+    MODEL_OPTIONS.value = [
+      { label: '选择模型', value: '' },
+      ...[...modelNames].sort().map(name => ({ label: name, value: name })),
+    ]
+  } catch { /* keep defaults */ }
+}
+
+onMounted(async () => {
+  await loadFilterOptions()
+  loadLogs()
+})
 </script>

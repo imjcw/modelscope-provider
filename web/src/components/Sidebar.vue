@@ -1,5 +1,5 @@
 <template>
-  <aside class="w-56 bg-ls-bg border-r border-ls-border flex flex-col flex-shrink-0">
+  <aside class="w-56 bg-ls-bg border-r border-ls-border flex flex-col flex-shrink-0 h-screen">
     <!-- Logo -->
     <div class="px-5 py-5">
       <div class="flex items-center gap-2.5">
@@ -21,12 +21,12 @@
         </svg>
         仪表盘
       </router-link>
-      <router-link to="/accounts" class="nav-item">
+      <router-link to="/suppliers" class="nav-item">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
           <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
         </svg>
-        账户管理
+        供应商管理
       </router-link>
       <router-link to="/mappings" class="nav-item">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -60,6 +60,13 @@
           <polygon points="5 3 19 12 5 21 5 3"/>
         </svg>
         在线测试
+      </router-link>
+      <router-link to="/guide" class="nav-item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14"/>
+          <path d="M9 12h6"/><path d="M9 16h4"/>
+        </svg>
+        使用指南
       </router-link>
       <router-link to="/config" class="nav-item">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

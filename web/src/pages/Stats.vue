@@ -1,14 +1,12 @@
 <template>
   <div>
-    <header class="bg-ls-bg/80 backdrop-blur-md border-b border-ls-border px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight text-white">使用统计</h1>
-        <p class="text-xs text-gray-500 mt-0.5">Token 消耗与模型使用分布</p>
-      </div>
-      <div class="w-40">
-        <CSelect v-model="timeRange" :options="TIME_RANGE_OPTIONS" size="sm" placeholder="时间范围" />
-      </div>
-    </header>
+    <PageHeader title="使用统计" subtitle="Token 消耗与模型使用分布">
+      <template #action>
+        <div class="w-40">
+          <CSelect v-model="timeRange" :options="TIME_RANGE_OPTIONS" size="sm" placeholder="时间范围" />
+        </div>
+      </template>
+    </PageHeader>
 
     <div class="p-6 space-y-6">
       <!-- Activity Heatmap -->
@@ -96,6 +94,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
 import { getStats } from '@/api'
 import CSelect from '@/components/CSelect.vue'
 

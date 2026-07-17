@@ -1,18 +1,15 @@
 <template>
   <div>
-    <header class="bg-ls-bg/80 backdrop-blur-md border-b border-ls-border px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight text-white">模型映射</h1>
-        <p class="text-xs text-gray-500 mt-0.5">管理模型别名与实际模型 ID 的映射关系</p>
-      </div>
-      <button @click="openAdd"
-        class="bg-ls-accent text-white font-medium rounded-lg h-9 px-4 text-sm hover:bg-ls-accentHover transition-all inline-flex items-center gap-2">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-        添加映射
-      </button>
-    </header>
+    <PageHeader title="模型映射" subtitle="管理模型别名与实际模型 ID 的映射关系">
+      <template #action>
+        <button @click="openAdd" class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          添加映射
+        </button>
+      </template>
+    </PageHeader>
 
     <div class="p-6">
       <div v-if="loading" class="flex items-center justify-center h-64">
@@ -73,73 +70,50 @@
     </div>
 
     <!-- ── 添加/编辑 映射 抽屉 ── -->
-    <Teleport to="body">
-      <div v-if="showFormDrawer" class="drawer-overlay">
-        <div class="drawer drawer-right">
-          <div class="drawer-panel" :class="{ 'exiting': formExiting }">
-            <div class="drawer-header">
-              <h2 class="drawer-title">{{ isEditing ? '编辑映射' : '添加映射' }}</h2>
-              <button @click="closeForm" class="drawer-close">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-              </button>
-            </div>
-            <div class="drawer-body space-y-4">
-              <div>
-                <label class="form-label">别名</label>
-                <input v-model="form.alias" type="text" placeholder="my-alias"
-                  class="form-input font-mono" :disabled="isEditing"
-                  @keyup.enter="submitForm" ref="formAliasInput">
-                <p v-if="isEditing" class="text-[10px] text-gray-600 mt-1">别名不可修改</p>
-              </div>
-              <div>
-                <label class="form-label">实际模型 ID</label>
-                <input v-model="form.model_id" type="text" placeholder="qwen-max"
-                  class="form-input font-mono" @keyup.enter="submitForm">
-              </div>
-            </div>
-            <div class="drawer-footer">
-              <button @click="closeForm" class="btn btn-secondary">取消</button>
-              <button @click="submitForm" class="btn btn-primary" :disabled="submitting">
-                {{ submitting ? '保存中...' : isEditing ? '保存' : '添加' }}
-              </button>
-            </div>
-          </div>
+    <Drawer v-model="showFormDrawer" :title="isEditing ? '编辑映射' : '添加映射'">
+      <div class="space-y-4">
+        <div>
+          <label class="form-label">别名</label>
+          <input v-model="form.alias" type="text" placeholder="my-alias"
+            class="form-input font-mono" :disabled="isEditing"
+            @keyup.enter="submitForm" ref="formAliasInput">
+          <p v-if="isEditing" class="text-[10px] text-gray-600 mt-1">别名不可修改</p>
+        </div>
+        <div>
+          <label class="form-label">实际模型 ID</label>
+          <input v-model="form.model_id" type="text" placeholder="qwen-max"
+            class="form-input font-mono" @keyup.enter="submitForm">
         </div>
       </div>
-    </Teleport>
+      <template #footer>
+        <button @click="closeForm" class="btn btn-secondary btn-esc">取消</button>
+        <button @click="submitForm" class="btn btn-primary" :disabled="submitting">
+          {{ submitting ? '保存中...' : isEditing ? '保存' : '添加' }}
+        </button>
+      </template>
+    </Drawer>
 
     <!-- ── 删除确认 弹窗 ── -->
-    <Teleport to="body">
-      <div v-if="showDeleteModal" class="modal-overlay" @click.self="closeDeleteConfirm">
-        <div class="modal">
-          <div class="modal-icon modal-icon-danger">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
-              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-            </svg>
-          </div>
-          <h3 class="modal-title">确认删除</h3>
-          <p class="modal-message">
-            确定删除别名 <strong class="text-white">{{ deletingItem?.alias_name }}</strong> 的映射吗？<br>
-            <span class="text-gray-500 text-xs">此操作不可撤销</span>
-          </p>
-          <div class="modal-actions">
-            <button @click="closeDeleteConfirm" class="btn btn-secondary">取消</button>
-            <button @click="confirmDelete" class="btn btn-danger" :disabled="deleting">
-              {{ deleting ? '删除中...' : '确认删除' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <ConfirmModal
+      v-model="showDeleteModal"
+      title="确认删除"
+      :message="`确定删除别名 <strong class='text-white'>${deletingItem?.alias_name || ''}</strong> 的映射吗？<br><span class='text-gray-500 text-xs'>此操作不可撤销</span>`"
+      danger
+      :confirm-text="deleting ? '删除中...' : '确认删除'"
+      :disabled="deleting"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, inject } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
+import Drawer from '@/components/Drawer.vue'
+import ConfirmModal from '@/components/ConfirmModal.vue'
 import { getMappings, bulkUpdateMappings as apiBulkUpdate, deleteMapping as apiDelete } from '@/api'
+
+const toast = inject('$toast')
 
 const loading = ref(true)
 const error = ref(null)
@@ -147,7 +121,6 @@ const mappings = ref([])
 
 // ── Form drawer ──
 const showFormDrawer = ref(false)
-const formExiting = ref(false)
 const submitting = ref(false)
 const formAliasInput = ref(null)
 const isEditing = ref(false)
@@ -176,7 +149,6 @@ const openAdd = async () => {
   isEditing.value = false
   form.value = { alias: '', model_id: '' }
   showFormDrawer.value = true
-  formExiting.value = false
   await nextTick()
   formAliasInput.value?.focus()
 }
@@ -188,19 +160,15 @@ const openEdit = (item) => {
     model_id: item.actual_model_id,
   }
   showFormDrawer.value = true
-  formExiting.value = false
 }
 
-const closeForm = async () => {
-  formExiting.value = true
-  await new Promise(r => setTimeout(r, 250))
+const closeForm = () => {
   showFormDrawer.value = false
-  formExiting.value = false
 }
 
 const submitForm = async () => {
   if (!form.value.alias || !form.value.model_id) {
-    alert('请填写别名和实际模型 ID')
+    toast('请填写别名和实际模型 ID', 'error')
     return
   }
   submitting.value = true
@@ -216,7 +184,7 @@ const submitForm = async () => {
     await loadData()
     closeForm()
   } catch (e) {
-    alert('保存失败: ' + (e.response?.data?.detail || e.message || ''))
+    toast('保存失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
   } finally {
     submitting.value = false
   }
@@ -239,9 +207,8 @@ const confirmDelete = async () => {
   try {
     await apiDelete(deletingItem.value.alias_name)
     await loadData()
-    closeDeleteConfirm()
   } catch (e) {
-    alert('删除失败: ' + (e.message || ''))
+    toast('删除失败: ' + (e.message || ''), 'error')
   } finally {
     deleting.value = false
   }
@@ -249,9 +216,3 @@ const confirmDelete = async () => {
 
 onMounted(() => loadData())
 </script>
-
-<style scoped>
-.drawer-panel.exiting {
-  animation: slideOutRight .25s cubic-bezier(.4, 0, .2, 1) forwards;
-}
-</style>

@@ -1,11 +1,6 @@
 <template>
   <div>
-    <header class="bg-ls-bg/80 backdrop-blur-md border-b border-ls-border px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight text-white">系统配置</h1>
-        <p class="text-xs text-gray-500 mt-0.5">全局参数和服务设置</p>
-      </div>
-    </header>
+    <PageHeader title="系统配置" subtitle="全局参数和服务设置"></PageHeader>
 
     <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -133,8 +128,8 @@
       <div class="bg-ls-card rounded-lg border border-ls-border px-5 py-3 flex items-center justify-between">
         <p class="text-xs text-gray-500">修改后请点击保存以应用配置</p>
         <div class="flex items-center gap-2.5">
-          <button @click="resetConfig" class="text-sm text-gray-400 hover:text-white px-4 py-1.5 rounded-md">取消</button>
-          <button @click="saveConfig" class="bg-ls-accent text-white font-medium rounded-lg h-9 px-6 text-sm hover:bg-ls-accentHover transition-all">保存配置</button>
+          <button @click="resetConfig" class="btn btn-secondary">取消</button>
+          <button @click="saveConfig" class="btn btn-primary">保存配置</button>
         </div>
       </div>
     </div>
@@ -142,8 +137,12 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, inject } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
 import CSelect from '@/components/CSelect.vue'
+import { updateConfig as apiUpdateConfig } from '@/api'
+
+const toast = inject('$toast')
 
 // ── Select options ──
 const LOG_LEVEL_OPTIONS = [
@@ -177,14 +176,10 @@ const saveConfig = async () => {
     auto_reset_daily: String(config.value.autoReset),
   }
   try {
-    await fetch('/api/admin/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: payload }),
-    })
-    alert('配置已保存')
+    await apiUpdateConfig(payload)
+    toast('配置已保存', 'success')
   } catch (e) {
-    alert('保存失败: ' + e.message)
+    toast('保存失败: ' + e.message, 'error')
   }
 }
 

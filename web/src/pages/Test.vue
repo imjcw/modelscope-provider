@@ -1,11 +1,6 @@
 <template>
   <div>
-    <header class="bg-ls-bg/80 backdrop-blur-md border-b border-ls-border px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight text-white">在线测试</h1>
-        <p class="text-xs text-gray-500 mt-0.5">直接发送请求测试 API 代理</p>
-      </div>
-    </header>
+    <PageHeader title="在线测试" subtitle="直接发送请求测试 API 代理"></PageHeader>
 
     <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
       <!-- Request Panel -->
@@ -47,7 +42,7 @@
           <div class="flex items-center justify-between">
             <p class="text-xs text-gray-600">发送请求将消耗配额</p>
             <button @click="sendRequest" :disabled="loading"
-              class="bg-ls-accent text-white font-medium rounded-lg h-9 px-6 text-sm hover:bg-ls-accentHover transition-all disabled:opacity-50">
+              class="btn btn-primary disabled:opacity-50">
               {{ loading ? '发送中...' : '发送请求' }}
             </button>
           </div>
@@ -95,6 +90,7 @@
 
 <script setup>
 import { ref } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
 import CSelect from '@/components/CSelect.vue'
 
 const MODEL_OPTIONS = [
@@ -134,11 +130,20 @@ const sendRequest = async () => {
     })
 
     const text = await res.text()
+    // Extract tokens from OpenAI-compatible response
+    let totalTokens = null
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed.usage) {
+        totalTokens = parsed.usage.total_tokens || (parsed.usage.prompt_tokens + parsed.usage.completion_tokens) || null
+      }
+    } catch { /* not JSON, skip */ }
+
     response.value = {
       status: res.status === 200 ? '200 OK' : res.status + ' Error',
-      account: 'account-1',
-      latency: Math.floor(Math.random() * 500 + 100) + 'ms',
-      tokens: '1,240',
+      account: res.headers.get('x-upstream-account') || '—',
+      latency: res.headers.get('x-latency-ms') ? `${res.headers.get('x-latency-ms')}ms` : '—',
+      tokens: totalTokens != null ? totalTokens.toLocaleString() : '—',
       raw: formatJson(text),
     }
   } catch (e) {

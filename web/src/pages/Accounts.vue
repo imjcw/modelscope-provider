@@ -1,18 +1,15 @@
 <template>
   <div>
-    <header class="bg-ls-bg/80 backdrop-blur-md border-b border-ls-border px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight text-white">供应商管理</h1>
-        <p class="text-xs text-gray-500 mt-0.5">添加、编辑和删除 ModelScope 供应商</p>
-      </div>
-      <button @click="openAdd"
-        class="bg-ls-accent text-white font-medium rounded-lg h-9 px-4 text-sm hover:bg-ls-accentHover transition-all inline-flex items-center gap-2">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-        添加供应商
-      </button>
-    </header>
+    <PageHeader title="供应商管理" subtitle="添加、编辑和删除 ModelScope 供应商">
+      <template #action>
+        <button @click="openAdd" class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          添加供应商
+        </button>
+      </template>
+    </PageHeader>
 
     <div class="p-6">
       <div v-if="loading" class="flex items-center justify-center h-64">
@@ -83,206 +80,178 @@
       </div>
     </div>
 
-    <!-- ── 添加供应商 抽屉（表单类，点击空白不关闭） ── -->
-    <Teleport to="body">
-      <div v-if="showAddDrawer" class="drawer-overlay">
-        <div class="drawer drawer-right">
-          <div class="drawer-panel" :class="{ 'exiting': addExiting }">
-            <div class="drawer-header">
-              <h2 class="drawer-title">添加供应商</h2>
-              <button @click="closeAdd" class="drawer-close">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-              </button>
-            </div>
-            <div class="drawer-body space-y-4">
-              <div>
-                <label class="form-label">别名</label>
-                <input v-model="newSupplier.name" type="text" placeholder="如：智谱、阿里云"
-                  class="form-input" @keyup.enter="addSupplier" ref="addNameInput">
-              </div>
-              <div>
-                <label class="form-label">API Key</label>
-                <input v-model="newSupplier.api_key" type="password" placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                  class="form-input font-mono" @keyup.enter="addSupplier">
-              </div>
-              <div>
-                <label class="form-label">Base URL</label>
-                <input v-model="newSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
-                  class="form-input font-mono" @keyup.enter="addSupplier">
-              </div>
+    <!-- ── 添加供应商 抽屉 ── -->
+    <Drawer v-model="showAddDrawer" title="添加供应商">
+      <div class="space-y-4">
+        <div>
+          <label class="form-label">别名</label>
+          <input v-model="newSupplier.name" type="text" placeholder="如：智谱、阿里云"
+            class="form-input" @keyup.enter="addSupplier" ref="addNameInput">
+        </div>
+        <div>
+          <label class="form-label">API Key</label>
+          <input v-model="newSupplier.api_key" type="password" placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            class="form-input font-mono" @keyup.enter="addSupplier">
+        </div>
+        <div>
+          <label class="form-label">Base URL</label>
+          <input v-model="newSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
+            class="form-input font-mono" @keyup.enter="addSupplier">
+        </div>
 
-              <!-- ── 支持模型 ── -->
-              <div>
-                <div class="flex items-center justify-between mb-3">
-                  <label class="form-label m-0">支持模型</label>
-                  <span class="text-[11px] text-gray-500">{{ newSupplier.models.length }} 个模型</span>
-                </div>
-                <div class="space-y-3">
-                  <div v-for="(m, idx) in newSupplier.models" :key="idx"
-                    class="bg-ls-bg rounded-lg border border-ls-border p-3"
-                    :style="{ animation: 'rowIn .2s ease-out ' + idx * 50 + 'ms both' }">
-                    <div class="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_28px] gap-3 items-center">
-                      <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
-                        class="form-input h-10 px-3 font-mono text-sm" />
-                      <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
-                      <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                        class="form-input h-10 px-3 text-sm font-mono" />
-                      <button type="button" @click="removeNewModel(idx)"
-                        class="action-icon" title="删除">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <button type="button" @click="addNewModel"
-                  class="mt-3 w-full h-10 rounded-lg border border-dashed border-ls-border text-ls-accent hover:text-ls-accentHover hover:border-ls-accent/30 transition-all flex items-center justify-center gap-2 text-sm">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        <!-- ── 支持模型 ── -->
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <label class="form-label m-0">支持模型</label>
+            <span class="text-[11px] text-gray-500">{{ newSupplier.models.length }} 个模型</span>
+          </div>
+          <div class="space-y-3">
+            <div v-for="(m, idx) in newSupplier.models" :key="idx"
+              class="bg-ls-bg rounded-lg border border-ls-border p-3"
+              :style="{ animation: 'rowIn .2s ease-out ' + idx * 50 + 'ms both' }">
+              <div class="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_28px] gap-3 items-center">
+                <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
+                  class="form-input h-10 px-3 font-mono text-sm" />
+                <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
+                <input v-model.number="m.context_length" type="number" placeholder="上下文"
+                  class="form-input h-10 px-3 text-sm font-mono" />
+                <button type="button" @click="removeNewModel(idx)"
+                  class="action-icon" title="删除">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                   </svg>
-                  添加模型
                 </button>
               </div>
             </div>
-            <div class="drawer-footer">
-              <button @click="closeAdd" class="btn btn-secondary">取消</button>
-              <button @click="addSupplier" class="btn btn-primary" :disabled="adding">
-                {{ adding ? '添加中...' : '添加' }}
-              </button>
-            </div>
           </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- ── 编辑供应商 抽屉（表单类，点击空白不关闭） ── -->
-    <Teleport to="body">
-      <div v-if="showEditDrawer" class="drawer-overlay">
-        <div class="drawer drawer-right">
-          <div class="drawer-panel" :class="{ 'exiting': editExiting }">
-            <div class="drawer-header">
-              <h2 class="drawer-title">编辑供应商</h2>
-              <button @click="closeEdit" class="drawer-close">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-              </button>
-            </div>
-            <div class="drawer-body space-y-4">
-              <div>
-                <label class="form-label">别名</label>
-                <input v-model="editingSupplier.name" type="text" placeholder="如：智谱、阿里云"
-                  class="form-input" @keyup.enter="saveEdit">
-              </div>
-              <div>
-                <label class="form-label">API Key</label>
-                <div class="relative">
-                  <input :type="showApiKey ? 'text' : 'password'" v-model="editingSupplier.api_key"
-                    placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                    class="form-input pr-10 font-mono" @keyup.enter="saveEdit">
-                  <button type="button" @click="showApiKey = !showApiKey"
-                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white p-1" title="显示/隐藏">
-                    <svg v-if="showApiKey" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-                    </svg>
-                    <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 2.9M5 12h14"/><line x1="1" y1="1" x2="23" y2="23"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label class="form-label">Base URL</label>
-                <input v-model="editingSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
-                  class="form-input font-mono" @keyup.enter="saveEdit">
-              </div>
-              <div>
-                <label class="form-label">状态</label>
-                <CSelect v-model="editingSupplier.status" :options="STATUS_OPTIONS" placeholder="状态" />
-              </div>
-
-              <!-- ── 支持模型 ── -->
-              <div>
-                <div class="flex items-center justify-between mb-3">
-                  <label class="form-label m-0">支持模型</label>
-                  <span class="text-[11px] text-gray-500">{{ editingSupplier.models.length }} 个模型</span>
-                </div>
-                <div v-if="editingSupplier.models.length === 0"
-                  class="text-center py-6 text-gray-500 text-sm">
-                  暂无配置模型
-                </div>
-                <div class="space-y-3">
-                  <div v-for="(m, idx) in editingSupplier.models" :key="idx"
-                    class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                    <div class="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_28px] gap-3 items-center">
-                      <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
-                        class="form-input h-10 px-3 font-mono text-sm" />
-                      <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
-                      <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                        class="form-input h-10 px-3 text-sm font-mono" />
-                      <button type="button" @click="removeEditModel(idx)"
-                        class="action-icon" title="删除">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <button type="button" @click="addEditModel"
-                  class="mt-3 w-full h-10 rounded-lg border-2 border-dashed border-ls-border text-ls-accent hover:text-ls-accentHover hover:border-ls-accent/30 transition-all flex items-center justify-center gap-2 text-sm">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                  </svg>
-                  添加模型
-                </button>
-              </div>
-            </div>
-            <div class="drawer-footer">
-              <button @click="closeEdit" class="btn btn-secondary">取消</button>
-              <button @click="saveEdit" class="btn btn-primary" :disabled="saving">
-                {{ saving ? '保存中...' : '保存' }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- ── 删除确认 弹窗（确认类） ── -->
-    <Teleport to="body">
-      <div v-if="showDeleteModal" class="modal-overlay" @click.self="closeDeleteConfirm">
-        <div class="modal">
-          <div class="modal-icon modal-icon-danger">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
-              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          <button type="button" @click="addNewModel"
+            class="mt-3 w-full h-10 rounded-lg border border-dashed border-ls-border text-ls-accent hover:text-ls-accentHover hover:border-ls-accent/30 transition-all flex items-center justify-center gap-2 text-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
-          </div>
-          <h3 class="modal-title">确认删除</h3>
-          <p class="modal-message">
-            确定要删除供应商 <strong class="text-white">{{ deletingSupplier?.name }}</strong> 吗？<br>
-            <span class="text-gray-500 text-xs">此操作不可撤销</span>
-          </p>
-          <div class="modal-actions">
-            <button @click="closeDeleteConfirm" class="btn btn-secondary">取消</button>
-            <button @click="confirmDelete" class="btn btn-danger" :disabled="deleting">
-              {{ deleting ? '删除中...' : '确认删除' }}
+            添加模型
+          </button>
+        </div>
+      </div>
+      <template #footer>
+        <button @click="closeAdd" class="btn btn-secondary btn-esc">取消</button>
+        <button @click="addSupplier" class="btn btn-primary" :disabled="adding">
+          {{ adding ? '添加中...' : '添加' }}
+        </button>
+      </template>
+    </Drawer>
+
+    <!-- ── 编辑供应商 抽屉 ── -->
+    <Drawer v-model="showEditDrawer" title="编辑供应商">
+      <div class="space-y-4">
+        <div>
+          <label class="form-label">别名</label>
+          <input v-model="editingSupplier.name" type="text" placeholder="如：智谱、阿里云"
+            class="form-input" @keyup.enter="saveEdit">
+        </div>
+        <div>
+          <label class="form-label">API Key</label>
+          <div class="relative">
+            <input :type="showApiKey ? 'text' : 'password'" v-model="editingSupplier.api_key"
+              placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              class="form-input pr-10 font-mono" @keyup.enter="saveEdit">
+            <button type="button" @click="showApiKey = !showApiKey"
+              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white p-1" title="显示/隐藏">
+              <svg v-if="showApiKey" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 2.9M5 12h14"/><line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
             </button>
           </div>
         </div>
+        <div>
+          <label class="form-label">Base URL</label>
+          <input v-model="editingSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
+            class="form-input font-mono" @keyup.enter="saveEdit">
+        </div>
+        <div>
+          <label class="form-label">状态</label>
+          <CSelect v-model="editingSupplier.status" :options="STATUS_OPTIONS" placeholder="状态" />
+        </div>
+
+        <!-- ── 支持模型 ── -->
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <label class="form-label m-0">支持模型</label>
+            <span class="text-[11px] text-gray-500">{{ editingSupplier.models.length }} 个模型</span>
+          </div>
+          <div v-if="editingSupplier.models.length === 0"
+            class="text-center py-6 text-gray-500 text-sm">
+            暂无配置模型
+          </div>
+          <div class="space-y-3">
+            <div v-for="(m, idx) in editingSupplier.models" :key="idx"
+              class="bg-ls-bg rounded-lg border border-ls-border p-3">
+              <div class="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_28px] gap-3 items-center">
+                <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
+                  class="form-input h-10 px-3 font-mono text-sm" />
+                <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
+                <input v-model.number="m.context_length" type="number" placeholder="上下文"
+                  class="form-input h-10 px-3 text-sm font-mono" />
+                <button type="button" @click="removeEditModel(idx)"
+                  class="action-icon" title="删除">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <button type="button" @click="addEditModel"
+            class="mt-3 w-full h-10 rounded-lg border-2 border-dashed border-ls-border text-ls-accent hover:text-ls-accentHover hover:border-ls-accent/30 transition-all flex items-center justify-center gap-2 text-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            添加模型
+          </button>
+        </div>
       </div>
-    </Teleport>
+      <template #footer>
+        <button @click="closeEdit" class="btn btn-secondary btn-esc">取消</button>
+        <button @click="saveEdit" class="btn btn-primary" :disabled="saving">
+          {{ saving ? '保存中...' : '保存' }}
+        </button>
+      </template>
+    </Drawer>
+
+    <!-- ── 删除确认 弹窗 ── -->
+    <ConfirmModal
+      v-model="showDeleteModal"
+      title="确认删除"
+      :message="`确定要删除供应商 <strong class='text-white'>${deletingSupplier?.name || ''}</strong> 吗？<br><span class='text-gray-500 text-xs'>此操作不可撤销</span>`"
+      danger
+      :confirm-text="deleting ? '删除中...' : '确认删除'"
+      :disabled="deleting"
+      @confirm="confirmDelete"
+    />
+
+    <!-- ── 删除模型确认 弹窗 ── -->
+    <ConfirmModal
+      v-model="showModelDeleteModal"
+      title="确认删除模型"
+      :message="`确定要删除模型 <strong class='text-white font-mono'>${pendingModelDelete?.name || ''}</strong> 吗？<br><span class='text-gray-500 text-xs'>此操作不可撤销</span>`"
+      danger
+      @confirm="confirmModelDelete"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, inject } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
+import Drawer from '@/components/Drawer.vue'
+import ConfirmModal from '@/components/ConfirmModal.vue'
 import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels } from '@/api'
 import CSelect from '@/components/CSelect.vue'
+
+const toast = inject('$toast')
 
 // ── Select options ──
 const MODEL_TYPE_OPTIONS = [
@@ -305,14 +274,12 @@ const activeCount = computed(() => suppliers.value.filter(a => a.status === 'act
 
 // ── Add drawer ──
 const showAddDrawer = ref(false)
-const addExiting = ref(false)
 const adding = ref(false)
 const addNameInput = ref(null)
 const newSupplier = ref({ name: '', api_key: '', base_url: '', models: [] })
 
 // ── Edit drawer ──
 const showEditDrawer = ref(false)
-const editExiting = ref(false)
 const saving = ref(false)
 const editingSupplier = ref(null)
 const showApiKey = ref(false)
@@ -321,6 +288,33 @@ const showApiKey = ref(false)
 const showDeleteModal = ref(false)
 const deleting = ref(false)
 const deletingSupplier = ref(null)
+
+// ── Model delete confirmation modal ──
+const showModelDeleteModal = ref(false)
+const pendingModelDelete = ref(null) // { name, source: 'new'|'edit', idx }
+
+const confirmModelDelete = () => {
+  if (!pendingModelDelete.value) return
+  const { source, idx } = pendingModelDelete.value
+  if (source === 'new') {
+    newSupplier.value.models.splice(idx, 1)
+  } else {
+    editingSupplier.value.models.splice(idx, 1)
+  }
+}
+
+const closeModelDeleteConfirm = () => {
+  showModelDeleteModal.value = false
+  pendingModelDelete.value = null
+}
+
+const openModelDeleteConfirm = (source, idx) => {
+  const model = source === 'new'
+    ? newSupplier.value.models[idx]
+    : editingSupplier.value.models[idx]
+  pendingModelDelete.value = { name: model?.model_name || '(未命名)', source, idx }
+  showModelDeleteModal.value = true
+}
 
 // ── Helpers ──
 const maskKey = (key) => {
@@ -355,7 +349,7 @@ const addNewModel = () => {
 }
 
 const removeNewModel = (idx) => {
-  newSupplier.value.models.splice(idx, 1)
+  openModelDeleteConfirm('new', idx)
 }
 
 const addEditModel = () => {
@@ -363,7 +357,7 @@ const addEditModel = () => {
 }
 
 const removeEditModel = (idx) => {
-  editingSupplier.value.models.splice(idx, 1)
+  openModelDeleteConfirm('edit', idx)
 }
 
 // ── Data loading ──
@@ -372,15 +366,15 @@ const loadData = async () => {
   try {
     const res = await getSuppliers()
     suppliers.value = res.data || []
-    // Load models for each supplier
-    for (const s of suppliers.value) {
-      try {
-        const mRes = await getSupplierModels(s.id)
-        s.models = mRes.data || []
-      } catch {
-        s.models = []
-      }
-    }
+    // Load models concurrently
+    const modelResults = await Promise.allSettled(
+      suppliers.value.map(s => getSupplierModels(s.id))
+    )
+    suppliers.value.forEach((s, i) => {
+      s.models = modelResults[i].status === 'fulfilled'
+        ? (modelResults[i].value.data || [])
+        : []
+    })
   } catch (e) {
     error.value = e.message || 'Failed to load suppliers'
   }
@@ -391,21 +385,17 @@ const loadData = async () => {
 const openAdd = async () => {
   newSupplier.value = { name: '', api_key: '', base_url: '', models: [] }
   showAddDrawer.value = true
-  addExiting.value = false
   await nextTick()
   addNameInput.value?.focus()
 }
 
-const closeAdd = async () => {
-  addExiting.value = true
-  await new Promise(r => setTimeout(r, 250))
+const closeAdd = () => {
   showAddDrawer.value = false
-  addExiting.value = false
 }
 
 const addSupplier = async () => {
   if (!newSupplier.value.name || !newSupplier.value.api_key) {
-    alert('请填写别名和 API Key')
+    toast('请填写别名和 API Key', 'error')
     return
   }
   adding.value = true
@@ -429,7 +419,7 @@ const addSupplier = async () => {
     await loadData()
     closeAdd()
   } catch (e) {
-    alert('添加失败: ' + (e.response?.data?.detail || e.message || ''))
+    toast('添加失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
   } finally {
     adding.value = false
   }
@@ -453,14 +443,10 @@ const openEdit = async (acc) => {
   }
   showApiKey.value = false
   showEditDrawer.value = true
-  editExiting.value = false
 }
 
-const closeEdit = async () => {
-  editExiting.value = true
-  await new Promise(r => setTimeout(r, 250))
+const closeEdit = () => {
   showEditDrawer.value = false
-  editExiting.value = false
 }
 
 const saveEdit = async () => {
@@ -489,7 +475,7 @@ const saveEdit = async () => {
     await loadData()
     closeEdit()
   } catch (e) {
-    alert('保存失败: ' + (e.response?.data?.detail || e.message || ''))
+    toast('保存失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
   } finally {
     saving.value = false
   }
@@ -501,7 +487,7 @@ const toggleSupplier = async (acc) => {
     const res = await apiToggleSupplier(acc.id)
     Object.assign(acc, res.data)
   } catch (e) {
-    alert('操作失败: ' + (e.message || ''))
+    toast('操作失败: ' + (e.message || ''), 'error')
   }
 }
 
@@ -522,19 +508,26 @@ const confirmDelete = async () => {
   try {
     await apiDeleteSupplier(deletingSupplier.value.id)
     suppliers.value = suppliers.value.filter(a => a.id !== deletingSupplier.value.id)
-    closeDeleteConfirm()
   } catch (e) {
-    alert('删除失败: ' + (e.message || ''))
+    toast('删除失败: ' + (e.message || ''), 'error')
   } finally {
     deleting.value = false
   }
 }
 
-// ── ESC closes drawers ──
+// ── ESC / Enter keyboard shortcuts ──
 const handleKeyDown = (e) => {
   if (e.key === 'Escape') {
-    if (showAddDrawer.value) closeAdd()
-    else if (showEditDrawer.value) closeEdit()
+    if (showModelDeleteModal.value) {
+      closeModelDeleteConfirm()
+    } else if (showAddDrawer.value) {
+      closeAdd()
+    } else if (showEditDrawer.value) {
+      closeEdit()
+    }
+  }
+  if (e.key === 'Enter' && showModelDeleteModal.value) {
+    confirmModelDelete()
   }
 }
 
@@ -547,9 +540,3 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeyDown)
 })
 </script>
-
-<style scoped>
-.drawer-panel.exiting {
-  animation: slideOutRight .25s cubic-bezier(.4, 0, .2, 1) forwards;
-}
-</style>

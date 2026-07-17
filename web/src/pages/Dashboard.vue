@@ -1,16 +1,17 @@
 <template>
   <div>
-    <header class="bg-ls-bg/80 backdrop-blur-md border-b border-ls-border px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight text-white">Dashboard</h1>
-        <p class="text-xs text-gray-500 mt-0.5">{{ today }}</p>
-      </div>
-      <div class="flex items-center gap-2.5">
+    <PageHeader title="Dashboard" :subtitle="today">
+      <template #action>
         <span class="inline-flex items-center rounded-md px-2 py-0.5 bg-green-500/10 text-green-400 text-xs">● Healthy</span>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <div class="p-6">
+      <div v-if="loading" class="flex items-center justify-center h-64">
+        <div class="text-gray-500">Loading...</div>
+      </div>
+      <div v-else-if="error" class="text-red-400 text-sm p-4">Error: {{ error }}</div>
+      <div v-else>
       <!-- Stat Cards -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 mb-6">
         <div v-for="card in statCards" :key="card.label" class="bg-ls-card rounded-lg border border-ls-border p-5">
@@ -26,9 +27,9 @@
         <div class="bg-ls-card rounded-lg border border-ls-border p-5">
           <p class="text-xs text-gray-500 mb-3 font-medium">Quota Usage</p>
           <div class="space-y-3">
-            <div v-for="acc in accounts" :key="acc.account_id">
+            <div v-for="acc in suppliers" :key="acc.id">
               <div class="flex justify-between text-xs mb-1">
-                <span class="text-gray-300">{{ acc.account_id }}</span>
+                <span class="text-gray-300">{{ acc.name }}</span>
                 <span class="text-gray-500">{{ acc.usage }}%</span>
               </div>
               <div class="w-full bg-ls-bg rounded-full h-1.5">
@@ -36,7 +37,7 @@
                   class="h-1.5 rounded-full"
                   :class="acc.usage > 90 ? 'bg-red-500' : 'bg-ls-accent'"
                   :style="{ width: acc.usage + '%' }"
-                ></div>
+               ></div>
               </div>
             </div>
           </div>
@@ -60,25 +61,21 @@
       <!-- Accounts Table -->
       <div class="bg-ls-card rounded-lg border border-ls-border">
         <div class="px-5 py-3.5 border-b border-ls-border flex items-center justify-between">
-          <h2 class="font-semibold tracking-tight text-sm">Accounts</h2>
-          <router-link to="/accounts" class="text-xs text-gray-500 hover:text-white">View all →</router-link>
+          <h2 class="font-semibold tracking-tight text-sm">Suppliers</h2>
+          <router-link to="/suppliers" class="text-xs text-gray-500 hover:text-white">View all →</router-link>
         </div>
         <table class="w-full text-sm">
           <thead>
             <tr class="text-gray-500 border-b border-ls-border text-xs">
-              <th class="text-left px-5 py-2.5 font-medium">Account</th>
-              <th class="text-left px-5 py-2.5 font-medium">Region</th>
+              <th class="text-left px-5 py-2.5 font-medium">Supplier</th>
               <th class="text-left px-5 py-2.5 font-medium">Status</th>
               <th class="text-left px-5 py-2.5 font-medium">Quota</th>
               <th class="text-left px-5 py-2.5 font-medium">Today</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="acc in accounts" :key="acc.account_id" class="border-b border-ls-border/50">
-              <td class="px-5 py-3 font-medium text-white">{{ acc.account_id }}</td>
-              <td class="px-5 py-3 text-gray-500 text-xs">
-                <span class="inline-flex items-center rounded-md px-2 py-0.5 bg-ls-elevated text-gray-300">{{ acc.region }}</span>
-              </td>
+            <tr v-for="acc in suppliers" :key="acc.id" class="border-b border-ls-border/50">
+              <td class="px-5 py-3 font-medium text-white">{{ acc.name }}</td>
               <td class="px-5 py-3">
                 <span class="inline-flex items-center rounded-md px-2 py-0.5"
                   :class="acc.status === 'active' ? 'bg-green-500/10 text-green-400' : 'bg-ls-elevated text-gray-400'">
@@ -90,33 +87,93 @@
               <td class="px-5 py-3 text-xs text-gray-400">{{ acc.quota }}</td>
               <td class="px-5 py-3 text-xs text-gray-500">{{ acc.today }}</td>
             </tr>
+            <tr v-if="suppliers.length === 0">
+              <td colspan="4" class="px-5 py-8 text-center text-gray-500">No suppliers configured. Go to Suppliers page to add one.</td>
+            </tr>
           </tbody>
         </table>
       </div>
+    </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
+import { getSuppliers, getLogs, getStats, getAlerts } from '@/api'
 
 const today = computed(() => {
   return new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
 })
 
+const loading = ref(true)
+const error = ref(null)
+
 const statCards = ref([
-  { label: 'Today Requests', value: '12,847', sub: '↑ 8.3% vs yesterday', trendColor: 'text-green-400' },
-  { label: 'Active Accounts', value: '3 / 4', sub: '1 disabled', trendColor: 'text-gray-500' },
-  { label: 'Remaining Quota', value: '56.2k', sub: 'of 80,000 total', trendColor: 'text-gray-500' },
-  { label: 'Avg Latency', value: '342 ms', sub: 'last 1 hour', trendColor: 'text-gray-500' },
+  { label: 'Today Requests', value: '...', sub: 'loading...', trendColor: 'text-gray-500' },
+  { label: 'Active Suppliers', value: '...', sub: '', trendColor: 'text-gray-500' },
+  { label: 'Remaining Quota', value: '...', sub: '', trendColor: 'text-gray-500' },
+  { label: 'Avg Latency', value: '...', sub: '', trendColor: 'text-gray-500' },
 ])
 
-const accounts = ref([
-  { account_id: 'account-1', region: 'CN', status: 'active', usage: 92, quota: '18,400 / 20,000', today: '1,600' },
-  { account_id: 'account-2', region: 'US', status: 'active', usage: 0, quota: '20,000 / 20,000', today: '0' },
-  { account_id: 'account-3', region: 'CN', status: 'active', usage: 61, quota: '12,200 / 20,000', today: '7,800' },
-  { account_id: 'account-4', region: 'US', status: 'disabled', usage: 100, quota: '0 / 20,000', today: '—' },
-])
-
+const suppliers = ref([])
 const trendBars = ref([20, 35, 50, 75, 90, 100, 88, 72, 55, 30])
+
+const loadData = async () => {
+  loading.value = true
+  error.value = null
+  try {
+    const [suppliersRes, logsRes, statsRes] = await Promise.allSettled([
+      getSuppliers(),
+      getLogs({ page: 0, page_size: 20 }),
+      getStats(7),
+    ])
+
+    // Suppliers
+    if (suppliersRes.status === 'fulfilled') {
+      const sups = suppliersRes.value.data || []
+      suppliers.value = sups.map(a => ({
+        id: a.id,
+        name: a.name || a.account_id,
+        status: a.status,
+        usage: a.quota_remaining && a.quota_limit
+          ? Math.round((a.quota_limit - a.quota_remaining) / a.quota_limit * 100)
+          : 0,
+        quota: `${a.quota_remaining || 0} / ${a.quota_limit || '—'}`,
+        today: '—',
+      }))
+    }
+
+    // Logs / stats for summary cards
+    if (logsRes.status === 'fulfilled') {
+      const total = logsRes.value.data?.total || 0
+      statCards.value[0].value = total.toLocaleString()
+      statCards.value[0].sub = 'today'
+    }
+    if (suppliersRes.status === 'fulfilled') {
+      const sups = suppliersRes.value.data || []
+      const active = sups.filter(a => a.status === 'active').length
+      statCards.value[1].value = `${active} / ${sups.length}`
+    }
+    if (statsRes.status === 'fulfilled') {
+      const s = statsRes.value.data || {}
+      if (s.avg_latency != null) {
+        statCards.value[3].value = `${s.avg_latency}ms`
+        statCards.value[3].sub = 'avg'
+      } else if (s.avg_latency_ms != null) {
+        statCards.value[3].value = `${s.avg_latency_ms}ms`
+        statCards.value[3].sub = 'avg'
+      } else {
+        statCards.value[3].value = '—'
+        statCards.value[3].sub = 'no data'
+      }
+    }
+  } catch (e) {
+    error.value = e.message || 'Failed to load data'
+  }
+  loading.value = false
+}
+
+onMounted(() => loadData())
 </script>
