@@ -79,17 +79,36 @@
             @keyup.enter="submitForm" ref="formAliasInput">
           <p v-if="isEditing" class="text-[10px] text-gray-600 mt-1">别名不可修改</p>
         </div>
-        <div>
-          <label class="form-label">实际模型 ID</label>
-          <input v-model="form.model_id" type="text" placeholder="qwen-max"
-            class="form-input font-mono" @keyup.enter="submitForm">
+        <div v-if="isEditing && currentMapping?.bound_models?.length > 0" class="mb-3">
+          <label class="form-label">绑定模型</label>
+          <div class="tag-list">
+            <div v-for="model in currentMapping.bound_models" :key="model.id" class="tag-item">
+              <span>{{ model.supplier_name || `供应商${model.supplier_id}` }} {{ model.model_name }}</span>
+              <button @click="removeMappingModel(model.id)" class="tag-delete">×</button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="text-xs text-gray-500 mb-3">
+          多模型支持: 添加/删除模型将显示在此处
         </div>
       </div>
       <template #footer>
         <button @click="closeForm" class="btn btn-secondary btn-esc">取消</button>
+        <button @click="openSelector" class="btn btn-secondary">管理绑定模型</button>
         <button @click="submitForm" class="btn btn-primary" :disabled="submitting">
           {{ submitting ? '保存中...' : isEditing ? '保存' : '添加' }}
         </button>
+      </template>
+    </Drawer>
+
+    <!-- ── 模型选择器 抽屉 ── -->
+    <Drawer v-model="showSelectorDrawer" title="管理绑定模型">
+      <div class="space-y-4">
+        <MappingModelSelector v-model="currentMapping.bound_models" />
+      </div>
+      <template #footer>
+        <button @click="closeSelector" class="btn btn-secondary btn-esc">取消</button>
+        <button @click="closeSelector" class="btn btn-primary">完成</button>
       </template>
     </Drawer>
 
@@ -107,17 +126,19 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, inject } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, inject } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import Drawer from '@/components/Drawer.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
-import { getMappings, bulkUpdateMappings as apiBulkUpdate, deleteMapping as apiDelete } from '@/api'
+import MappingModelSelector from '@/components/MappingModelSelector.vue'
+import { getMappings, bulkUpdateMappings as apiBulkUpdate, deleteMapping as apiDelete, getMappingModels, removeMappingModel as apiRemoveMappingModel } from '@/api'
 
 const toast = inject('$toast')
 
 const loading = ref(true)
 const error = ref(null)
 const mappings = ref([])
+const currentMapping = ref(null)
 
 // ── Form drawer ──
 const showFormDrawer = ref(false)
@@ -125,6 +146,9 @@ const submitting = ref(false)
 const formAliasInput = ref(null)
 const isEditing = ref(false)
 const form = ref({ alias: '', model_id: '' })
+
+// ── Model selector drawer ──
+const showSelectorDrawer = ref(false)
 
 // ── Delete modal ──
 const showDeleteModal = ref(false)
@@ -138,10 +162,26 @@ const loadData = async () => {
   try {
     const res = await getMappings()
     mappings.value = res.data || []
+    // Load models for each mapping
+    for (const m of mappings.value) {
+      await loadMappingModels(m.alias_name)
+    }
   } catch (e) {
     error.value = e.message || 'Failed to load mappings'
   }
   loading.value = false
+}
+
+const loadMappingModels = async (aliasName) => {
+  try {
+    const res = await getMappingModels(aliasName)
+    const mapping = mappings.value.find(m => m.alias_name === aliasName)
+    if (mapping) {
+      mapping.bound_models = res.data || []
+    }
+  } catch (e) {
+    console.error('Failed to load mapping models:', e)
+  }
 }
 
 // ── Form ──
@@ -153,17 +193,38 @@ const openAdd = async () => {
   formAliasInput.value?.focus()
 }
 
-const openEdit = (item) => {
+const openEdit = async (item) => {
   isEditing.value = true
-  form.value = {
-    alias: item.alias_name,
-    model_id: item.actual_model_id,
+  currentMapping.value = item
+  try {
+    const res = await getMappingModels(item.alias_name)
+    currentMapping.value.bound_models = res.data || []
+  } catch (e) {
+    console.error('Failed to load mapping models:', e)
   }
   showFormDrawer.value = true
 }
 
 const closeForm = () => {
   showFormDrawer.value = false
+  currentMapping.value = null
+}
+
+const openSelector = () => {
+  showSelectorDrawer.value = true
+}
+
+const closeSelector = () => {
+  showSelectorDrawer.value = false
+}
+
+const removeMappingModel = async (modelId) => {
+  try {
+    await apiRemoveMappingModel(modelId)
+    await loadMappingModels(currentMapping.value.alias_name)
+  } catch (e) {
+    toast('删除失败: ' + (e.message || ''), 'error')
+  }
 }
 
 const submitForm = async () => {
@@ -214,5 +275,60 @@ const confirmDelete = async () => {
   }
 }
 
-onMounted(() => loadData())
+const handleKeyDown = (e) => {
+  if (e.key === 'Escape') {
+    if (showSelectorDrawer.value) {
+      closeSelector()
+    } else if (showDeleteModal.value) {
+      closeDeleteConfirm()
+    } else if (showFormDrawer.value) {
+      closeForm()
+    }
+  }
+  if (e.key === 'Enter' && showDeleteModal.value) {
+    confirmDelete()
+  }
+}
+
+onMounted(() => {
+  loadData()
+  document.addEventListener('keydown', handleKeyDown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleKeyDown)
+})
 </script>
+
+<style scoped>
+.tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tag-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: var(--ls-bg);
+  border: 1px solid var(--ls-border);
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.tag-delete {
+  background: none;
+  border: none;
+  color: var(--text-400);
+  cursor: pointer;
+  padding: 0.25rem;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.tag-delete:hover {
+  color: var(--text-200);
+}
+</style>
