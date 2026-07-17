@@ -33,10 +33,10 @@
               <p class="text-xs text-gray-500 mt-0.5">{{ maskKey(acc.api_key) }}</p>
               <div v-if="acc.models && acc.models.length > 0" class="flex items-center gap-1 flex-wrap mt-2">
                 <span v-for="(m, i) in acc.models.slice(0, 3)" :key="i"
-                  class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-ls-elevated border border-ls-border">
-                  <span class="mr-0.5">{{ getModelTypeIcon(m.model_type) }}</span>
+                  class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-ls-elevated border border-ls-border gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: getModelTypeColor(m.model_type) }"></span>
                   <span class="text-white">{{ m.model_name }}</span>
-                  <span v-if="m.context_length" class="text-gray-500 ml-0.5">({{ formatContextLength(m.context_length) }})</span>
+                  <span v-if="m.context_length" class="text-gray-500">({{ formatContextLength(m.context_length) }})</span>
                 </span>
                 <span v-if="acc.models.length > 3"
                   class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-ls-elevated border border-ls-border text-gray-500">
@@ -280,16 +280,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels } from '@/api'
 import CSelect from '@/components/CSelect.vue'
 
 // ── Select options ──
 const MODEL_TYPE_OPTIONS = [
-  { label: '📝 文本', value: 'text' },
-  { label: '🖼️ 图像', value: 'image' },
-  { label: '💻 代码', value: 'code' },
-  { label: '🔊 语音', value: 'voice' },
+  { label: '文本', value: 'text' },
+  { label: '图像', value: 'image' },
+  { label: '代码', value: 'code' },
+  { label: '语音', value: 'voice' },
 ]
 const STATUS_OPTIONS = [
   { label: '活跃', value: 'active' },
@@ -333,14 +333,14 @@ const usagePct = (acc) => {
 }
 
 // ── Model helpers ──
-const MODEL_TYPE_ICONS = {
-  text: '📝',
-  image: '🖼️',
-  code: '💻',
-  voice: '🔊',
+const MODEL_TYPE_COLORS = {
+  text: '#89b4fa',
+  image: '#f0c674',
+  code: '#a6e3a1',
+  voice: '#cba6f7',
 }
 
-const getModelTypeIcon = (type) => MODEL_TYPE_ICONS[type] || '📝'
+const getModelTypeColor = (type) => MODEL_TYPE_COLORS[type] || '#89b4fa'
 
 const formatContextLength = (length) => {
   if (!length) return ''
@@ -528,7 +528,22 @@ const confirmDelete = async () => {
   }
 }
 
-onMounted(() => loadData())
+// ── ESC closes drawers ──
+const handleKeyDown = (e) => {
+  if (e.key === 'Escape') {
+    if (showAddDrawer.value) closeAdd()
+    else if (showEditDrawer.value) closeEdit()
+  }
+}
+
+onMounted(() => {
+  loadData()
+  document.addEventListener('keydown', handleKeyDown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleKeyDown)
+})
 </script>
 
 <style scoped>

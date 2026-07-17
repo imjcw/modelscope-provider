@@ -39,7 +39,7 @@ html, body, #app {
 }
 
 .drawer-right {
-  width: 640px;        /* was 440px — wider for model list input */
+  width: 780px;
   max-width: 92vw;
   height: 100%;
   display: flex;
