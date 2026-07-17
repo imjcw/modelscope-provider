@@ -67,6 +67,11 @@ class SupplierModelBulkUpdate(BaseModel):
     models: List[SupplierModelCreate]
 
 
+class MappingModelCreate(BaseModel):
+    supplier_id: int = Field(..., description="Supplier ID")
+    model_name: str = Field(..., description="Model name on supplier")
+
+
 class LogQueryParams(BaseModel):
     page: int = 0
     page_size: int = 50
@@ -78,11 +83,23 @@ class LogQueryParams(BaseModel):
     end_time: Optional[str] = None
 
 
-# ── Suppliers ───────────────────────────────────────────────────────────────
+# ── Mappings ───────────────────────────────────────────────────────────────
 
 @router.get("/suppliers")
 def list_suppliers(service=Depends(get_admin_service)):
-    return service.get_suppliers()
+    """Get all suppliers for model selection dropdown."""
+    suppliers = service.get_suppliers()
+    # Enrich suppliers with their models for dropdown population
+    result = []
+    for sup in suppliers:
+        models = []
+        if service.supplier_model_repo:
+            models = service.supplier_model_repo.find_by_supplier(sup["id"])
+        result.append({
+            **sup,
+            "models": models
+        })
+    return result
 
 
 @router.get("/suppliers/{supplier_id}")
@@ -193,6 +210,41 @@ def bulk_update_mappings(body: MappingBulkUpdate, service=Depends(get_admin_serv
 @router.delete("/mappings/{alias_name}")
 def delete_mapping(alias_name: str, service=Depends(get_admin_service)):
     service.delete_mapping(alias_name)
+    return {"ok": True}
+
+
+# ── Mapping Models ───────────────────────────────────────────────────────────
+
+@router.get("/mappings/{alias_name}/models")
+def list_mapping_models(alias_name: str, service=Depends(get_admin_service)):
+    """Get all models bound to a mapping alias."""
+    return service.get_mapping_models(alias_name)
+
+
+@router.post("/mappings/{alias_name}/models")
+def add_mapping_model(
+    alias_name: str,
+    body: MappingModelCreate,
+    service=Depends(get_admin_service)
+):
+    """Add a model to a mapping alias."""
+    try:
+        return service.add_mapping_model(
+            alias_name,
+            supplier_id=body.supplier_id,
+            model_name=body.model_name,
+        )
+    except Exception as e:
+        if "UNIQUE constraint" in str(e):
+            raise HTTPException(status_code=409, detail=f"Model {body.model_name} already bound to this alias")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/mappings/models/{model_id}")
+def remove_mapping_model(model_id: int, service=Depends(get_admin_service)):
+    """Remove a model from a mapping alias."""
+    if not service.remove_mapping_model(model_id):
+        raise HTTPException(status_code=404, detail="Mapping model not found")
     return {"ok": True}
 
 
