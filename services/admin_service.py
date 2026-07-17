@@ -5,6 +5,7 @@ from provider.repositories.account_repository import AccountRepository
 from provider.repositories.config_repository import ConfigRepository
 from provider.repositories.log_repository import LogRepository
 from provider.repositories.mapping_repository import MappingRepository
+from provider.repositories.mapping_model_repository import MappingModelRepository
 from provider.repositories.quota_repository import QuotaRepository
 from provider.repositories.supplier_model_repository import SupplierModelRepository
 
@@ -17,13 +18,15 @@ class AdminService:
                  config_repo: ConfigRepository,
                  log_repo: LogRepository,
                  quota_repo: QuotaRepository = None,
-                 supplier_model_repo: SupplierModelRepository = None):
+                 supplier_model_repo: SupplierModelRepository = None,
+                 mapping_model_repo: MappingModelRepository = None):
         self.account_repo = account_repo
         self.mapping_repo = mapping_repo
         self.config_repo = config_repo
         self.log_repo = log_repo
         self.quota_repo = quota_repo
         self.supplier_model_repo = supplier_model_repo
+        self.mapping_model_repo = mapping_model_repo
 
     # ── Accounts ──
 
@@ -123,6 +126,80 @@ class AdminService:
 
     def delete_mapping(self, alias_name: str):
         return self.mapping_repo.delete_by_alias(alias_name)
+
+    def resolve_mapping_alias(self, alias: str) -> str:
+        """Resolve mapping alias to actual model ID with multi-model support.
+
+        Returns:
+            actual_model_id: The selected model name from bound suppliers
+
+        Raises:
+            ValueError: If no models are bound to this alias
+        """
+        if self.mapping_model_repo is None:
+            raise ValueError("Mapping model repo not configured")
+
+        # Fetch all models bound to this alias
+        model_entries = self.mapping_model_repo.find_by_alias(alias)
+
+        if not model_entries:
+            raise ValueError(f"No models bound to alias '{alias}'")
+
+        # Build a list of accounts for load balancing
+        accounts_for_alias = []
+        for entry in model_entries:
+            accounts_for_alias.append(
+                type('Account', (), {
+                    'account_id': f'mapping_{entry["id"]}',
+                    'base_url': '',  # Will be filled below
+                    'model_name': entry['model_name'],
+                    'actual_model_id': entry['model_name'],
+                    'current_index': 0,
+                })()
+            )
+
+        # Fetch supplier details for all suppliers in the mapping
+        supplier_ids = {entry['supplier_id'] for entry in model_entries}
+        supplier_details = {}
+        for sid in supplier_ids:
+            sup = self.account_repo.find_by_id(sid)
+            if sup:
+                supplier_details[sid] = sup
+
+        if not supplier_details:
+            raise ValueError(f"Cannot find supplier details for alias '{alias}'")
+
+        # Use the first supplier's base_url for all accounts (they're the same supplier)
+        base_url = next(iter(supplier_details.values()))['base_url']
+
+        # Override base_url for all accounts
+        for acc in accounts_for_alias:
+            acc.base_url = base_url
+
+        # Select account using load balancer
+        from provider.services.load_balancer import LoadBalancer
+        load_balancer = LoadBalancer(accounts_for_alias)
+        selected = load_balancer.select_account(model_name=model_entries[0]['model_name'])
+
+        return selected.actual_model_id
+
+    def get_mapping_models(self, alias_name: str):
+        """Get all models bound to a mapping alias."""
+        if self.mapping_model_repo is None:
+            return []
+        return self.mapping_model_repo.find_by_alias(alias_name)
+
+    def add_mapping_model(self, alias_name: str, supplier_id: int, model_name: str):
+        """Add a model to a mapping alias."""
+        if self.mapping_model_repo is None:
+            raise NotImplementedError("Mapping model repo not configured")
+        return self.mapping_model_repo.add_model(alias_name, supplier_id, model_name)
+
+    def remove_mapping_model(self, model_id: int):
+        """Remove a model from a mapping alias."""
+        if self.mapping_model_repo is None:
+            return False
+        return self.mapping_model_repo.remove_model(model_id)
 
     # ── Config ──
 
