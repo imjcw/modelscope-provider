@@ -290,6 +290,7 @@ const MODEL_TYPE_OPTIONS = [
   { label: '图像', value: 'image' },
   { label: '代码', value: 'code' },
   { label: '语音', value: 'voice' },
+  { label: '多模态', value: 'multimodal' },
 ]
 const STATUS_OPTIONS = [
   { label: '活跃', value: 'active' },
@@ -338,6 +339,7 @@ const MODEL_TYPE_COLORS = {
   image: '#f0c674',
   code: '#a6e3a1',
   voice: '#cba6f7',
+  multimodal: '#f38ba8',
 }
 
 const getModelTypeColor = (type) => MODEL_TYPE_COLORS[type] || '#89b4fa'

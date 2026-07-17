@@ -59,7 +59,7 @@ class ConfigBulkUpdate(BaseModel):
 
 class SupplierModelCreate(BaseModel):
     model_name: str
-    model_type: Literal["text", "image", "code", "voice"] = "text"
+    model_type: Literal["text", "image", "code", "voice", "multimodal"] = "text"
     context_length: Optional[int] = None
 
 
