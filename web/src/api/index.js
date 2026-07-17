@@ -4,14 +4,21 @@ import axios from 'axios'
 const api = axios.create({
   baseURL: '/api/admin',
   timeout: 15000,
+  headers: { 'Content-Type': 'application/json' },
 })
 
-// ── Accounts ──
-export const getAccounts = () => api.get('/accounts')
-export const createAccount = (data) => api.post('/accounts', data)
-export const updateAccount = (id, data) => api.put(`/accounts/${id}`, data)
-export const deleteAccount = (id) => api.delete(`/accounts/${id}`)
-export const toggleAccount = (id) => api.patch(`/accounts/${id}/status`)
+// ── Suppliers ──
+export const getSuppliers = () => api.get('/suppliers')
+export const createSupplier = (data) => api.post('/suppliers', data)
+export const updateSupplier = (id, data) => api.put(`/suppliers/${id}`, data)
+export const deleteSupplier = (id) => api.delete(`/suppliers/${id}`)
+export const toggleSupplier = (id) => api.patch(`/suppliers/${id}/status`)
+
+// ── Supplier Models ──
+export const getSupplierModels = (id) => api.get(`/suppliers/${id}/models`)
+export const createSupplierModel = (id, data) => api.post(`/suppliers/${id}/models`, data)
+export const deleteSupplierModel = (id, modelId) => api.delete(`/suppliers/${id}/models/${modelId}`)
+export const bulkSetSupplierModels = (id, data) => api.put(`/suppliers/${id}/models/bulk`, data)
 
 // ── Mappings ──
 export const getMappings = () => api.get('/mappings')
