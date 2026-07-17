@@ -45,6 +45,7 @@ async def initialize_services():
         from provider.services.admin_service import AdminService
         from provider.repositories.account_repository import AccountRepository
         from provider.repositories.mapping_repository import MappingRepository
+        from provider.repositories.mapping_model_repository import MappingModelRepository
         from provider.repositories.config_repository import ConfigRepository
         from provider.repositories.log_repository import LogRepository
         from provider.repositories.quota_repository import QuotaRepository
@@ -53,6 +54,7 @@ async def initialize_services():
         from services.admin_service import AdminService
         from repositories.account_repository import AccountRepository
         from repositories.mapping_repository import MappingRepository
+        from repositories.mapping_model_repository import MappingModelRepository
         from repositories.config_repository import ConfigRepository
         from repositories.log_repository import LogRepository
         from repositories.quota_repository import QuotaRepository
@@ -66,6 +68,7 @@ async def initialize_services():
         log_repo=LogRepository(db),
         quota_repo=QuotaRepository(db),
         supplier_model_repo=SupplierModelRepository(db),
+        mapping_model_repo=MappingModelRepository(db),
     )
     _admin_service = admin_service
     logger.info(f"Loaded {len(_services['accounts'])} accounts, admin service initialized")
