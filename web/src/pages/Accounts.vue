@@ -128,16 +128,16 @@
                         class="form-input h-10 px-3 font-mono text-sm" />
                     </div>
                     <select v-model="m.model_type"
-                      class="form-input select h-10 w-24 text-sm px-3 py-1">
+                      class="form-input select h-10 w-28 text-sm px-3 py-1 flex-none">
                       <option value="text">📝 文本</option>
                       <option value="image">🖼️ 图像</option>
                       <option value="code">💻 代码</option>
                       <option value="voice">🔊 语音</option>
                     </select>
                     <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                      class="form-input h-10 w-28 px-3 text-sm font-mono" />
+                      class="form-input h-10 w-28 px-3 text-sm font-mono flex-none" />
                     <button type="button" @click="removeNewModel(idx)"
-                      class="action-icon" title="删除">
+                      class="action-icon flex-none" title="删除">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                       </svg>
@@ -231,16 +231,16 @@
                         class="form-input h-10 px-3 font-mono text-sm" />
                     </div>
                     <select v-model="m.model_type"
-                      class="form-input select h-10 w-24 text-sm px-3 py-1">
+                      class="form-input select h-10 w-28 text-sm px-3 py-1 flex-none">
                       <option value="text">📝 文本</option>
                       <option value="image">🖼️ 图像</option>
                       <option value="code">💻 代码</option>
                       <option value="voice">🔊 语音</option>
                     </select>
                     <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                      class="form-input h-10 w-28 px-3 text-sm font-mono" />
+                      class="form-input h-10 w-28 px-3 text-sm font-mono flex-none" />
                     <button type="button" @click="removeEditModel(idx)"
-                      class="action-icon" title="删除">
+                      class="action-icon flex-none" title="删除">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                       </svg>
