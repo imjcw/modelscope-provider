@@ -123,12 +123,12 @@
                   <div v-for="(m, idx) in newSupplier.models" :key="idx"
                     class="bg-ls-bg rounded-lg border border-ls-border p-3"
                     :style="{ animation: 'rowIn .2s ease-out ' + idx * 50 + 'ms both' }">
-                    <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_28px] gap-3 items-center">
+                    <div class="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_28px] gap-3 items-center">
                       <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
                         class="form-input h-10 px-3 font-mono text-sm" />
                       <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
                       <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                        class="form-input h-10 w-28 px-3 text-sm font-mono" />
+                        class="form-input h-10 px-3 text-sm font-mono" />
                       <button type="button" @click="removeNewModel(idx)"
                         class="action-icon" title="删除">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -217,12 +217,12 @@
                 <div class="space-y-3">
                   <div v-for="(m, idx) in editingSupplier.models" :key="idx"
                     class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                    <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_28px] gap-3 items-center">
+                    <div class="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_28px] gap-3 items-center">
                       <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
                         class="form-input h-10 px-3 font-mono text-sm" />
                       <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
                       <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                        class="form-input h-10 w-28 px-3 text-sm font-mono" />
+                        class="form-input h-10 px-3 text-sm font-mono" />
                       <button type="button" @click="removeEditModel(idx)"
                         class="action-icon" title="删除">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
