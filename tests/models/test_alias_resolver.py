@@ -11,36 +11,37 @@ class MockAccount:
         self.base_url = base_url
 
 
+class MockMappingRepo:
+    """Mock MappingRepository for testing."""
+    def __init__(self, mappings):
+        self.mappings = mappings  # dict: alias_name -> list[dict]
+
+    def find_by_alias(self, alias_name: str):
+        return self.mappings.get(alias_name, [])
+
+
 @pytest.mark.asyncio
 async def test_resolve_alias_success():
-    """Test successful alias resolution."""
-    mock_response = {
-        "data": [{
-            "id": "hy3 overseas",
-            "object": "model",
-            "created": 1234567890,
-            "owned_by": "modelscope"
-        }],
-        "object": "list"
-    }
-
-    mock_client = AsyncMock()
-    mock_client.get = AsyncMock(return_value=Mock(
-        status_code=200,
-        json=lambda: mock_response,
-        raise_for_status=lambda: None
-    ))
+    """Test alias resolution via the local model_mappings table."""
+    mock_repo = MockMappingRepo({
+        "hy3": [{"alias_name": "hy3", "region": "overseas", "actual_model_id": "hy3 overseas"}],
+    })
+    mock_client = AsyncMock()  # HTTP path must NOT be exercised
 
     account = MockAccount("test", "test-key", "https://api.inference.modelscope.cn/v1")
-    resolver = ModelAliasResolver(mock_client)
+    resolver = ModelAliasResolver(mock_client, mapping_repo=mock_repo)
     result = await resolver.resolve_alias(account, "hy3")
 
     assert result == "hy3 overseas"
+    # Verify HTTP was never called (mapping lookup short-circuited)
+    mock_client.get.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_resolve_alias_not_found():
-    """Test alias resolution when model not found."""
+    """Test that when the mapping repo returns empty, HTTP fallback is used and
+    a ValueError is raised when no models are returned by the API."""
+    mock_repo = MockMappingRepo({})  # no mapping for the alias -> fall through to HTTP
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(return_value=Mock(
         status_code=200,
@@ -49,7 +50,7 @@ async def test_resolve_alias_not_found():
     ))
 
     account = MockAccount("test", "test-key", "https://api.inference.modelscope.cn/v1")
-    resolver = ModelAliasResolver(mock_client)
+    resolver = ModelAliasResolver(mock_client, mapping_repo=mock_repo)
 
     with pytest.raises(ValueError, match="No models found"):
         await resolver.resolve_alias(account, "nonexistent")
@@ -57,12 +58,13 @@ async def test_resolve_alias_not_found():
 
 @pytest.mark.asyncio
 async def test_resolve_alias_http_error():
-    """Test alias resolution on HTTP error."""
+    """Test that when no mapping exists, an HTTP error propagates as ValueError."""
+    mock_repo = MockMappingRepo({})  # no mapping -> HTTP path exercised
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(side_effect=Exception("HTTP 500"))
 
     account = MockAccount("test", "test-key", "https://api.inference.modelscope.cn/v1")
-    resolver = ModelAliasResolver(mock_client)
+    resolver = ModelAliasResolver(mock_client, mapping_repo=mock_repo)
 
     with pytest.raises(ValueError, match="Failed to resolve"):
         await resolver.resolve_alias(account, "test-model")

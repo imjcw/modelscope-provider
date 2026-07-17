@@ -8,17 +8,32 @@ logger = logging.getLogger(__name__)
 class ModelAliasResolver:
     """Resolve model aliases to actual model IDs."""
 
-    def __init__(self, http_client: httpx.AsyncClient):
+    def __init__(self, http_client: httpx.AsyncClient, mapping_repo=None):
         self.http_client = http_client
+        self.mapping_repo = mapping_repo
 
     async def resolve_alias(self, account: ModelScopeAccount, alias: str) -> str:
         """Resolve model alias to actual model ID.
-        
-        For now, just return the alias as-is since ModelScope API doesn't have a separate alias endpoint.
-        The model name is used directly.
+
+        Resolution priority:
+        1. If a mapping_repo is provided, look up the alias in the model_mappings
+           table. If a mapping exists, return its actual_model_id immediately.
+        2. Otherwise, fall through to HTTP-based resolution (the ModelScope API
+           model endpoint).
         """
-        logger.info(f"Using model '{alias}' for account {account.account_id}")
-        return alias
+        # Step 1: check the local model_mappings table first
+        if self.mapping_repo is not None:
+            mappings = self.mapping_repo.find_by_alias(alias)
+            if mappings:
+                actual_model_id = mappings[0]["actual_model_id"]
+                logger.info(
+                    f"Resolved alias '{alias}' to model ID '{actual_model_id}' "
+                    f"via model_mappings table for account {account.account_id}"
+                )
+                return actual_model_id
+
+        # Step 2: fall through to HTTP-based resolution
+        return await self._fetch_model_id(account, alias)
 
     async def _fetch_model_id(self, account: ModelScopeAccount, alias: str) -> str:
         """Fetch model ID from ModelScope API."""
