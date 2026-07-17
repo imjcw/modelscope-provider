@@ -30,25 +30,22 @@ class AccountCreate(BaseModel):
     name: str = Field(..., description="Supplier display name")
     api_key: str = Field(..., description="API key")
     base_url: str = Field(..., description="ModelScope base URL")
-    region: str = Field("china", description="china or overseas")
 
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
-    region: Optional[str] = None
     status: Optional[str] = None
 
 
 class MappingUpsert(BaseModel):
     alias_name: str
-    region: str
     actual_model_id: str
 
 
 class MappingBulkUpdate(BaseModel):
-    mappings: Dict[str, Dict[str, str]]
+    mappings: Dict[str, str]
 
 
 class ConfigUpdate(BaseModel):
@@ -103,7 +100,6 @@ def create_supplier(body: AccountCreate, service=Depends(get_admin_service)):
             name=body.name,
             api_key=body.api_key,
             base_url=body.base_url,
-            region=body.region,
         )
     except Exception as e:
         if "UNIQUE constraint" in str(e):

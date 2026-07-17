@@ -21,7 +21,7 @@ def _create_supplier(client):
     name = _tid("sup")
     r = client.post("/api/admin/suppliers", json={
         "name": name, "api_key": "ms-test-key",
-        "base_url": "https://api.modelscope.test/v1", "region": "china",
+        "base_url": "https://api.modelscope.test/v1",
     })
     return r.json()
 

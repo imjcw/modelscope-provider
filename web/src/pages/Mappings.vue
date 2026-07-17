@@ -5,7 +5,7 @@
         <h1 class="text-lg font-semibold tracking-tight text-white">模型映射</h1>
         <p class="text-xs text-gray-500 mt-0.5">管理模型别名与实际模型 ID 的映射关系</p>
       </div>
-      <button @click="showAddDialog = true"
+      <button @click="openAdd"
         class="bg-ls-accent text-white font-medium rounded-lg h-9 px-4 text-sm hover:bg-ls-accentHover transition-all inline-flex items-center gap-2">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -15,176 +15,243 @@
     </header>
 
     <div class="p-6">
-      <!-- Mapping Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div v-for="group in groupedMappings" :key="group.alias"
-          class="bg-ls-card rounded-lg border border-ls-border p-5">
-          <div class="flex items-center justify-between mb-4">
+      <div v-if="loading" class="flex items-center justify-center h-64">
+        <div class="text-gray-500">Loading...</div>
+      </div>
+      <div v-else-if="error" class="text-red-400 text-sm p-4">Error: {{ error }}</div>
+      <div v-else>
+      <div class="space-y-3">
+        <!-- Mapping rows -->
+        <div v-for="m in mappings" :key="m.alias_name"
+          class="bg-ls-card rounded-lg border border-ls-border p-5 flex items-center justify-between hover:border-gray-700 transition-all">
+          <div class="flex items-center gap-6">
             <div>
               <p class="text-xs text-gray-500 mb-0.5">别名</p>
-              <p class="text-sm font-mono text-ls-accent font-semibold">{{ group.alias }}</p>
+              <p class="text-sm font-mono text-ls-accent font-semibold">{{ m.alias_name }}</p>
             </div>
-            <div class="flex items-center gap-2">
-              <span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-green-500/10 text-green-400 text-xs">活跃</span>
-              <button @click="editMapping(group)" class="text-gray-500 hover:text-white p-1 transition-colors">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                </svg>
-              </button>
-              <button @click="deleteMap(group.alias)" class="text-gray-500 hover:text-red-400 p-1 transition-colors">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                </svg>
-              </button>
+            <div class="flex items-center gap-2 text-gray-600">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </div>
+            <div>
+              <p class="text-xs text-gray-500 mb-0.5">实际模型 ID</p>
+              <p class="text-sm font-mono text-white">{{ m.actual_model_id }}</p>
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <p class="text-xs text-gray-500 mb-1.5">中国大陆</p>
-              <p class="text-sm font-mono text-white bg-ls-bg rounded-md px-3 py-2">{{ group.china }}</p>
-            </div>
-            <div>
-              <p class="text-xs text-gray-500 mb-1.5">海外</p>
-              <p class="text-sm font-mono text-white bg-ls-bg rounded-md px-3 py-2">{{ group.overseas || '—' }}</p>
-            </div>
+          <div class="flex items-center gap-2">
+            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 bg-green-500/10 text-green-400 text-xs">活跃</span>
+            <button @click="openEdit(m)" class="text-gray-500 hover:text-white p-1 transition-colors" title="编辑">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+            <button @click="openDeleteConfirm(m)" class="text-gray-500 hover:text-red-400 p-1 transition-colors" title="删除">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
           </div>
         </div>
 
-        <!-- Add new placeholder -->
-        <div class="bg-ls-bg rounded-lg border-2 border-dashed border-ls-border p-5 flex flex-col items-center justify-center gap-2 min-h-[180px] hover:border-gray-600 transition-colors cursor-pointer"
-          @click="showAddDialog = true">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-gray-500">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="12" y2="12"/>
+        <!-- Empty state -->
+        <div v-if="mappings.length === 0"
+          class="bg-ls-bg rounded-lg border-2 border-dashed border-ls-border p-12 flex flex-col items-center justify-center gap-3">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-gray-600">
+            <path d="M10 13a5 5 0 0 0 7.54 .54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
           </svg>
-          <p class="text-sm text-gray-500">添加新的模型映射</p>
+          <p class="text-sm text-gray-500">暂无映射规则</p>
+          <button @click="openAdd" class="text-xs text-ls-accent hover:text-ls-accentHover">添加第一个映射 →</button>
         </div>
       </div>
 
-      <!-- Bulk Edit JSON -->
-      <div class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3.5 border-b border-ls-border">
-          <h2 class="font-semibold tracking-tight text-sm">批量编辑 (JSON)</h2>
-        </div>
-        <div class="p-5">
-          <textarea v-model="jsonText"
-            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-3 text-sm text-white font-mono focus:outline-none focus:border-ls-accent resize-none"
-            rows="10"></textarea>
-          <div class="flex items-center justify-between mt-3">
-            <p class="text-xs text-gray-500">JSON 格式：key 为别名，value 为各区域对应的实际模型 ID</p>
-            <button @click="saveJson"
-              class="bg-ls-accent text-white font-medium rounded-lg h-9 px-6 text-sm hover:bg-ls-accentHover transition-all">保存</button>
-          </div>
-        </div>
+      <div class="mt-6 flex items-center justify-center gap-2 text-sm text-gray-500">
+        共 {{ mappings.length }} 条映射
       </div>
-
-      <!-- Add Mapping Dialog -->
-      <div v-if="showAddDialog" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showAddDialog = false">
-        <div class="bg-ls-card border border-ls-border rounded-lg w-full max-w-md p-6">
-          <h2 class="text-lg font-semibold text-white mb-4">添加模型映射</h2>
-          <div class="space-y-4">
-            <div>
-              <label class="block text-xs text-gray-500 mb-1.5">别名</label>
-              <input v-model="addForm.alias" type="text" placeholder="my-alias"
-                class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-ls-accent font-mono">
-            </div>
-            <div>
-              <label class="block text-xs text-gray-500 mb-1.5">中国大陆模型</label>
-              <input v-model="addForm.china" type="text" placeholder="hy3"
-                class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-ls-accent font-mono">
-            </div>
-            <div>
-              <label class="block text-xs text-gray-500 mb-1.5">海外模型（可选）</label>
-              <input v-model="addForm.overseas" type="text" placeholder="hy3 overseas"
-                class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-ls-accent font-mono">
-            </div>
-          </div>
-          <div class="flex items-center justify-end gap-2.5 mt-6">
-            <button @click="showAddDialog = false" class="text-sm text-gray-400 hover:text-white px-4 py-1.5 rounded-md">取消</button>
-            <button @click="addMapping" class="bg-ls-accent text-white font-medium rounded-lg h-9 px-6 text-sm hover:bg-ls-accentHover transition-all">添加</button>
-          </div>
-        </div>
       </div>
     </div>
+
+    <!-- ── 添加/编辑 映射 抽屉 ── -->
+    <Teleport to="body">
+      <div v-if="showFormDrawer" class="drawer-overlay">
+        <div class="drawer drawer-right">
+          <div class="drawer-panel" :class="{ 'exiting': formExiting }">
+            <div class="drawer-header">
+              <h2 class="drawer-title">{{ isEditing ? '编辑映射' : '添加映射' }}</h2>
+              <button @click="closeForm" class="drawer-close">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+            <div class="drawer-body space-y-4">
+              <div>
+                <label class="form-label">别名</label>
+                <input v-model="form.alias" type="text" placeholder="my-alias"
+                  class="form-input font-mono" :disabled="isEditing"
+                  @keyup.enter="submitForm" ref="formAliasInput">
+                <p v-if="isEditing" class="text-[10px] text-gray-600 mt-1">别名不可修改</p>
+              </div>
+              <div>
+                <label class="form-label">实际模型 ID</label>
+                <input v-model="form.model_id" type="text" placeholder="qwen-max"
+                  class="form-input font-mono" @keyup.enter="submitForm">
+              </div>
+            </div>
+            <div class="drawer-footer">
+              <button @click="closeForm" class="btn btn-secondary">取消</button>
+              <button @click="submitForm" class="btn btn-primary" :disabled="submitting">
+                {{ submitting ? '保存中...' : isEditing ? '保存' : '添加' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ── 删除确认 弹窗 ── -->
+    <Teleport to="body">
+      <div v-if="showDeleteModal" class="modal-overlay" @click.self="closeDeleteConfirm">
+        <div class="modal">
+          <div class="modal-icon modal-icon-danger">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+          </div>
+          <h3 class="modal-title">确认删除</h3>
+          <p class="modal-message">
+            确定删除别名 <strong class="text-white">{{ deletingItem?.alias_name }}</strong> 的映射吗？<br>
+            <span class="text-gray-500 text-xs">此操作不可撤销</span>
+          </p>
+          <div class="modal-actions">
+            <button @click="closeDeleteConfirm" class="btn btn-secondary">取消</button>
+            <button @click="confirmDelete" class="btn btn-danger" :disabled="deleting">
+              {{ deleting ? '删除中...' : '确认删除' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
+import { getMappings, bulkUpdateMappings as apiBulkUpdate, deleteMapping as apiDelete } from '@/api'
 
-const showAddDialog = ref(false)
-const jsonText = ref('')
+const loading = ref(true)
+const error = ref(null)
+const mappings = ref([])
 
-const addForm = ref({ alias: '', china: '', overseas: '' })
+// ── Form drawer ──
+const showFormDrawer = ref(false)
+const formExiting = ref(false)
+const submitting = ref(false)
+const formAliasInput = ref(null)
+const isEditing = ref(false)
+const form = ref({ alias: '', model_id: '' })
 
-const mappings = ref([
-  { id: 1, alias_name: 'hy3', region: 'china', actual_model_id: 'hy3' },
-  { id: 2, alias_name: 'hy3', region: 'overseas', actual_model_id: 'hy3 overseas' },
-  { id: 3, alias_name: 'qwen2.5-7b', region: 'china', actual_model_id: 'qwen2.5-7b' },
-  { id: 4, alias_name: 'qwen2.5-7b', region: 'overseas', actual_model_id: 'qwen2.5-7b-instruct' },
-])
+// ── Delete modal ──
+const showDeleteModal = ref(false)
+const deleting = ref(false)
+const deletingItem = ref(null)
 
-const groupedMappings = computed(() => {
-  const groups = {}
-  for (const m of mappings.value) {
-    if (!groups[m.alias_name]) groups[m.alias_name] = {}
-    groups[m.alias_name][m.region] = m.actual_model_id
-  }
-  return Object.entries(groups).map(([alias, regions]) => ({ alias, ...regions }))
-})
-
-const syncJson = () => {
-  const groups = {}
-  for (const m of mappings.value) {
-    if (!groups[m.alias_name]) groups[m.alias_name] = {}
-    groups[m.alias_name][m.region] = m.actual_model_id
-  }
-  jsonText.value = JSON.stringify(groups, null, 2)
-}
-
-onMounted(() => syncJson())
-
-const addMapping = () => {
-  if (!addForm.value.alias || !addForm.value.china) return
-  const nextId = Math.max(1, ...mappings.value.map(m => m.id)) + 1
-  mappings.value.push({ id: nextId, alias_name: addForm.value.alias, region: 'china', actual_model_id: addForm.value.china })
-  if (addForm.value.overseas) {
-    mappings.value.push({ id: nextId + 1, alias_name: addForm.value.alias, region: 'overseas', actual_model_id: addForm.value.overseas })
-  }
-  showAddDialog.value = false
-  addForm.value = { alias: '', china: '', overseas: '' }
-  syncJson()
-}
-
-const deleteMap = (alias) => {
-  if (!confirm(`确定删除 ${alias} 的所有映射？`)) return
-  mappings.value = mappings.value.filter(m => m.alias_name !== alias)
-  syncJson()
-}
-
-const editMapping = (group) => {
-  alert(`编辑 ${group.alias} — 请在下方 JSON 区域修改后保存`)
-  syncJson()
-  setTimeout(() => {
-    const groups = JSON.parse(jsonText.value)
-    groups[group.alias] = { china: group.china, overseas: group.overseas || '' }
-    jsonText.value = JSON.stringify(groups, null, 2)
-  }, 100)
-}
-
-const saveJson = () => {
+// ── Data loading ──
+const loadData = async () => {
+  loading.value = true
+  error.value = null
   try {
-    const data = JSON.parse(jsonText.value)
-    const newMappings = []
-    let id = 0
-    for (const [alias, regions] of Object.entries(data)) {
-      for (const [region, actualId] of Object.entries(regions)) {
-        id++
-        newMappings.push({ id, alias_name: alias, region, actual_model_id: actualId })
-      }
-    }
-    mappings.value = newMappings
+    const res = await getMappings()
+    mappings.value = res.data || []
   } catch (e) {
-    alert('JSON 格式错误: ' + e.message)
+    error.value = e.message || 'Failed to load mappings'
+  }
+  loading.value = false
+}
+
+// ── Form ──
+const openAdd = async () => {
+  isEditing.value = false
+  form.value = { alias: '', model_id: '' }
+  showFormDrawer.value = true
+  formExiting.value = false
+  await nextTick()
+  formAliasInput.value?.focus()
+}
+
+const openEdit = (item) => {
+  isEditing.value = true
+  form.value = {
+    alias: item.alias_name,
+    model_id: item.actual_model_id,
+  }
+  showFormDrawer.value = true
+  formExiting.value = false
+}
+
+const closeForm = async () => {
+  formExiting.value = true
+  await new Promise(r => setTimeout(r, 250))
+  showFormDrawer.value = false
+  formExiting.value = false
+}
+
+const submitForm = async () => {
+  if (!form.value.alias || !form.value.model_id) {
+    alert('请填写别名和实际模型 ID')
+    return
+  }
+  submitting.value = true
+  try {
+    // Build full mappings dict (all existing + this one)
+    const allMappings = {}
+    for (const m of mappings.value) {
+      allMappings[m.alias_name] = m.actual_model_id
+    }
+    allMappings[form.value.alias] = form.value.model_id
+
+    await apiBulkUpdate(allMappings)
+    await loadData()
+    closeForm()
+  } catch (e) {
+    alert('保存失败: ' + (e.response?.data?.detail || e.message || ''))
+  } finally {
+    submitting.value = false
   }
 }
+
+// ── Delete ──
+const openDeleteConfirm = (item) => {
+  deletingItem.value = item
+  showDeleteModal.value = true
+}
+
+const closeDeleteConfirm = () => {
+  showDeleteModal.value = false
+  deletingItem.value = null
+}
+
+const confirmDelete = async () => {
+  if (!deletingItem.value) return
+  deleting.value = true
+  try {
+    await apiDelete(deletingItem.value.alias_name)
+    await loadData()
+    closeDeleteConfirm()
+  } catch (e) {
+    alert('删除失败: ' + (e.message || ''))
+  } finally {
+    deleting.value = false
+  }
+}
+
+onMounted(() => loadData())
 </script>
+
+<style scoped>
+.drawer-panel.exiting {
+  animation: slideOutRight .25s cubic-bezier(.4, 0, .2, 1) forwards;
+}
+</style>

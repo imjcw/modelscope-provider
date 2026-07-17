@@ -61,8 +61,8 @@ class AdminService:
         return acc
 
     def create_account(self, name: str, api_key: str,
-                       base_url: str, region: str = "china") -> dict:
-        return self.account_repo.create(name, api_key, base_url, region)
+                       base_url: str) -> dict:
+        return self.account_repo.create(name, api_key, base_url)
 
     def update_account(self, account_id: int, **kwargs) -> dict:
         return self.account_repo.update(account_id, **kwargs)
@@ -115,8 +115,8 @@ class AdminService:
     def get_mappings_by_alias(self, alias_name: str):
         return self.mapping_repo.find_by_alias(alias_name)
 
-    def upsert_mapping(self, alias_name: str, region: str, actual_model_id: str):
-        return self.mapping_repo.create(alias_name, region, actual_model_id)
+    def upsert_mapping(self, alias_name: str, actual_model_id: str):
+        return self.mapping_repo.create(alias_name, actual_model_id)
 
     def bulk_update_mappings(self, mappings: dict):
         self.mapping_repo.bulk_upsert(mappings)

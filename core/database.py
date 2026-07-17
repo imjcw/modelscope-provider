@@ -94,7 +94,6 @@ class DatabaseManager:
                     account_id TEXT NOT NULL UNIQUE,
                     api_key TEXT NOT NULL,
                     base_url TEXT NOT NULL,
-                    region TEXT NOT NULL DEFAULT 'china',
                     status TEXT NOT NULL DEFAULT 'active',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -105,10 +104,8 @@ class DatabaseManager:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS model_mappings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    alias_name TEXT NOT NULL,
-                    region TEXT NOT NULL DEFAULT 'china',
-                    actual_model_id TEXT NOT NULL,
-                    UNIQUE(alias_name, region)
+                    alias_name TEXT NOT NULL UNIQUE,
+                    actual_model_id TEXT NOT NULL
                 )
             """)
 
@@ -220,6 +217,42 @@ class DatabaseManager:
                 logger.info("Migration: added 'account_name' column to request_logs table")
             except sqlite3.OperationalError:
                 pass
+
+            # ── Migration: drop `region` column from accounts (no longer needed) ──
+            try:
+                cursor.execute("ALTER TABLE accounts DROP COLUMN region")
+                logger.info("Migration: dropped 'region' column from accounts table")
+            except sqlite3.OperationalError:
+                pass  # Column already dropped or doesn't exist
+
+            # ── Migration: drop `region` column from model_mappings and fix UNIQUE constraint ──
+            # Check if model_mappings has a 'region' column (legacy schema)
+            try:
+                cursor.execute(
+                    "SELECT name FROM pragma_table_info('model_mappings') WHERE name = 'region'"
+                )
+                if cursor.fetchone():
+                    # Legacy schema: recreate table without region and with UNIQUE(alias_name).
+                    # Duplicates (same alias_name, different region) are collapsed by keeping
+                    # the first row per alias_name (MIN(id)).
+                    cursor.execute(
+                        """CREATE TABLE model_mappings_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            alias_name TEXT NOT NULL UNIQUE,
+                            actual_model_id TEXT NOT NULL
+                        )"""
+                    )
+                    cursor.execute(
+                        """INSERT INTO model_mappings_new (alias_name, actual_model_id)
+                           SELECT alias_name, actual_model_id
+                           FROM model_mappings
+                           WHERE id IN (SELECT MIN(id) FROM model_mappings GROUP BY alias_name)"""
+                    )
+                    cursor.execute("DROP TABLE model_mappings")
+                    cursor.execute("ALTER TABLE model_mappings_new RENAME TO model_mappings")
+                    logger.info("Migration: recreated model_mappings without region column")
+            except sqlite3.OperationalError:
+                pass  # Table doesn't exist yet (will be created by CREATE TABLE IF NOT EXISTS above)
 
             logger.info("Database tables initialized")
 

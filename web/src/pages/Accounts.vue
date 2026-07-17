@@ -391,7 +391,6 @@ const addSupplier = async () => {
       name: newSupplier.value.name,
       api_key: newSupplier.value.api_key,
       base_url: newSupplier.value.base_url,
-      region: 'china',
     })
     const supplierId = res.data.id
     // Add models if any
@@ -420,7 +419,6 @@ const openEdit = async (acc) => {
     name: acc.name,
     api_key: acc.api_key,
     base_url: acc.base_url,
-    region: acc.region,
     status: acc.status,
     models: [],
   }
@@ -450,7 +448,6 @@ const saveEdit = async () => {
       name: editingSupplier.value.name,
       api_key: editingSupplier.value.api_key,
       base_url: editingSupplier.value.base_url,
-      region: editingSupplier.value.region,
       status: editingSupplier.value.status,
     }
     const res = await apiUpdateSupplier(editingSupplier.value.id, body)

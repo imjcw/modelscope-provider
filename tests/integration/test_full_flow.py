@@ -1,3 +1,7 @@
+import datetime
+import os
+import sqlite3
+from pathlib import Path
 import pytest
 from unittest.mock import AsyncMock, Mock
 from fastapi.testclient import TestClient
@@ -9,17 +13,87 @@ class MockAccount:
     """Mock ModelScopeAccount for testing."""
     def __init__(self, account_id: str):
         self.account_id = account_id
+        self.name = account_id
         self.base_url = "https://api.inference.modelscope.cn/v1"
         self.api_key = "test-key"
         self.unavailable_models = set()
         self.last_reset_date = "2026-07-15"
 
 
-def test_full_flow_with_success():
-    """Test complete flow with successful response."""
-    app = create_app()
-    client = TestClient(app)
+# ── 集成测试使用独立数据库，绝不触碰 .env 指向的库 ──
+INTEGRATION_DB = Path(__file__).resolve().parent / "integration_test.db"
+_INTEGRATION_DB_URL = f"sqlite:///{INTEGRATION_DB}"
+_original_env = os.environ.get("DATABASE_URL")
 
+
+def _get_integration_db_path():
+    """Return the integration test DB path (same file, always accessible)."""
+    return str(INTEGRATION_DB)
+
+
+def _ensure_test_supplier_in_db():
+    """Directly seed a supplier into the integration test DB."""
+    db_path = _get_integration_db_path()
+    # Ensure tables exist
+    from provider.core.database import DatabaseManager
+    db = DatabaseManager(_INTEGRATION_DB_URL)
+    db.initialize_tables()
+
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute("SELECT count(*) FROM accounts")
+    if c.fetchone()[0] > 0:
+        conn.close()
+        return
+    c.execute("PRAGMA table_info(accounts)")
+    cols = {row[1] for row in c.fetchall()}
+    if "name" in cols:
+        c.execute(
+            "INSERT INTO accounts (account_id, name, api_key, base_url, status) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("test-integration-000", "test-integration-000",
+             "test-integration-key",
+             "https://api-inference.modelscope.cn/v1/chat/completions",
+             "active"),
+        )
+    else:
+        c.execute(
+            "INSERT INTO accounts (account_id, api_key, base_url, status) "
+            "VALUES (?, ?, ?, ?)",
+            ("test-integration-000", "test-integration-key",
+             "https://api-inference.modelscope.cn/v1/chat/completions",
+             "active"),
+        )
+    conn.commit()
+    conn.close()
+
+
+@pytest.fixture(autouse=True)
+def integration_db_isolation():
+    """Override DATABASE_URL for integration tests so they never touch the .env DB."""
+    os.environ["DATABASE_URL"] = _INTEGRATION_DB_URL
+    yield
+    # Restore original env
+    if _original_env is not None:
+        os.environ["DATABASE_URL"] = _original_env
+    elif "DATABASE_URL" in os.environ:
+        del os.environ["DATABASE_URL"]
+    # Clean up integration DB after all tests
+    if INTEGRATION_DB.exists():
+        INTEGRATION_DB.unlink()
+
+
+@pytest.fixture
+def client():
+    _ensure_test_supplier_in_db()
+    app = create_app()
+    c = TestClient(app)
+    yield c
+    c.close()
+
+
+def test_full_flow_with_success(client):
+    """Test complete flow with successful response."""
     # Make a request to the health check
     response = client.get("/api/health")
     assert response.status_code == 200
@@ -40,11 +114,8 @@ def test_full_flow_with_success():
     assert data["choices"][0]["message"]["role"] == "assistant"
 
 
-def test_full_flow_with_admin_quota():
+def test_full_flow_with_admin_quota(client):
     """Test admin quota endpoint returns valid data."""
-    app = create_app()
-    client = TestClient(app)
-
     response = client.get("/api/admin/quota")
     assert response.status_code == 200
     data = response.json()
@@ -52,11 +123,8 @@ def test_full_flow_with_admin_quota():
     assert "quota_status" in data
 
 
-def test_error_handling_missing_messages():
+def test_error_handling_missing_messages(client):
     """Test error handling when messages field is missing."""
-    app = create_app()
-    client = TestClient(app)
-
     response = client.post(
         "/api/v1/chat/completions",
         json={"model": "test"}  # Missing messages field
@@ -65,11 +133,8 @@ def test_error_handling_missing_messages():
     assert response.status_code == 422
 
 
-def test_error_handling_missing_model():
+def test_error_handling_missing_model(client):
     """Test error handling when model field is missing."""
-    app = create_app()
-    client = TestClient(app)
-
     response = client.post(
         "/api/v1/chat/completions",
         json={"messages": []}  # Missing model field
@@ -112,8 +177,9 @@ def test_quota_update_and_mark_unavailable():
     from provider.core.database import DatabaseManager
     from provider.models.account import ModelScopeAccount
 
-    # Create database manager
-    db = DatabaseManager("D:/workspace/third/provider/test_quota_integration.db")
+    # Create database manager (use a temp file, cleaned up after test)
+    _quota_db_path = Path(__file__).resolve().parent / "test_quota_integration.db"
+    db = DatabaseManager(f"sqlite:///{_quota_db_path}")
     db.initialize_tables()
 
     # Create quota repository
@@ -148,10 +214,8 @@ def test_quota_update_and_mark_unavailable():
     assert info["quota_limit"] == 100
 
     # Cleanup
-    import os
-    db_path = "D:/workspace/third/provider/test_quota_integration.db"
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    if _quota_db_path.exists():
+        _quota_db_path.unlink()
 
 
 def test_response_converter_full_response():

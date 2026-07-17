@@ -37,8 +37,11 @@ class ConfigManager:
 
         accounts_list = []
         for account_data in accounts:
+            # Accept `name` (preferred) or fall back to `account_id` for backward compat
+            name = account_data.get("name") or account_data.get("account_id", "")
             account = ModelScopeAccount(
-                account_id=account_data["account_id"],
+                account_id=account_data.get("account_id", ""),
+                name=name,
                 api_key=account_data["api_key"],
                 base_url=account_data["base_url"]
             )
@@ -65,6 +68,7 @@ class ConfigManager:
         for a in db_accounts:
             accounts.append(ModelScopeAccount(
                 account_id=a["account_id"],
+                name=a.get("name", ""),
                 api_key=a["api_key"],
                 base_url=a["base_url"],
             ))
@@ -94,22 +98,22 @@ class ConfigManager:
                 logger.info(f"Migrated {len(env_accounts)} accounts from .env to database")
                 return env_accounts
             except ValueError as e:
-                logger.error(f"Failed to load accounts: {e}")
-                raise
+                # No accounts configured anywhere — OK to start with empty list
+                logger.warning(f"No accounts configured (DB empty, env empty): {e}")
+                return []
 
         raise ValueError("No accounts found in database and migration disabled")
 
     def _migrate_accounts_to_db(self, accounts: List[ModelScopeAccount]):
-        """Migrate accounts to the database."""
+        """Migrate accounts to the database. account_id is auto-generated as UUID."""
         from provider.repositories.account_repository import AccountRepository
         repo = AccountRepository(self.db)
         for acc in accounts:
             try:
                 repo.create(
-                    account_id=acc.account_id,
+                    name=acc.name or acc.account_id,
                     api_key=acc.api_key,
                     base_url=acc.base_url,
-                    region="china",
                 )
             except Exception:
                 pass  # Already exists or constraint error

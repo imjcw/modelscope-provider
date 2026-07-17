@@ -24,7 +24,7 @@ class MockMappingRepo:
 async def test_resolve_alias_success():
     """Test alias resolution via the local model_mappings table."""
     mock_repo = MockMappingRepo({
-        "hy3": [{"alias_name": "hy3", "region": "overseas", "actual_model_id": "hy3 overseas"}],
+        "hy3": [{"alias_name": "hy3", "actual_model_id": "hy3 overseas"}],
     })
     mock_client = AsyncMock()  # HTTP path must NOT be exercised
 
