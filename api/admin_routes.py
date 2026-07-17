@@ -26,13 +26,13 @@ def get_admin_service(request: Request):
 
 # ── Request / Response Models ───────────────────────────────────────────────
 
-class AccountCreate(BaseModel):
+class SupplierCreate(BaseModel):
     name: str = Field(..., description="Supplier display name")
     api_key: str = Field(..., description="API key")
     base_url: str = Field(..., description="ModelScope base URL")
 
 
-class AccountUpdate(BaseModel):
+class SupplierUpdate(BaseModel):
     name: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
@@ -82,34 +82,34 @@ class LogQueryParams(BaseModel):
 
 @router.get("/suppliers")
 def list_suppliers(service=Depends(get_admin_service)):
-    return service.get_accounts()
+    return service.get_suppliers()
 
 
 @router.get("/suppliers/{supplier_id}")
 def get_supplier(supplier_id: int, service=Depends(get_admin_service)):
-    supplier = service.get_account(supplier_id)
+    supplier = service.get_supplier(supplier_id)
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     return supplier
 
 
 @router.post("/suppliers")
-def create_supplier(body: AccountCreate, service=Depends(get_admin_service)):
+def create_supplier(body: SupplierCreate, service=Depends(get_admin_service)):
     try:
-        return service.create_account(
+        return service.create_supplier(
             name=body.name,
             api_key=body.api_key,
             base_url=body.base_url,
         )
     except Exception as e:
         if "UNIQUE constraint" in str(e):
-            raise HTTPException(status_code=409, detail=f"Supplier {body.name} already exists")
+            raise HTTPException(status_code=409, detail=f"供应商 {body.name} 已存在")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/suppliers/{supplier_id}")
-def update_supplier(supplier_id: int, body: AccountUpdate, service=Depends(get_admin_service)):
-    updated = service.update_account(supplier_id, **body.model_dump(exclude_unset=True))
+def update_supplier(supplier_id: int, body: SupplierUpdate, service=Depends(get_admin_service)):
+    updated = service.update_supplier(supplier_id, **body.model_dump(exclude_unset=True))
     if not updated:
         raise HTTPException(status_code=404, detail="Supplier not found")
     return updated
@@ -117,7 +117,7 @@ def update_supplier(supplier_id: int, body: AccountUpdate, service=Depends(get_a
 
 @router.patch("/suppliers/{supplier_id}/status")
 def toggle_supplier(supplier_id: int, service=Depends(get_admin_service)):
-    toggled = service.toggle_account(supplier_id)
+    toggled = service.toggle_supplier(supplier_id)
     if not toggled:
         raise HTTPException(status_code=404, detail="Supplier not found")
     return toggled
@@ -125,7 +125,7 @@ def toggle_supplier(supplier_id: int, service=Depends(get_admin_service)):
 
 @router.delete("/suppliers/{supplier_id}")
 def delete_supplier(supplier_id: int, service=Depends(get_admin_service)):
-    if not service.delete_account(supplier_id):
+    if not service.delete_supplier(supplier_id):
         raise HTTPException(status_code=404, detail="Supplier not found")
     return {"ok": True}
 

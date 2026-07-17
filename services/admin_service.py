@@ -27,57 +27,57 @@ class AdminService:
 
     # ── Accounts ──
 
-    def get_accounts(self):
-        """List accounts enriched with today's quota info (when quota_repo set)."""
-        accounts = self.account_repo.find_all()
+    def get_suppliers(self):
+        """List suppliers enriched with today's quota info (when quota_repo set)."""
+        suppliers = self.account_repo.find_all()
         if self.quota_repo is not None:
-            for acc in accounts:
-                info = self.quota_repo.get_account_info(acc["account_id"])
+            for s in suppliers:
+                info = self.quota_repo.get_account_info(s["account_id"])
                 if info:
-                    acc["quota_remaining"] = info["quota_remaining"]
-                    acc["quota_limit"] = info["quota_limit"]
+                    s["quota_remaining"] = info["quota_remaining"]
+                    s["quota_limit"] = info["quota_limit"]
                 else:
-                    acc["quota_remaining"] = 0
-                    acc["quota_limit"] = 0
+                    s["quota_remaining"] = 0
+                    s["quota_limit"] = 0
         else:
-            for acc in accounts:
-                acc.setdefault("quota_remaining", 0)
-                acc.setdefault("quota_limit", 0)
-        return accounts
+            for s in suppliers:
+                s.setdefault("quota_remaining", 0)
+                s.setdefault("quota_limit", 0)
+        return suppliers
 
-    def get_account(self, account_id: int):
-        acc = self.account_repo.find_by_id(account_id)
-        if acc and self.quota_repo is not None:
-            info = self.quota_repo.get_account_info(acc["account_id"])
+    def get_supplier(self, supplier_id: int):
+        s = self.account_repo.find_by_id(supplier_id)
+        if s and self.quota_repo is not None:
+            info = self.quota_repo.get_account_info(s["account_id"])
             if info:
-                acc["quota_remaining"] = info["quota_remaining"]
-                acc["quota_limit"] = info["quota_limit"]
+                s["quota_remaining"] = info["quota_remaining"]
+                s["quota_limit"] = info["quota_limit"]
             else:
-                acc["quota_remaining"] = 0
-                acc["quota_limit"] = 0
-        elif acc:
-            acc.setdefault("quota_remaining", 0)
-            acc.setdefault("quota_limit", 0)
-        return acc
+                s["quota_remaining"] = 0
+                s["quota_limit"] = 0
+        elif s:
+            s.setdefault("quota_remaining", 0)
+            s.setdefault("quota_limit", 0)
+        return s
 
-    def create_account(self, name: str, api_key: str,
-                       base_url: str) -> dict:
+    def create_supplier(self, name: str, api_key: str,
+                        base_url: str) -> dict:
         return self.account_repo.create(name, api_key, base_url)
 
-    def update_account(self, account_id: int, **kwargs) -> dict:
-        return self.account_repo.update(account_id, **kwargs)
+    def update_supplier(self, supplier_id: int, **kwargs) -> dict:
+        return self.account_repo.update(supplier_id, **kwargs)
 
-    def delete_account(self, account_id: int) -> bool:
+    def delete_supplier(self, supplier_id: int) -> bool:
         if self.supplier_model_repo is not None:
-            self.supplier_model_repo.delete_by_supplier(account_id)
-        return self.account_repo.delete(account_id)
+            self.supplier_model_repo.delete_by_supplier(supplier_id)
+        return self.account_repo.delete(supplier_id)
 
-    def toggle_account(self, account_id: int) -> dict:
-        account = self.account_repo.find_by_id(account_id)
-        if not account:
+    def toggle_supplier(self, supplier_id: int) -> dict:
+        s = self.account_repo.find_by_id(supplier_id)
+        if not s:
             return None
-        new_status = "disabled" if account["status"] == "active" else "active"
-        return self.account_repo.update(account_id, status=new_status)
+        new_status = "disabled" if s["status"] == "active" else "active"
+        return self.account_repo.update(supplier_id, status=new_status)
 
     # ── Supplier Models ──
 

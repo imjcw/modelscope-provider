@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, AsyncGenerator
@@ -33,17 +33,15 @@ class ErrorResponse(BaseModel):
     error: dict
 
 
-def get_services():
-    """Get services from app state."""
-    from main import app
+def get_services(request: Request):
+    """Get services from the *request's* app state."""
     try:
-        services = app.state.services
-        if services:
-            return services
+        services = request.app.state.services
     except AttributeError:
-        pass
-    from main import _services
-    return _services
+        raise HTTPException(status_code=503, detail="Services not initialized")
+    if services is None:
+        raise HTTPException(status_code=503, detail="Services not initialized")
+    return services
 
 
 async def stream_response(
@@ -73,9 +71,8 @@ async def stream_response(
 
 
 @router.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
+async def chat_completions(request: ChatCompletionRequest, services=Depends(get_services)):
     """Chat completions endpoint compatible with OpenAI API."""
-    services = get_services()
     alias_resolver = services["alias_resolver"]
     load_balancer = services["load_balancer"]
     response_converter = services["response_converter"]
@@ -83,7 +80,7 @@ async def chat_completions(request: ChatCompletionRequest):
     http_client = services["http_client"]
 
     try:
-        # Select account using load balancer
+        # Select supplier using load balancer
         selected_account = load_balancer.select_account(request.model)
         logger.info(f"Selected account {selected_account.account_id} for request")
 
@@ -141,7 +138,7 @@ async def chat_completions(request: ChatCompletionRequest):
                 status_code=429,
                 detail={
                     "error": {
-                        "message": f"All accounts have exceeded daily quota for model {request.model}",
+                        "message": f"所有供应商的 {request.model} 模型配额已耗尽",
                         "type": "rate_limit_exceeded",
                         "param": None,
                         "code": "rate_limit_exceeded"
@@ -222,9 +219,9 @@ async def health_check():
 
 @router.get("/admin/quota")
 async def admin_quota_info():
-    """Get quota information for all accounts."""
+    """Get quota information for all suppliers."""
     # Simulate quota info (actual implementation in Task 12)
     return {
-        "total_accounts": 0,
+        "total_suppliers": 0,
         "quota_status": []
     }
