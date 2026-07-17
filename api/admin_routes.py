@@ -1,7 +1,7 @@
 """Admin API routes for the management panel."""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 
 router = APIRouter()
 
@@ -62,7 +62,7 @@ class ConfigBulkUpdate(BaseModel):
 
 class SupplierModelCreate(BaseModel):
     model_name: str
-    model_type: str = "text"
+    model_type: Literal["text", "image", "code", "voice"] = "text"
     context_length: Optional[int] = None
 
 
