@@ -1,5 +1,6 @@
 <script setup>
 import { watch, onBeforeUnmount } from 'vue'
+import { useOverlayEsc } from '@/composables/useOverlayEsc'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -13,29 +14,30 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'confirm'])
 
+const { register, unregister } = useOverlayEsc()
+
 const handleConfirm = () => {
   emit('confirm')
   close()
 }
 
 const close = () => {
+  unregister(escId)
   emit('update:modelValue', false)
 }
 
-const handleEsc = (e) => {
-  if (e.key === 'Escape' && props.modelValue) close()
-}
+let escId = null
 
 watch(
   () => props.modelValue,
   (val) => {
-    if (val) document.addEventListener('keydown', handleEsc)
-    else document.removeEventListener('keydown', handleEsc)
+    if (val) escId = register(close)
+    else { unregister(escId); escId = null }
   }
 )
 
 onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleEsc)
+  if (escId) unregister(escId)
 })
 </script>
 
