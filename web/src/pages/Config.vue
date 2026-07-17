@@ -54,7 +54,8 @@
           <div>
             <label class="block text-xs text-gray-500 mb-1.5">日志级别</label>
             <select v-model="config.logLevel"
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white focus:outline-none focus:border-ls-accent">
+              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white focus:outline-none focus:border-ls-accent appearance-none"
+              style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpolyline points=%276 9 12 15 18 9%27%3E%3C/polyline%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
               <option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option>
             </select>
           </div>
@@ -78,7 +79,8 @@
           <div>
             <label class="block text-xs text-gray-500 mb-1.5">策略</label>
             <select v-model="config.lbStrategy"
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white focus:outline-none focus:border-ls-accent">
+              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white focus:outline-none focus:border-ls-accent appearance-none"
+              style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpolyline points=%276 9 12 15 18 9%27%3E%3C/polyline%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
               <option>round_robin</option><option>least_conn</option><option>random</option>
             </select>
           </div>
@@ -102,7 +104,7 @@
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-white">配额耗尽自动禁用</p>
-              <p class="text-xs text-gray-500 mt-0.5">账户配额耗尽时自动标记为不可用</p>
+              <p class="text-xs text-gray-500 mt-0.5">供应商配额耗尽时自动标记为不可用</p>
             </div>
             <label class="relative inline-flex items-center cursor-pointer">
               <input v-model="config.autoDisable" type="checkbox" class="sr-only peer">

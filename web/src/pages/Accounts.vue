@@ -115,31 +115,41 @@
 
               <!-- ── 支持模型 ── -->
               <div>
-                <label class="form-label">支持模型</label>
-                <div v-if="newSupplier.models.length === 0" class="text-[11px] text-gray-500 mb-2">
-                  可配置该供应商支持的模型
+                <div class="flex items-center justify-between mb-3">
+                  <label class="form-label m-0">支持模型</label>
+                  <span class="text-[11px] text-gray-500">{{ newSupplier.models.length }} 个模型</span>
                 </div>
-                <div v-for="(m, idx) in newSupplier.models" :key="idx" class="flex items-center gap-2 mb-2">
-                  <input v-model="m.model_name" type="text" placeholder="模型名称"
-                    class="form-input flex-1 text-xs h-8 py-1" />
-                  <select v-model="m.model_type" class="form-input h-8 text-xs px-2 py-1 w-20">
-                    <option value="text">文本</option>
-                    <option value="image">图像</option>
-                    <option value="code">代码</option>
-                    <option value="voice">语音</option>
-                  </select>
-                  <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                    class="form-input h-8 text-xs px-2 py-1 w-24" />
-                  <button type="button" @click="removeNewModel(idx)"
-                    class="text-gray-500 hover:text-red-400 p-1 transition-colors" title="删除">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                  </button>
+                <div class="space-y-3">
+                  <div v-for="(m, idx) in newSupplier.models" :key="idx"
+                    class="bg-ls-bg rounded-lg border border-ls-border p-3 flex items-center gap-2"
+                    :style="{ animation: 'rowIn .2s ease-out ' + idx * 50 + 'ms both' }">
+                    <div class="flex-1 min-w-0">
+                      <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
+                        class="form-input h-10 px-3 font-mono text-sm" />
+                    </div>
+                    <select v-model="m.model_type"
+                      class="form-input select h-10 w-24 text-sm px-3 py-1">
+                      <option value="text">📝 文本</option>
+                      <option value="image">🖼️ 图像</option>
+                      <option value="code">💻 代码</option>
+                      <option value="voice">🔊 语音</option>
+                    </select>
+                    <input v-model.number="m.context_length" type="number" placeholder="上下文"
+                      class="form-input h-10 w-28 px-3 text-sm font-mono" />
+                    <button type="button" @click="removeNewModel(idx)"
+                      class="action-icon" title="删除">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
                 <button type="button" @click="addNewModel"
-                  class="text-xs text-ls-accent hover:text-ls-accentHover transition-colors">
-                  + 添加模型
+                  class="mt-3 w-full h-10 rounded-lg border-2 border-dashed border-ls-border text-ls-accent hover:text-ls-accentHover hover:border-ls-accent/30 transition-all flex items-center justify-center gap-2 text-sm">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                  添加模型
                 </button>
               </div>
             </div>
@@ -197,7 +207,7 @@
               </div>
               <div>
                 <label class="form-label">状态</label>
-                <select v-model="editingSupplier.status" class="form-input">
+                <select v-model="editingSupplier.status" class="form-input select">
                   <option value="active">活跃</option>
                   <option value="disabled">已禁用</option>
                 </select>
@@ -205,31 +215,44 @@
 
               <!-- ── 支持模型 ── -->
               <div>
-                <label class="form-label">支持模型</label>
-                <div v-if="editingSupplier.models.length === 0" class="text-[11px] text-gray-500 mb-2">
+                <div class="flex items-center justify-between mb-3">
+                  <label class="form-label m-0">支持模型</label>
+                  <span class="text-[11px] text-gray-500">{{ editingSupplier.models.length }} 个模型</span>
+                </div>
+                <div v-if="editingSupplier.models.length === 0"
+                  class="text-center py-6 text-gray-500 text-sm">
                   暂无配置模型
                 </div>
-                <div v-for="(m, idx) in editingSupplier.models" :key="idx" class="flex items-center gap-2 mb-2">
-                  <input v-model="m.model_name" type="text" placeholder="模型名称"
-                    class="form-input flex-1 text-xs h-8 py-1" />
-                  <select v-model="m.model_type" class="form-input h-8 text-xs px-2 py-1 w-20">
-                    <option value="text">文本</option>
-                    <option value="image">图像</option>
-                    <option value="code">代码</option>
-                    <option value="voice">语音</option>
-                  </select>
-                  <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                    class="form-input h-8 text-xs px-2 py-1 w-24" />
-                  <button type="button" @click="removeEditModel(idx)"
-                    class="text-gray-500 hover:text-red-400 p-1 transition-colors" title="删除">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                  </button>
+                <div class="space-y-3">
+                  <div v-for="(m, idx) in editingSupplier.models" :key="idx"
+                    class="bg-ls-bg rounded-lg border border-ls-border p-3 flex items-center gap-2">
+                    <div class="flex-1 min-w-0">
+                      <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
+                        class="form-input h-10 px-3 font-mono text-sm" />
+                    </div>
+                    <select v-model="m.model_type"
+                      class="form-input select h-10 w-24 text-sm px-3 py-1">
+                      <option value="text">📝 文本</option>
+                      <option value="image">🖼️ 图像</option>
+                      <option value="code">💻 代码</option>
+                      <option value="voice">🔊 语音</option>
+                    </select>
+                    <input v-model.number="m.context_length" type="number" placeholder="上下文"
+                      class="form-input h-10 w-28 px-3 text-sm font-mono" />
+                    <button type="button" @click="removeEditModel(idx)"
+                      class="action-icon" title="删除">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
                 <button type="button" @click="addEditModel"
-                  class="text-xs text-ls-accent hover:text-ls-accentHover transition-colors">
-                  + 添加模型
+                  class="mt-3 w-full h-10 rounded-lg border-2 border-dashed border-ls-border text-ls-accent hover:text-ls-accentHover hover:border-ls-accent/30 transition-all flex items-center justify-center gap-2 text-sm">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                  添加模型
                 </button>
               </div>
             </div>
