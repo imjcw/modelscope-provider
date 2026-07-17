@@ -112,6 +112,18 @@ class DatabaseManager:
                 )
             """)
 
+            # Supplier models table - models available on each supplier
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS supplier_models (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    supplier_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    model_name TEXT NOT NULL,
+                    model_type TEXT NOT NULL,
+                    context_length INTEGER,
+                    UNIQUE(supplier_id, model_name)
+                )
+            """)
+
             # System config table - key-value storage
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS system_config (
@@ -131,6 +143,7 @@ class DatabaseManager:
                     model TEXT NOT NULL,
                     actual_model_id TEXT,
                     account_id TEXT,
+                    account_name TEXT,
                     status_code INTEGER,
                     input_tokens INTEGER DEFAULT 0,
                     output_tokens INTEGER DEFAULT 0,
@@ -164,6 +177,50 @@ class DatabaseManager:
                 ON request_logs(account_id)
             """)
 
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_supplier_models_name
+                ON supplier_models(model_name)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_supplier_models_supplier
+                ON supplier_models(supplier_id)
+            """)
+
+            # ── Migration: add `name` column to accounts if missing ──
+            try:
+                cursor.execute(
+                    "ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT ''"
+                )
+                cursor.execute(
+                    "UPDATE accounts SET name = account_id WHERE name = ''"
+                )
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Enforce name uniqueness (safe if already present)
+            try:
+                cursor.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_name ON accounts(name)"
+                )
+            except (sqlite3.OperationalError, sqlite3.IntegrityError):
+                pass  # Index already exists or conflicting data
+
+            # ── Migration: add `account_name` column to request_logs if missing ──
+            try:
+                cursor.execute(
+                    "ALTER TABLE request_logs ADD COLUMN account_name TEXT"
+                )
+                # Backfill: join with accounts to populate names
+                cursor.execute(
+                    """UPDATE request_logs SET account_name =
+                       (SELECT name FROM accounts WHERE accounts.account_id = request_logs.account_id)
+                       WHERE account_name IS NULL"""
+                )
+                logger.info("Migration: added 'account_name' column to request_logs table")
+            except sqlite3.OperationalError:
+                pass
+
             logger.info("Database tables initialized")
 
     def seed_default_config(self):
@@ -173,7 +230,7 @@ class DatabaseManager:
             ("load_balancer_strategy", "round_robin", "负载均衡策略: round_robin/least_conn/random"),
             ("request_timeout_ms", "30000", "请求超时毫秒数"),
             ("retry_count", "0", "失败重试次数"),
-            ("auto_disable_on_quota", "true", "配额耗尽时自动禁用账户"),
+            ("auto_disable_on_quota", "true", "配额耗尽时自动禁用供应商"),
             ("auto_reset_daily", "true", "每日自动重置配额"),
         ]
         with self.get_connection() as conn:
