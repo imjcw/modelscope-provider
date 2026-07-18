@@ -71,12 +71,31 @@
               </button>
               <!-- Expanded content: Markdown or Raw -->
               <div v-if="expandedMap.get(i)" class="px-4 pb-3 text-xs text-gray-300">
-                <MarkdownRender v-if="msg.content && renderModes[i] !== 'raw'" :source="msg.content" />
-                <pre v-if="msg.content && renderModes[i] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
-                <span v-if="!msg.content && !msg.toolCalls" class="text-gray-600 text-xs italic">—</span>
+                <!-- Normal messages: show content -->
+                <template v-if="msg.role !== 'tool_call'">
+                  <MarkdownRender v-if="msg.content && renderModes[i] !== 'raw'" :source="msg.content" />
+                  <pre v-if="msg.content && renderModes[i] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
+                  <span v-if="!msg.content && !msg.toolCalls" class="text-gray-600 text-xs italic">—</span>
+                </template>
+                <!-- Tool call: header already shows tool name, just show args/result -->
+                <template v-else-if="msg.toolCalls && msg.toolCalls.length > 0">
+                  <div v-for="(tc, ti) in msg.toolCalls" :key="ti">
+                    <div v-if="ti > 0" class="pt-2 mt-2 border-t border-ls-border"></div>
+                    <div class="text-xs text-gray-300 mb-2">
+                      <span class="text-gray-500">Args:</span>
+                      <MarkdownRender :source="tc.arguments" />
+                    </div>
+                    <div v-if="tc.result" class="mt-2 pt-2 border-t border-ls-border">
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">Result</span>
+                      </div>
+                      <MarkdownRender :source="tc.result" />
+                    </div>
+                  </div>
+                </template>
               </div>
-              <!-- Tool calls inside assistant -->
-              <div v-if="expandedMap.get(i) && msg.toolCalls" class="px-4 pb-3 space-y-2">
+              <!-- Tool calls nested in assistant messages (not tool_call role) -->
+              <div v-if="expandedMap.get(i) && msg.toolCalls && msg.role !== 'tool_call'" class="px-4 pb-3 space-y-2">
                 <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="bg-ls-bg rounded-lg border border-ls-border p-3">
                   <div class="flex items-center gap-2 mb-2">
                     <span :class="toolTypeColor(tc.name)" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
