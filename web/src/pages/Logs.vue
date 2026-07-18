@@ -1,6 +1,6 @@
 <template>
   <div>
-    <PageHeader title="日志">
+    <PageHeader title="请求日志">
       <template #action>
         <button class="btn btn-primary">↻ 刷新</button>
       </template>
