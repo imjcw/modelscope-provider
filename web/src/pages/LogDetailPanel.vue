@@ -265,7 +265,7 @@
           <div class="p-4 border-b border-ls-border">
             <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">性能指标</h3>
             <div class="space-y-2">
-              <div class="flex justify-between text-sm"><span class="text-gray-400">延迟</span><span class="text-white font-mono">{{ modelValue.latency_ms ? modelValue.latency_ms + ' ms' : '-' }}</span></div>
+              <div class="flex justify-between text-sm"><span class="text-gray-400">延迟</span><span class="text-white font-mono">{{ modelValue.latency_ms ? formatDuration(modelValue.latency_ms) : '-' }}</span></div>
               <div class="flex justify-between text-sm"><span class="text-gray-400">状态码</span>
                 <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs"
                   :class="modelValue.status_code >= 400 ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'">
@@ -579,7 +579,8 @@ const ttfr = computed(() => {
   const first = props.modelValue?.first_response
   if (!start || !first) return null
   try {
-    return Math.round((new Date(first) - new Date(start)) / 1) + ' ms'
+    const diff = Math.round((new Date(first) - new Date(start)) / 1)
+    return formatDuration(diff)
   } catch { return null }
 })
 
@@ -588,7 +589,8 @@ const totalDuration = computed(() => {
   const end = props.modelValue?.end_time
   if (!start || !end) return null
   try {
-    return Math.round((new Date(end) - new Date(start)) / 1) + ' ms'
+    const diff = Math.round((new Date(end) - new Date(start)) / 1)
+    return formatDuration(diff)
   } catch { return null }
 })
 
@@ -621,6 +623,24 @@ function formatMsTime(ts) {
 }
 
 const formatTime = formatMsTime  // alias for backward compat
+
+// Format duration in ms to human-readable string
+function formatDuration(ms) {
+  if (!ms || ms <= 0) return ''
+  if (ms < 1000) return `${ms}ms`
+  const totalSec = Math.round(ms / 1000)
+  if (totalSec < 60) {
+    return `${totalSec}s`
+  }
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  if (min < 60) {
+    return sec > 0 ? `${min}m ${sec}s` : `${min}m`
+  }
+  const hr = Math.floor(min / 60)
+  const m = min % 60
+  return m > 0 ? `${hr}h ${m}m` : `${hr}h`
+}
 
 const formatJson = (str) => {
   if (!str) return '(empty)'
