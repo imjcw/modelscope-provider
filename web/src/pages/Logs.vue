@@ -52,7 +52,7 @@
         <table class="w-full text-xs">
           <thead>
             <tr class="text-gray-500 border-b border-ls-border bg-ls-bg">
-              <th class="text-left px-4 py-2.5 font-medium">时间戳</th>
+              <th class="text-left px-4 py-2.5 font-medium">时间</th>
               <th class="text-left px-4 py-2.5 font-medium">请求 ID</th>
               <th class="text-left px-4 py-2.5 font-medium">模型</th>
               <th class="text-left px-4 py-2.5 font-medium">供应商</th>
