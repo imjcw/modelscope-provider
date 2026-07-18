@@ -275,10 +275,10 @@
                 </svg>
               </button>
             </div>
-            <div class="space-y-1">
-              <div v-for="(val, key) in responseHeaders" :key="key" class="flex justify-between text-xs">
-                <span class="text-gray-500 font-mono">{{ key }}</span>
-                <span class="text-white font-mono truncate ml-2" :title="val">{{ val }}</span>
+            <div class="space-y-1.5">
+              <div v-for="(val, key) in responseHeaders" :key="key">
+                <div class="text-xs text-gray-500 font-mono">{{ key }}</div>
+                <div class="text-xs text-white font-mono" :title="val">{{ val }}</div>
               </div>
             </div>
           </div>
