@@ -197,6 +197,21 @@
             </div>
           </div>
 
+          <!-- 工具与思考 -->
+          <div class="p-4 border-b border-ls-border">
+            <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">工具与思考</h3>
+            <div class="space-y-2">
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-400">工具调用</span>
+                <span class="font-mono text-white">{{ totalToolCalls }}</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-400">思考次数</span>
+                <span class="font-mono" :class="thinkingCount > 0 ? 'text-yellow-400' : 'text-gray-500'">{{ thinkingCount }}</span>
+              </div>
+            </div>
+          </div>
+
           <!-- 请求时序 -->
           <div class="p-4 border-b border-ls-border">
             <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">请求时序</h3>
@@ -523,6 +538,27 @@ const toolStats = computed(() => {
 
 const totalToolCalls = computed(() => {
   return toolCallCards.value.length
+})
+
+// Count thinking/reasoning blocks in raw_request messages
+const thinkingCount = computed(() => {
+  if (!props.modelValue?.raw_request) return 0
+  try {
+    const parsed = JSON.parse(props.modelValue.raw_request)
+    const messages = parsed.messages || []
+    let count = 0
+    for (const msg of messages) {
+      // Check for thinking/reasoning content in assistant messages
+      if (msg.role === 'assistant') {
+        if (msg.thinking || msg.reasoning_content || msg.reasoning) {
+          count++
+        }
+      }
+    }
+    return count
+  } catch {
+    return 0
+  }
 })
 
 // ── Timing helpers ──
