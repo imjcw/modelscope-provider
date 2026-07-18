@@ -218,7 +218,7 @@
               </div>
               <div v-if="totalDuration">
                 <div class="text-xs text-gray-500">总耗时</div>
-                <div class="text-xs text-white font-mono">{{ totalDuration }} ms</div>
+                <div class="text-xs text-white font-mono">{{ totalDuration }}</div>
               </div>
               <div v-if="!modelValue.request_start && !modelValue.end_time" class="text-xs text-gray-600">—</div>
             </div>
