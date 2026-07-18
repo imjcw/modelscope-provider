@@ -2,8 +2,6 @@ import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
 import './assets/main.css'
-// highlight.js dark theme (for Markdown code block syntax highlighting)
-import 'highlight.js/styles/github-dark.css'
 
 // ── Router ──
 const routes = [

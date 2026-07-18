@@ -1,62 +1,6 @@
 <script setup>
 import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
-// highlight.js core + commonly-used languages (full bundle is 1MB+)
-import hljs from 'highlight.js/lib/core'
-import js from 'highlight.js/lib/languages/javascript'
-import ts from 'highlight.js/lib/languages/typescript'
-import python from 'highlight.js/lib/languages/python'
-import json from 'highlight.js/lib/languages/json'
-import yaml from 'highlight.js/lib/languages/yaml'
-import bash from 'highlight.js/lib/languages/bash'
-import shell from 'highlight.js/lib/languages/shell'
-import css from 'highlight.js/lib/languages/css'
-import xmlLang from 'highlight.js/lib/languages/xml'
-import markdown from 'highlight.js/lib/languages/markdown'
-import http from 'highlight.js/lib/languages/http'
-import diff from 'highlight.js/lib/languages/diff'
-import sql from 'highlight.js/lib/languages/sql'
-import dockerfile from 'highlight.js/lib/languages/dockerfile'
-import go from 'highlight.js/lib/languages/go'
-import rust from 'highlight.js/lib/languages/rust'
-import java from 'highlight.js/lib/languages/java'
-import php from 'highlight.js/lib/languages/php'
-import ruby from 'highlight.js/lib/languages/ruby'
-import kotlin from 'highlight.js/lib/languages/kotlin'
-import plaintext from 'highlight.js/lib/languages/plaintext'
-
-hljs.registerLanguage('javascript', js)
-hljs.registerLanguage('js', js)
-hljs.registerLanguage('typescript', ts)
-hljs.registerLanguage('ts', ts)
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('py', python)
-hljs.registerLanguage('json', json)
-hljs.registerLanguage('yaml', yaml)
-hljs.registerLanguage('yml', yaml)
-hljs.registerLanguage('bash', bash)
-hljs.registerLanguage('shell', shell)
-hljs.registerLanguage('sh', shell)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('xml', xmlLang)
-hljs.registerLanguage('html', xmlLang)
-hljs.registerLanguage('markdown', markdown)
-hljs.registerLanguage('md', markdown)
-hljs.registerLanguage('http', http)
-hljs.registerLanguage('diff', diff)
-hljs.registerLanguage('sql', sql)
-hljs.registerLanguage('dockerfile', dockerfile)
-hljs.registerLanguage('go', go)
-hljs.registerLanguage('rust', rust)
-hljs.registerLanguage('rs', rust)
-hljs.registerLanguage('java', java)
-hljs.registerLanguage('php', php)
-hljs.registerLanguage('ruby', ruby)
-hljs.registerLanguage('rb', ruby)
-hljs.registerLanguage('kotlin', kotlin)
-hljs.registerLanguage('kt', kotlin)
-hljs.registerLanguage('plaintext', plaintext)
-hljs.registerLanguage('text', plaintext)
 
 const props = defineProps({
   source: { type: String, required: true },
@@ -69,45 +13,35 @@ const md = new MarkdownIt({
   linkify: true,
   typographer: true,
   breaks: true,
-  // Built-in highlight option: wraps fenced code with hljs
-  hljs,
 })
 
 // Plugin: wrap fenced code blocks in a styled container with header + line numbers
 md.use(function codeBlockPlugin(md) {
-  const fenceRender = md.renderer.rules.fence || function(tokens, idx) {
-    return '<pre><code>' + md.utils.escapeHtml(tokens[idx].content) + '</code></pre>\n'
-  }
-
   md.renderer.rules.fence = function(tokens, idx) {
     const token = tokens[idx]
     const lang = token.info ? token.info.trim() : ''
     const content = token.content
 
-    // Count logical lines (strip trailing newline)
     const rawLines = content.endsWith('\n') ? content.slice(0, -1).split('\n') : content.split('\n')
     const lineCount = rawLines.length || 1
 
-    // Build line number column
     let lineNums = ''
     for (let i = 1; i <= lineCount; i++) {
       lineNums += '<span>' + i + '</span>'
     }
 
-    // Header: language with dot, copy button
     const langHtml = lang
       ? '<span class="cb-lang"><span class="cb-dot"></span>' + md.utils.escapeHtml(lang) + '</span>'
       : '<span class="cb-lang"><span class="cb-dot"></span></span>'
 
-    // The inner <pre><code> rendered by markdown-it hljs (syntax-highlighted)
-    const inner = fenceRender(tokens, idx)
+    const innerHtml = md.utils.escapeHtml(content)
 
     return '<div class="codeblock">' +
       '<div class="cb-header">' + langHtml +
-      '<button class="cb-copy" type="button" title="Copy" onclick="navigator.clipboard.writeText(this.closest(\'.codeblock\').querySelector(\'.cb-code pre code\').innerText)">&#x1F4CB;</button></div>' +
+      '<button class="cb-copy" type="button" title="Copy" onclick="navigator.clipboard.writeText(this.closest(\'.codeblock\').querySelector(\'.cb-code\').innerText)">&#x1F4CB;</button></div>' +
       '<div class="cb-body">' +
       '<div class="cb-linenumbers">' + lineNums + '</div>' +
-      '<div class="cb-code">' + inner + '</div>' +
+      '<div class="cb-code">' + innerHtml + '</div>' +
       '</div></div>\n'
   }
 })
@@ -120,14 +54,12 @@ function stripLineNumbers(src) {
   const lines = src.split('\n')
   if (lines.length < 2) return src
 
-  // Heuristic: if every line starts with "N " (optional spaces, then digits, then space), strip it
   const LINE_NUM_RE = /^\s*(\d+)\s+(.*)$/
   let matched = 0
   for (const line of lines) {
     if (LINE_NUM_RE.test(line)) matched++
   }
 
-  // Require >50% of lines to match the pattern to avoid false positives
   if (matched / lines.length > 0.5) {
     return lines.map(line => {
       const m = line.match(LINE_NUM_RE)
@@ -346,23 +278,13 @@ const html = computed(() => {
   min-width: 0;
 }
 
-.md-content :deep(.cb-code pre) {
-  margin: 0;
+.md-content :deep(.cb-code) {
   padding: 12px 16px 12px 12px;
-  overflow: visible;
-}
-
-.md-content :deep(.cb-code pre code) {
-  display: block;
-  padding: 0;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   font-size: 12px;
   line-height: 1.6;
-  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-  background: transparent !important;
-  white-space: pre;
-}
-
-.md-content :deep(.cb-code pre code.hljs) {
-  color: #cdd6f4;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>
