@@ -61,13 +61,36 @@ const md = new MarkdownIt({
 // Extract YAML frontmatter: ---\n...\n--- at the very start
 const YAML_FRONTMATTER_RE = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/
 
+// Strip line number prefixes like "1 ---\n2 name: ..." that some tools embed
+function stripLineNumbers(src) {
+  const lines = src.split('\n')
+  if (lines.length < 2) return src
+
+  // Heuristic: if every line starts with "N " (optional spaces, then digits, then space), strip it
+  const LINE_NUM_RE = /^\s*(\d+)\s+(.*)$/
+  let matched = 0
+  for (const line of lines) {
+    if (LINE_NUM_RE.test(line)) matched++
+  }
+
+  // Require >50% of lines to match the pattern to avoid false positives
+  if (matched / lines.length > 0.5) {
+    return lines.map(line => {
+      const m = line.match(LINE_NUM_RE)
+      return m ? m[2] : line
+    }).join('\n')
+  }
+  return src
+}
+
 function parseSource(src) {
-  const match = src.match(YAML_FRONTMATTER_RE)
+  const cleaned = stripLineNumbers(src)
+  const match = cleaned.match(YAML_FRONTMATTER_RE)
   if (match) {
     emit('frontmatter', match[1])
     return match[2]
   }
-  return src
+  return cleaned
 }
 
 const html = computed(() => {
