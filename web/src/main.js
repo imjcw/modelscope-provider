@@ -2,6 +2,8 @@ import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
 import './assets/main.css'
+// highlight.js dark theme (for Markdown code block syntax highlighting)
+import 'highlight.js/styles/github-dark.css'
 
 // ── Router ──
 const routes = [
@@ -9,11 +11,11 @@ const routes = [
   { path: '/suppliers', name: 'suppliers', component: () => import('./pages/Accounts.vue') },
   { path: '/mappings', name: 'mappings', component: () => import('./pages/Mappings.vue') },
   { path: '/logs', name: 'logs', component: () => import('./pages/Logs.vue') },
-  { path: '/stats', name: 'stats', component: () => import('./pages/Stats.vue') },
   { path: '/alerts', name: 'alerts', component: () => import('./pages/Alerts.vue') },
   { path: '/test', name: 'test', component: () => import('./pages/Test.vue') },
   { path: '/config', name: 'config', component: () => import('./pages/Config.vue') },
   { path: '/guide', name: 'guide', component: () => import('./pages/Guide.vue') },
+  { path: '/keys', name: 'keys', component: () => import('./pages/ApiKeys.vue') },
 ]
 
 const router = createRouter({
