@@ -70,7 +70,7 @@
                 <span class="ml-auto text-gray-500 text-xs transition-transform" :class="expandedMap.get(i) ? 'rotate-90' : ''">▶</span>
               </button>
               <!-- Expanded content: Markdown or Raw -->
-              <div v-if="expandedMap.get(i)" class="px-4 pb-3 text-xs text-gray-300">
+              <div v-if="expandedMap.get(i)" class="px-4 py-3 text-xs text-gray-300">
                 <!-- Normal messages: show content -->
                 <template v-if="msg.role !== 'tool_call'">
                   <MarkdownRender v-if="msg.content && renderModes[i] !== 'raw'" :source="msg.content" />
@@ -95,7 +95,7 @@
                 </template>
               </div>
               <!-- Tool calls nested in assistant messages (not tool_call role) -->
-              <div v-if="expandedMap.get(i) && msg.toolCalls && msg.role !== 'tool_call'" class="px-4 pb-3 space-y-2">
+              <div v-if="expandedMap.get(i) && msg.toolCalls && msg.role !== 'tool_call'" class="px-4 py-3 space-y-2">
                 <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="bg-ls-bg rounded-lg border border-ls-border p-3">
                   <div class="flex items-center gap-2 mb-2">
                     <span :class="toolTypeColor(tc.name)" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
