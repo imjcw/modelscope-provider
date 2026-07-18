@@ -73,16 +73,42 @@ const md = new MarkdownIt({
   hljs,
 })
 
-// Plugin: inject language label into fenced code blocks
-md.use(function langLabelPlugin(md) {
+// Plugin: wrap fenced code blocks in a styled container with header + line numbers
+md.use(function codeBlockPlugin(md) {
   const fenceRender = md.renderer.rules.fence || function(tokens, idx) {
     return '<pre><code>' + md.utils.escapeHtml(tokens[idx].content) + '</code></pre>\n'
   }
+
   md.renderer.rules.fence = function(tokens, idx) {
     const token = tokens[idx]
     const lang = token.info ? token.info.trim() : ''
-    const label = lang ? `<span class="lang-label">${lang}</span>` : ''
-    return label + fenceRender(tokens, idx)
+    const content = token.content
+
+    // Count logical lines (strip trailing newline)
+    const rawLines = content.endsWith('\n') ? content.slice(0, -1).split('\n') : content.split('\n')
+    const lineCount = rawLines.length || 1
+
+    // Build line number column
+    let lineNums = ''
+    for (let i = 1; i <= lineCount; i++) {
+      lineNums += '<span>' + i + '</span>'
+    }
+
+    // Header: language with dot, copy button
+    const langHtml = lang
+      ? '<span class="cb-lang"><span class="cb-dot"></span>' + md.utils.escapeHtml(lang) + '</span>'
+      : '<span class="cb-lang"><span class="cb-dot"></span></span>'
+
+    // The inner <pre><code> rendered by markdown-it hljs (syntax-highlighted)
+    const inner = fenceRender(tokens, idx)
+
+    return '<div class="codeblock">' +
+      '<div class="cb-header">' + langHtml +
+      '<button class="cb-copy" type="button" title="Copy" onclick="navigator.clipboard.writeText(this.closest(\'.codeblock\').querySelector(\'.cb-code pre code\').innerText)">&#x1F4CB;</button></div>' +
+      '<div class="cb-body">' +
+      '<div class="cb-linenumbers">' + lineNums + '</div>' +
+      '<div class="cb-code">' + inner + '</div>' +
+      '</div></div>\n'
   }
 })
 
@@ -245,41 +271,98 @@ const html = computed(() => {
   border: 1px solid var(--border);
 }
 
-/* ── Fenced code blocks ── */
-.md-content :deep(pre) {
-  position: relative;
+/* ── Fenced code blocks (custom plugin output) ── */
+.md-content :deep(.codeblock) {
   margin: 0.8em 0;
-  padding: 14px 18px 14px 14px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: #0f0f10;
   overflow: hidden;
 }
 
-.md-content :deep(pre code) {
+.md-content :deep(.cb-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.md-content :deep(.cb-lang) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.md-content :deep(.cb-dot) {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.md-content :deep(.cb-copy) {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 13px;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.md-content :deep(.cb-copy:hover) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.md-content :deep(.cb-body) {
+  display: flex;
+  overflow-x: auto;
+}
+
+.md-content :deep(.cb-linenumbers) {
+  padding: 12px 0;
+  line-height: 1.6;
+  color: #4a4a5a;
+  font-size: 12px;
+  text-align: right;
+  user-select: none;
+  flex-shrink: 0;
+}
+.md-content :deep(.cb-linenumbers span) {
+  display: block;
+  padding-right: 12px;
+  min-width: 24px;
+}
+
+.md-content :deep(.cb-code) {
+  flex: 1;
+  min-width: 0;
+}
+
+.md-content :deep(.cb-code pre) {
+  margin: 0;
+  padding: 12px 16px 12px 12px;
+  overflow: visible;
+}
+
+.md-content :deep(.cb-code pre code) {
   display: block;
   padding: 0;
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.6;
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   background: transparent !important;
+  white-space: pre;
 }
 
-.md-content :deep(pre code.hljs) {
+.md-content :deep(.cb-code pre code.hljs) {
   color: #cdd6f4;
-}
-
-/* ── Language label in top-right corner ── */
-.md-content :deep(pre .lang-label) {
-  position: absolute;
-  top: 6px;
-  right: 10px;
-  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-  font-size: 10px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-  user-select: none;
 }
 </style>
