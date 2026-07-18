@@ -184,15 +184,13 @@
             <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Token 统计</h3>
             <div class="space-y-2">
               <div class="flex justify-between text-sm"><span class="text-gray-400">输入 Token</span><span class="text-white font-mono">{{ (modelValue.input_tokens || 0).toLocaleString() }}</span></div>
-              <div v-if="modelValue.cached_tokens || modelValue.prompt_partial_cached">
-                <div class="flex justify-between text-xs">
-                  <span class="text-gray-500 flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span>缓存命中</span>
-                  <span class="text-green-400 font-mono">{{ (modelValue.cached_tokens || 0).toLocaleString() }}</span>
-                </div>
-                <div v-if="modelValue.prompt_partial_cached" class="flex justify-between text-xs mt-1">
-                  <span class="text-gray-500 flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-yellow-500"></span>部分缓存</span>
-                  <span class="text-yellow-400 font-mono">{{ (modelValue.prompt_partial_cached || 0).toLocaleString() }}</span>
-                </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-400">Cache 命中</span>
+                <span class="font-mono text-green-400">{{ ((modelValue.cached_tokens || 0) + (modelValue.prompt_partial_cached || 0)).toLocaleString() }}</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-400">Cache 未命中</span>
+                <span class="font-mono text-gray-500">{{ Math.max(0, (modelValue.input_tokens || 0) - (modelValue.cached_tokens || 0) - (modelValue.prompt_partial_cached || 0)).toLocaleString() }}</span>
               </div>
               <div class="flex justify-between text-sm"><span class="text-gray-400">输出 Token</span><span class="text-white font-mono">{{ (modelValue.output_tokens || 0).toLocaleString() }}</span></div>
               <div class="flex justify-between text-sm"><span class="text-gray-400">总 Token</span><span class="text-white font-mono">{{ ((modelValue.input_tokens || 0) + (modelValue.output_tokens || 0)).toLocaleString() }}</span></div>
