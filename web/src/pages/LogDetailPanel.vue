@@ -208,7 +208,7 @@
                 <div class="text-xs text-white font-mono">{{ formatMsTime(modelValue.request_start) }}</div>
               </div>
               <div v-if="modelValue.first_response">
-                <div class="text-xs text-gray-500">首次响应 (TTFR)</div>
+                <div class="text-xs text-gray-500">首次响应耗时</div>
                 <div class="text-xs text-ls-accent font-mono">{{ formatMsTime(modelValue.first_response) }}</div>
                 <div v-if="modelValue.request_start && ttfr" class="text-xs text-gray-500 ml-4">{{ ttfr }}</div>
               </div>
