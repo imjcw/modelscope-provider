@@ -23,7 +23,7 @@
       </div>
 
       <!-- ── 使用热力图 ── -->
-      <div class="bg-ls-card rounded-lg border border-ls-border p-5 mb-6">
+      <div ref="heatmapCard" class="bg-ls-card rounded-lg border border-ls-border p-5 mb-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-semibold tracking-tight text-sm">每日使用情况</h2>
           <div class="flex items-center gap-2">
@@ -32,23 +32,21 @@
             <span class="text-xs text-gray-500">较多</span>
           </div>
         </div>
-        <div class="flex gap-0.5">
-          <div class="flex flex-col justify-between text-[9px] text-gray-600 w-5 text-center">
-            <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
-          </div>
-          <div class="flex-1 relative">
-            <div class="flex gap-[3px] min-w-0">
+        <div class="relative overflow-visible">
+            <div class="flex gap-[3px] flex-wrap min-w-0">
               <div
                 v-for="(col, ci) in heatmapCols"
                 :key="ci"
-                class="flex flex-col gap-[3px] flex-1 min-w-0"
+                class="flex flex-col gap-[3px]"
+                :style="{ width: heatmapColWidth + 'px' }"
               >
                 <div
                   v-for="(cell, ri) in col"
                   :key="ri"
                   class="rounded-sm cursor-pointer transition-opacity hover:opacity-80"
                   :style="{
-                    aspectRatio: '1',
+                    width: heatmapCellSize + 'px',
+                    height: heatmapCellSize + 'px',
                     backgroundColor: cell.empty ? '#232329' : (cell.value > 0 ? `rgba(137,180,250,${0.12 + cell.value * 0.18})` : '#232329')
                   }"
                   :title="''"
@@ -69,9 +67,8 @@
               <div class="text-gray-400">缓存命中率: <span class="text-white">{{ tooltip.cacheRate }}</span></div>
             </div>
           </div>
-        </div>
         <!-- X-axis: dates -->
-        <div class="flex justify-between text-[9px] text-gray-600 mt-1.5 ml-7">
+        <div class="flex justify-between text-[9px] text-gray-600 mt-1.5">
           <span v-for="d in heatmapDateLabels" :key="d">{{ d }}</span>
         </div>
       </div>
@@ -239,6 +236,7 @@ const groupedModelQuotas = computed(() => {
 // ── Heatmap ──
 const heatmapCols = ref([])
 const heatmapDateLabels = ref([])
+const heatmapCard = ref(null) // for measuring container width
 const heatmapCellSize = ref(10) // px, computed dynamically
 const heatmapColWidth = ref(12) // px (cell + gap)
 const tooltip = ref({ visible: false, x: 0, y: 0, date: '', requests: 0, tokens: '', cacheRate: '—' })
@@ -311,9 +309,9 @@ const buildHeatmap = (dailyTokens, heatmapCounts) => {
   })
 
   // Compute fixed cell size from container width
-  const containerEl = document.querySelector('.bg-ls-card.rounded-lg.border.border-ls-border.p-5.mb-6')
-  const containerWidth = containerEl ? containerEl.clientWidth - 68 : 900
-  const GAP = 8
+  const containerEl = heatmapCard.value
+  const containerWidth = containerEl ? containerEl.clientWidth - 40 : 900
+  const GAP = 3
   const WEEKS = 52
   const rawSize = Math.floor((containerWidth - WEEKS * GAP) / WEEKS)
   heatmapCellSize.value = Math.max(6, Math.min(14, rawSize))
@@ -548,9 +546,9 @@ const handleResize = () => {
   clearTimeout(resizeTimer)
   resizeTimer = setTimeout(() => {
     if (!loading.value && heatmapCols.value.length) {
-      const containerEl = document.querySelector('.bg-ls-card.rounded-lg.border.border-ls-border.p-5.mb-6')
-      const containerWidth = containerEl ? containerEl.clientWidth - 68 : 900
-      const GAP = 8
+      const containerEl = heatmapCard.value
+      const containerWidth = containerEl ? containerEl.clientWidth - 40 : 900
+      const GAP = 3
       const WEEKS = 52
       const rawSize = Math.floor((containerWidth - WEEKS * GAP) / WEEKS)
       heatmapCellSize.value = Math.max(6, Math.min(14, rawSize))
