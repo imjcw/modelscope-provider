@@ -236,13 +236,14 @@ const selectedLog = ref(null)
 
 const formatTime = (ts) => {
   if (!ts) return ''
-  const d = new Date(ts.replace(' ', 'T'))
+  // Treat the input as UTC (append Z)
+  const d = new Date(ts.replace(' ', 'T') + 'Z')
   if (isNaN(d.getTime())) return ts
-  // Convert to UTC+8 (东八区)
-  const utc = d.getTime() + d.getTimezoneOffset() * 60000
-  const cst = new Date(utc + 8 * 3600000)
+  // Manually compute UTC+8 components (avoid browser timezone dependency)
+  const cst = new Date(d.getTime() + 8 * 3600000)
   const pad = (n, l = 2) => String(n).padStart(l, '0')
-  return `${cst.getFullYear()}-${pad(cst.getMonth() + 1)}-${pad(cst.getDate())} ${pad(cst.getHours())}:${pad(cst.getMinutes())}:${pad(cst.getSeconds())}.${String(cst.getMilliseconds()).padStart(3, '0')}`
+  // Use getUTC* to read the raw values, which now represent UTC+8
+  return `${cst.getUTCFullYear()}-${pad(cst.getUTCMonth() + 1)}-${pad(cst.getUTCDate())} ${pad(cst.getUTCHours())}:${pad(cst.getUTCMinutes())}:${pad(cst.getUTCSeconds())}.${String(cst.getUTCMilliseconds()).padStart(3, '0')}`
 }
 
 const logMeta = computed(() => {
