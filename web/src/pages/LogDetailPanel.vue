@@ -344,13 +344,25 @@ watch(() => props.modelValue, (val) => {
   if (val) {
     nextTick(() => {
       showDrawer.value = true
-      collapsedMsgs.value = {}
       renderModes.value = {}
       responseExpanded.value = true
       responseRenderMode.value = 'md'
+      // Collapse system, tool, and tool_call messages by default
+      const collapsed = {}
+      for (let i = 0; i < conversationMessages.value.length; i++) {
+        const msg = conversationMessages.value[i]
+        if (msg.role === 'system' || msg.role === 'tool' || msg.role === 'tool_call') {
+          collapsed[String(i)] = true
+        }
+      }
+      collapsedMsgs.value = collapsed
     })
   } else {
     showDrawer.value = false
+    collapsedMsgs.value = {}
+    renderModes.value = {}
+    responseExpanded.value = true
+    responseRenderMode.value = 'md'
   }
 }, { immediate: true })
 
