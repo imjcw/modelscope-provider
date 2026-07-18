@@ -73,6 +73,19 @@ const md = new MarkdownIt({
   hljs,
 })
 
+// Plugin: inject language label into fenced code blocks
+md.use(function langLabelPlugin(md) {
+  const fenceRender = md.renderer.rules.fence || function(tokens, idx) {
+    return '<pre><code>' + md.utils.escapeHtml(tokens[idx].content) + '</code></pre>\n'
+  }
+  md.renderer.rules.fence = function(tokens, idx) {
+    const token = tokens[idx]
+    const lang = token.info ? token.info.trim() : ''
+    const label = lang ? `<span class="lang-label">${lang}</span>` : ''
+    return label + fenceRender(tokens, idx)
+  }
+})
+
 // Extract YAML frontmatter: ---\n...\n--- at the very start
 const YAML_FRONTMATTER_RE = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/
 
@@ -232,22 +245,22 @@ const html = computed(() => {
   border: 1px solid var(--border);
 }
 
-/* ── Fenced code blocks (markdown-it hljs option output) ── */
+/* ── Fenced code blocks ── */
 .md-content :deep(pre) {
+  position: relative;
   margin: 0.8em 0;
-  padding: 0;
-  border-radius: 10px;
+  padding: 14px 18px 14px 14px;
+  border-radius: 8px;
   border: 1px solid var(--border);
+  background: var(--bg);
   overflow: hidden;
-  background: linear-gradient(180deg, var(--surface-2) 0%, var(--bg) 30%);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .md-content :deep(pre code) {
   display: block;
-  padding: 14px 18px;
+  padding: 0;
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.65;
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   background: transparent !important;
 }
@@ -256,30 +269,17 @@ const html = computed(() => {
   color: #cdd6f4;
 }
 
-/* ── highlight.js theme overrides for Catppuccin Mocha ── */
-.md-content :deep(.hljs-keyword) { color: #cba6f7; }    /* mauve */
-.md-content :deep(.hljs-literal) { color: #cba6f7; }
-.md-content :deep(.hljs-built_in) { color: #cba6f7; }
-.md-content :deep(.hljs-title) { color: #89b4fa; }     /* blue */
-.md-content :deep(.hljs-function .hljs-title) { color: #89b4fa; }
-.md-content :deep(.hljs-attr) { color: #89b4fa; }
-.md-content :deep(.hljs-symbol) { color: #89b4fa; }
-.md-content :deep(.hljs-class .hljs-title) { color: #f9e2af; }  /* yellow */
-.md-content :deep(.hljs-string) { color: #a6e3a1; }     /* green */
-.md-content :deep(.hljs-char) { color: #a6e3a1; }
-.md-content :deep(.hljs-regexp) { color: #a6e3a1; }
-.md-content :deep(.hljs-number) { color: #fab387; }     /* peach */
-.md-content :deep(.hljs-params) { color: #cdd6f4; }
-.md-content :deep(.hljs-comment) { color: #6c7086; font-style: italic; }  /* overlay */
-.md-content :deep(.hljs-meta) { color: #6c7086; }
-.md-content :deep(.hljs-selector-class) { color: #a6e3a1; }
-.md-content :deep(.hljs-selector-id) { color: #fab387; }
-.md-content :deep(.hljs-selector-attr) { color: #cba6f7; }
-.md-content :deep(.hljs-tag) { color: #f38ba8; }        /* red */
-.md-content :deep(.hljs-variable) { color: #f2cdcd; }   /* flamingo */
-.md-content :deep(.hljs-type) { color: #94e2d5; }        /* teal */
-.md-content :deep(.hljs-operator) { color: #94e2d5; }
-.md-content :deep(.hljs-bullet) { color: #f2cdcd; }
-.md-content :deep(.hljs-code) { color: #a6e3a1; }
-.md-content :deep(.hljs-formula) { color: #cba6f7; }
+/* ── Language label in top-right corner ── */
+.md-content :deep(pre .lang-label) {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  user-select: none;
+}
 </style>
