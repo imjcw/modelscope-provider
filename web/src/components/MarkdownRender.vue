@@ -17,6 +17,12 @@ import http from 'highlight.js/lib/languages/http'
 import diff from 'highlight.js/lib/languages/diff'
 import sql from 'highlight.js/lib/languages/sql'
 import dockerfile from 'highlight.js/lib/languages/dockerfile'
+import go from 'highlight.js/lib/languages/go'
+import rust from 'highlight.js/lib/languages/rust'
+import java from 'highlight.js/lib/languages/java'
+import php from 'highlight.js/lib/languages/php'
+import ruby from 'highlight.js/lib/languages/ruby'
+import kotlin from 'highlight.js/lib/languages/kotlin'
 import plaintext from 'highlight.js/lib/languages/plaintext'
 
 hljs.registerLanguage('javascript', js)
@@ -40,6 +46,15 @@ hljs.registerLanguage('http', http)
 hljs.registerLanguage('diff', diff)
 hljs.registerLanguage('sql', sql)
 hljs.registerLanguage('dockerfile', dockerfile)
+hljs.registerLanguage('go', go)
+hljs.registerLanguage('rust', rust)
+hljs.registerLanguage('rs', rust)
+hljs.registerLanguage('java', java)
+hljs.registerLanguage('php', php)
+hljs.registerLanguage('ruby', ruby)
+hljs.registerLanguage('rb', ruby)
+hljs.registerLanguage('kotlin', kotlin)
+hljs.registerLanguage('kt', kotlin)
 hljs.registerLanguage('plaintext', plaintext)
 hljs.registerLanguage('text', plaintext)
 
@@ -219,18 +234,20 @@ const html = computed(() => {
 
 /* ── Fenced code blocks (markdown-it hljs option output) ── */
 .md-content :deep(pre) {
-  margin: 0.7em 0;
-  padding: 12px 16px;
+  margin: 0.8em 0;
+  padding: 0;
   border-radius: 10px;
   border: 1px solid var(--border);
-  overflow-x: auto;
-  background: var(--bg);
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--surface-2) 0%, var(--bg) 30%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .md-content :deep(pre code) {
   display: block;
+  padding: 14px 18px;
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.7;
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   background: transparent !important;
 }
@@ -239,5 +256,30 @@ const html = computed(() => {
   color: #cdd6f4;
 }
 
-/* ── override highlight.js default .hljs colors for dark theme consistency ── */
+/* ── highlight.js theme overrides for Catppuccin Mocha ── */
+.md-content :deep(.hljs-keyword) { color: #cba6f7; }    /* mauve */
+.md-content :deep(.hljs-literal) { color: #cba6f7; }
+.md-content :deep(.hljs-built_in) { color: #cba6f7; }
+.md-content :deep(.hljs-title) { color: #89b4fa; }     /* blue */
+.md-content :deep(.hljs-function .hljs-title) { color: #89b4fa; }
+.md-content :deep(.hljs-attr) { color: #89b4fa; }
+.md-content :deep(.hljs-symbol) { color: #89b4fa; }
+.md-content :deep(.hljs-class .hljs-title) { color: #f9e2af; }  /* yellow */
+.md-content :deep(.hljs-string) { color: #a6e3a1; }     /* green */
+.md-content :deep(.hljs-char) { color: #a6e3a1; }
+.md-content :deep(.hljs-regexp) { color: #a6e3a1; }
+.md-content :deep(.hljs-number) { color: #fab387; }     /* peach */
+.md-content :deep(.hljs-params) { color: #cdd6f4; }
+.md-content :deep(.hljs-comment) { color: #6c7086; font-style: italic; }  /* overlay */
+.md-content :deep(.hljs-meta) { color: #6c7086; }
+.md-content :deep(.hljs-selector-class) { color: #a6e3a1; }
+.md-content :deep(.hljs-selector-id) { color: #fab387; }
+.md-content :deep(.hljs-selector-attr) { color: #cba6f7; }
+.md-content :deep(.hljs-tag) { color: #f38ba8; }        /* red */
+.md-content :deep(.hljs-variable) { color: #f2cdcd; }   /* flamingo */
+.md-content :deep(.hljs-type) { color: #94e2d5; }        /* teal */
+.md-content :deep(.hljs-operator) { color: #94e2d5; }
+.md-content :deep(.hljs-bullet) { color: #f2cdcd; }
+.md-content :deep(.hljs-code) { color: #a6e3a1; }
+.md-content :deep(.hljs-formula) { color: #cba6f7; }
 </style>
