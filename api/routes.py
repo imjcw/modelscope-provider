@@ -185,6 +185,8 @@ async def stream_response(
             }
         }
         yield f"data: {json.dumps(error_body)}\n\n"
+        # 传递真实状态码供日志使用
+        yield f"data: {json.dumps({'__status_code__': response.status_code})}\n\n"
         return
 
     # Inject headers as first chunk (consumer strips them out)
@@ -237,27 +239,36 @@ async def stream_response_with_logging(
     client_key_name: str = None,
 ):
     """Streaming response wrapper that logs and updates quota after completion."""
-    total_tokens = 0
+    output_tokens = 0
     input_tokens = 0
     response_headers = {}
     raw_chunks = []
     first_response = None
     request_start = datetime.now(timezone.utc).isoformat()
+    stream_status_code = 200  # 默认 200，由 stream_response 的 __status_code__ 标记覆盖
 
     async for chunk_data in stream_response(
         account, http_client, model_name, request_body, _capture_headers=True
     ):
-        # Strip out the injected __hdrs__ chunk
-        try:
-            data_str = chunk_data.replace("data: ", "").strip()
-            if data_str:
+        data_str = chunk_data.replace("data: ", "").strip()
+        is_special_chunk = False
+
+        # Strip out injected marker chunks (do NOT yield or log them)
+        if data_str:
+            try:
                 dec = json.JSONDecoder()
-                hdr_obj, _ = dec.raw_decode(data_str)
-                if "__hdrs__" in hdr_obj:
-                    response_headers = hdr_obj["__hdrs__"]
-                    continue  # skip this chunk, don't yield to client
-        except Exception:
-            pass
+                obj, _ = dec.raw_decode(data_str)
+                if "__status_code__" in obj:
+                    stream_status_code = obj["__status_code__"]
+                    is_special_chunk = True
+                elif "__hdrs__" in obj:
+                    response_headers = obj["__hdrs__"]
+                    is_special_chunk = True
+            except Exception:
+                pass
+
+        if is_special_chunk:
+            continue
 
         if first_response is None:
             first_response = datetime.now(timezone.utc).isoformat()
@@ -266,40 +277,29 @@ async def stream_response_with_logging(
 
         # Try to extract token count from usage in each chunk
         try:
-            data_str = chunk_data.replace("data: ", "").strip()
             if data_str:
                 decoder = json.JSONDecoder()
                 json_data, _ = decoder.raw_decode(data_str)
                 usage = json_data.get("usage", {})
                 # Only take the latest usage (last chunk has final counts)
                 input_tokens = usage.get("prompt_tokens", 0) or input_tokens
-                total_tokens = usage.get("completion_tokens", 0) or total_tokens
+                output_tokens = usage.get("completion_tokens", 0) or output_tokens
         except Exception:
             pass
 
     # Log after streaming completes
     end_time = datetime.now(timezone.utc).isoformat()
-    logger.info(f"Streaming completed for {account.account_id}: input={input_tokens} output={total_tokens} chunks={len(raw_chunks)} admin_svc={'yes' if admin_service else 'no'}")
+    logger.info(f"Streaming completed for {account.account_id}: status={stream_status_code} input={input_tokens} output={output_tokens} chunks={len(raw_chunks)} admin_svc={'yes' if admin_service else 'no'}")
     if admin_service:
         try:
-            # Deduplicate tool calls by id
-            seen_ids = set()
-            unique_tools = []
-            for t in tool_calls_found:
-                if t["id"] and t["id"] in seen_ids:
-                    continue
-                if t["id"]:
-                    seen_ids.add(t["id"])
-                unique_tools.append(t)
-
             admin_service.log_request(
                 model=model_name,
                 actual_model_id=actual_model_id,
                 account_id=account.account_id,
                 account_name=account.name,
-                status_code=200,
+                status_code=stream_status_code,
                 input_tokens=input_tokens,
-                output_tokens=total_tokens,
+                output_tokens=output_tokens,
                 is_stream=True,
                 latency_ms=None,
                 raw_request=json.dumps(request_body, ensure_ascii=False),
@@ -311,14 +311,14 @@ async def stream_response_with_logging(
                 response_headers=json.dumps(response_headers, ensure_ascii=False) if response_headers else None,
             )
         except Exception as e:
-            logger.warning(f"Failed to log streaming request: {e}")
+            logger.error(f"Failed to log streaming request: {e}")
 
     # Update quota from streaming usage data
     if quota_updater and hasattr(account, 'api_key'):
         try:
-            if input_tokens > 0 or total_tokens > 0:
+            if input_tokens > 0 or output_tokens > 0:
                 quota_updater.update_quota_from_usage(
-                    account, input_tokens, total_tokens, model_name
+                    account, input_tokens, output_tokens, model_name
                 )
             # Also update quota remaining/limit from captured response headers
             if response_headers:
