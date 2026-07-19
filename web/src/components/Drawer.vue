@@ -1,10 +1,17 @@
 <script setup>
+/**
+ * Drawer — 右侧滑入/滑出抽屉 (朴素风格)。
+ * - 颜色遵循 Catppuccin-Mocha 暗色 theme，无额外配色
+ * - 进入/退出通过 `exiting` ref 驱动 CSS 过渡
+ * - 点击遮罩 / ESC 键关闭
+ */
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   title: { type: String, default: '' },
   width: { type: String, default: '780px' },
+  noHeader: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -23,7 +30,6 @@ const close = () => {
   }, 250)
 }
 
-// 监听 props.modelValue 变化
 watch(
   () => props.modelValue,
   (val) => {
@@ -36,20 +42,14 @@ watch(
   }
 )
 
-// ── ESC 键关闭 ──
 const handleEsc = (e) => {
   if (e.key === 'Escape' && visible.value && !exiting.value) {
-    // 如果确认弹窗打开，让弹窗优先关闭
-    if (document.querySelector('.modal-overlay')) return
     close()
-    e.stopImmediatePropagation() // 阻止其他组件响应
+    e.stopImmediatePropagation()
   }
 }
 
-onMounted(() => {
-  document.addEventListener('keydown', handleEsc)
-})
-
+onMounted(() => document.addEventListener('keydown', handleEsc))
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleEsc)
   if (exitingTimer.value) clearTimeout(exitingTimer.value)
@@ -61,7 +61,7 @@ onBeforeUnmount(() => {
     <div v-if="visible" class="drawer-overlay" @click.self="close">
       <div class="drawer drawer-right" :style="{ width: props.width }">
         <div class="drawer-panel" :class="{ 'exiting': exiting }">
-          <div class="drawer-header">
+          <div v-if="!noHeader" class="drawer-header">
             <h2 class="drawer-title">{{ title }}</h2>
             <button @click="close" class="drawer-close btn-esc">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -69,12 +69,8 @@ onBeforeUnmount(() => {
               </svg>
             </button>
           </div>
-          <div class="drawer-body">
-            <slot></slot>
-          </div>
-          <div v-if="$slots.footer" class="drawer-footer">
-            <slot name="footer"></slot>
-          </div>
+          <div class="drawer-body" :class="{ 'is-full': noHeader }"><slot></slot></div>
+          <div v-if="$slots.footer" class="drawer-footer"><slot name="footer"></slot></div>
         </div>
       </div>
     </div>

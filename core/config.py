@@ -4,7 +4,7 @@ import os
 from typing import List, Dict, Optional
 
 from dotenv import load_dotenv
-from provider.models.account import ModelScopeAccount
+from models.account import ModelScopeAccount
 
 load_dotenv()
 
@@ -57,7 +57,7 @@ class ConfigManager:
         if not self.db:
             raise ValueError("Database not configured, cannot load accounts from DB")
 
-        from provider.repositories.account_repository import AccountRepository
+        from repositories.account_repository import AccountRepository
         repo = AccountRepository(self.db)
         db_accounts = repo.find_active()
 
@@ -106,7 +106,7 @@ class ConfigManager:
 
     def _migrate_accounts_to_db(self, accounts: List[ModelScopeAccount]):
         """Migrate accounts to the database. account_id is auto-generated as UUID."""
-        from provider.repositories.account_repository import AccountRepository
+        from repositories.account_repository import AccountRepository
         repo = AccountRepository(self.db)
         for acc in accounts:
             try:

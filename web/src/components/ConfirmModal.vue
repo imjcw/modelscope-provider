@@ -1,5 +1,5 @@
 <script setup>
-import { watch, onBeforeUnmount } from 'vue'
+import { watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -22,8 +22,26 @@ const close = () => {
   emit('update:modelValue', false)
 }
 
+// ── ESC 键关闭 / Enter 键确认 ──
+const handleKey = (e) => {
+  if (e.key === 'Escape' && props.modelValue) {
+    close()
+    e.stopImmediatePropagation() // 阻止抽屉也响应
+    return
+  }
+  if (e.key === 'Enter' && props.modelValue && !props.disabled) {
+    handleConfirm()
+    e.stopImmediatePropagation() // 阻止抽屉内 input 的 enter 事件
+    return
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', handleKey)
+})
+
 onBeforeUnmount(() => {
-  // cleanup if needed
+  document.removeEventListener('keydown', handleKey)
 })
 </script>
 

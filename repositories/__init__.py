@@ -1,10 +1,10 @@
 """Database repository layer."""
 
-from provider.repositories.quota_repository import QuotaRepository
-from provider.repositories.account_repository import AccountRepository
-from provider.repositories.mapping_repository import MappingRepository
-from provider.repositories.config_repository import ConfigRepository
-from provider.repositories.log_repository import LogRepository
+from repositories.quota_repository import QuotaRepository
+from repositories.account_repository import AccountRepository
+from repositories.mapping_repository import MappingRepository
+from repositories.config_repository import ConfigRepository
+from repositories.log_repository import LogRepository
 
 __all__ = [
     "QuotaRepository",

@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 
-from provider.core.database import DatabaseManager
+from core.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 

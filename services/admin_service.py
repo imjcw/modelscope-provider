@@ -237,8 +237,17 @@ class AdminService:
     def get_mappings_by_alias(self, alias_name: str):
         return self.mapping_repo.find_by_alias(alias_name)
 
-    def upsert_mapping(self, alias_name: str, actual_model_id: str):
-        return self.mapping_repo.create(alias_name, actual_model_id)
+    def upsert_mapping(self, alias_name: str, actual_model_id: str,
+                       description: str = "", status: str = "active"):
+        return self.mapping_repo.create(alias_name, actual_model_id, description, status)
+
+    def update_mapping(self, alias_name: str, **kwargs):
+        """Update mapping fields. Supported: actual_model_id, description, status."""
+        return self.mapping_repo.update(alias_name, **kwargs)
+
+    def toggle_mapping_status(self, alias_name: str):
+        """Toggle mapping status between 'active' and 'disabled'."""
+        return self.mapping_repo.toggle_status(alias_name)
 
     def bulk_update_mappings(self, mappings: dict):
         self.mapping_repo.bulk_upsert(mappings)
@@ -247,16 +256,28 @@ class AdminService:
         return self.mapping_repo.delete_by_alias(alias_name)
 
     def get_mapping_models(self, alias_name: str):
-        """Get all models bound to a mapping alias."""
+        """Get all models bound to a mapping alias (with model_type, context_length)."""
         if self.mapping_model_repo is None:
             return []
         return self.mapping_model_repo.find_by_alias(alias_name)
 
-    def add_mapping_model(self, alias_name: str, supplier_id: int, model_name: str):
+    def add_mapping_model(self, alias_name: str, supplier_id: int,
+                          model_name: str, sort_order: int = 0):
         """Add a model to a mapping alias."""
         if self.mapping_model_repo is None:
             raise NotImplementedError("Mapping model repo not configured")
-        return self.mapping_model_repo.add_model(alias_name, supplier_id, model_name)
+        return self.mapping_model_repo.add_model(alias_name, supplier_id, model_name, sort_order)
+
+    def reorder_mapping_models(self, alias_name: str, ordered_ids: list):
+        """Reorder binding list for an alias.
+
+        Args:
+            alias_name: virtual model ID.
+            ordered_ids: list of mapping_models ids in desired order.
+        """
+        if self.mapping_model_repo is None:
+            raise NotImplementedError("Mapping model repo not configured")
+        return self.mapping_model_repo.reorder(alias_name, ordered_ids)
 
     def remove_mapping_model(self, model_id: int):
         """Remove a model from a mapping alias."""
@@ -274,6 +295,126 @@ class AdminService:
 
     def bulk_set_config(self, config: dict):
         self.config_repo.bulk_set(config)
+
+    # ── Mapping usage ────────────────────────────────────────────────────
+
+    def get_mapping_usage(self, alias_name: str, days: int = 7):
+        """Aggregated usage stats for one virtual model over the last ``days``.
+
+        A request is logged under either the alias name or the
+        ``actual_model_id`` (which is the bound supplier model). We union the
+        two via the candidate model-id list and de-duplicate by
+        ``request_id`` so each request is counted once.
+
+        Returns:
+          { alias, period_days,
+            usage: { requests, input_tokens, output_tokens, cache_tokens,
+                     error_count, cache_hit_rate,
+                     per_model: [{ supplier, model, display,
+                                   requests, input_tokens, output_tokens,
+                                   cache_tokens, error_count }, ...] } }
+          ``per_model`` lists *every* bound model, stats zero-filled when the
+          model saw no requests in the window. The virtual-alias row (no
+          supplier) is excluded — its hits are rolled up into each supplier
+          row that actually carried them.
+        """
+        from datetime import datetime, timedelta
+
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
+
+        bound = self.mapping_model_repo.find_by_alias(alias_name) if self.mapping_model_repo else []
+
+        # (supplier_name, supplier_model_name) keyed by supplier model name.
+        sup_name_by_model = {}
+        for b in bound:
+            sid = b.get("supplier_id")
+            sname = ""
+            if sid is not None:
+                acc = self.account_repo.find_by_id(sid)
+                sname = acc.get("name", "") if acc else ""
+            sup_name_by_model[b["model_name"]] = sname
+
+        candidate_ids = [alias_name] + [b["model_name"] for b in bound]
+
+        # De-duplicated request records. Again query per candidate id; the
+        # first id in ``candidate_ids`` whose query returns a request "wins".
+        # Since the alias id is listed first, any request logged only at the
+        # alias level falls through to it; requests logged under a supplier
+        # model (actual_model_id) match the later (more specific) id and are
+        # attributed there.
+        kept: dict[str, dict] = {}      # request_id -> log record
+        kept_carrier: dict[str, str] = {}  # request_id -> carrier model id
+        for mid in candidate_ids:
+            records, _ = self.log_repo.find_all(
+                page=0, page_size=5000,
+                model=mid, start_time=cutoff,
+            )
+            for r in records:
+                rid = r.get("request_id")
+                if not rid or rid in kept:
+                    continue
+                kept[rid] = r
+                kept_carrier[rid] = mid
+
+        # One row per bound model, plus a roll-up fallback for alias-level.
+        per_model_rows: list[dict] = []
+        for b in bound:
+            mn = b["model_name"]
+            per_model_rows.append(
+                dict(supplier=sup_name_by_model.get(mn, ""),
+                     model=mn, requests=0, input_tokens=0,
+                     output_tokens=0, cache_tokens=0, error_count=0))
+
+        totals = dict(requests=0, input_tokens=0, output_tokens=0,
+                      cache_tokens=0, partial=0, error_count=0)
+
+        for rid, r in kept.items():
+            carrier = kept_carrier.get(rid)
+            row = None
+            if carrier and carrier != alias_name:
+                for pm in per_model_rows:
+                    if pm["model"] == carrier:
+                        row = pm
+                        break
+
+            inp = r.get("input_tokens", 0) or 0
+            out = r.get("output_tokens", 0) or 0
+            cache = r.get("cached_tokens", 0) or 0
+            partial = r.get("prompt_partial_cached", 0) or 0
+            is_err = (r.get("status_code") or 0) >= 400
+
+            totals["requests"] += 1
+            totals["input_tokens"] += inp
+            totals["output_tokens"] += out
+            totals["cache_tokens"] += cache
+            totals["partial"] += partial
+            if is_err:
+                totals["error_count"] += 1
+
+            if row is not None:
+                row["requests"] += 1
+                row["input_tokens"] += inp
+                row["output_tokens"] += out
+                row["cache_tokens"] += cache
+                if is_err:
+                    row["error_count"] += 1
+
+        denom = totals["cache_tokens"] + totals["partial"]
+        cache_hit_rate = round(totals["cache_tokens"] / denom * 100, 1) if denom > 0 else 0.0
+
+        return {
+            "alias": alias_name,
+            "period_days": days,
+            "usage": {
+                "requests": totals["requests"],
+                "input_tokens": totals["input_tokens"],
+                "output_tokens": totals["output_tokens"],
+                "cache_tokens": totals["cache_tokens"],
+                "error_count": totals["error_count"],
+                "cache_hit_rate": cache_hit_rate,
+                "per_model": per_model_rows,
+            },
+        }
 
     # ── Logs ──
 

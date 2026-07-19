@@ -1,19 +1,19 @@
 from typing import List, Optional
-from provider.core.config import ConfigManager
-from provider.core.database import DatabaseManager
-from provider.core.http_client import HttpClient
-from provider.models.account import ModelScopeAccount
-from provider.models.alias_resolver import ModelAliasResolver
-from provider.repositories.account_repository import AccountRepository
-from provider.repositories.config_repository import ConfigRepository
-from provider.repositories.mapping_model_repository import MappingModelRepository
-from provider.repositories.mapping_repository import MappingRepository
-from provider.repositories.quota_repository import QuotaRepository
-from provider.repositories.supplier_model_repository import SupplierModelRepository
-from provider.services.alias_router import AliasRouter
-from provider.services.load_balancer import LoadBalancer
-from provider.services.response_converter import ResponseConverter
-from provider.services.quota_updater import QuotaUpdater
+from core.config import ConfigManager
+from core.database import DatabaseManager
+from core.http_client import HttpClient
+from models.account import ModelScopeAccount
+from models.alias_resolver import ModelAliasResolver
+from repositories.account_repository import AccountRepository
+from repositories.config_repository import ConfigRepository
+from repositories.mapping_model_repository import MappingModelRepository
+from repositories.mapping_repository import MappingRepository
+from repositories.quota_repository import QuotaRepository
+from repositories.supplier_model_repository import SupplierModelRepository
+from services.alias_router import AliasRouter
+from services.load_balancer import LoadBalancer
+from services.response_converter import ResponseConverter
+from services.quota_updater import QuotaUpdater
 
 
 class ServiceInitializer:

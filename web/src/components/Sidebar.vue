@@ -3,12 +3,14 @@
     <!-- Logo -->
     <div class="px-5 py-5">
       <div class="flex items-center gap-2.5">
-        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-ls-accent to-ls-accentHover flex items-center justify-center">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
-            <path d="M5 12h14M12 5l7 7-7 7"/>
-          </svg>
+        <div class="w-7 h-7 rounded-lg bg-[#0c0c0c] border border-gray-800 flex items-center justify-center font-bold text-[11px] tracking-tight">
+          <span class="text-ls-accent">A</span><span class="text-[#89b4fa]">P</span>
         </div>
-        <span class="font-semibold tracking-tight text-white text-sm">ModelScope Proxy</span>
+        <span class="font-semibold tracking-tight text-sm">
+          <span class="text-ls-accent">A</span><span class="text-white">I</span>
+          <span class="text-white">&nbsp;</span>
+          <span class="text-[#89b4fa]">P</span><span class="text-white">rovider</span>
+        </span>
       </div>
     </div>
 
@@ -33,7 +35,7 @@
           <path d="M10 13a5 5 0 0 0 7.54 .54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
         </svg>
-        模型映射
+        虚拟模型
       </router-link>
       <router-link to="/logs" class="nav-item">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -41,12 +43,6 @@
           <path d="M14 2v6h6"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
         请求日志
-      </router-link>
-      <router-link to="/stats" class="nav-item">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-        使用统计
       </router-link>
       <router-link to="/alerts" class="nav-item">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -67,6 +63,12 @@
           <path d="M9 12h6"/><path d="M9 16h4"/>
         </svg>
         使用指南
+      </router-link>
+      <router-link to="/keys" class="nav-item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="8" cy="15" r="5"/><path d="M11.5 11.5L21 2"/><path d="M16 7l3 3"/>
+        </svg>
+        API Keys
       </router-link>
       <router-link to="/config" class="nav-item">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

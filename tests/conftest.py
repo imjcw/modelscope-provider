@@ -14,8 +14,15 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_test_db_path}"
 
 
 @pytest.fixture(autouse=True)
-def cleanup_test_db_url():
-    """Restore original DATABASE_URL after each test."""
+def set_test_db_url():
+    """确保每个测试都使用测试数据库，并在测试后恢复 original。
+
+    仅靠模块级别的 os.environ 设置是不够的：cleanup 测试之后
+    的下一个测试会拿到被恢复的 original URL（或删除后的状态），
+    从而错误地指向生产数据库。这个 fixture 在每个测试开始前
+    重新设置测试 DB URL。
+    """
+    os.environ["DATABASE_URL"] = f"sqlite:///{_test_db_path}"
     yield
     if _original_db_url is not None:
         os.environ["DATABASE_URL"] = _original_db_url

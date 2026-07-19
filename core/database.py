@@ -41,6 +41,11 @@ class DatabaseManager:
         conn.row_factory = sqlite3.Row
         # Enable foreign keys
         conn.execute("PRAGMA foreign_keys = ON")
+        # Wait up to 3s for a lock instead of failing immediately. Removes the
+        # "database is locked" OperationalError when the request path opens a
+        # short-lived child connection while the outer transaction is in flight
+        # (e.g. SELECT inside a write block, or nested repository calls).
+        conn.execute("PRAGMA busy_timeout = 3000")
         try:
             yield conn
             conn.commit()
@@ -143,7 +148,11 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS model_mappings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     alias_name TEXT NOT NULL UNIQUE,
-                    actual_model_id TEXT NOT NULL
+                    actual_model_id TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
@@ -166,11 +175,22 @@ class DatabaseManager:
                     alias_name TEXT NOT NULL,
                     supplier_id INTEGER NOT NULL,
                     model_name TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (alias_name) REFERENCES model_mappings(alias_name) ON DELETE CASCADE,
                     FOREIGN KEY (supplier_id) REFERENCES accounts(id) ON DELETE CASCADE,
                     UNIQUE(alias_name, supplier_id, model_name)
+                )
+            """)
+
+            # System config table - key-value storage
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    description TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
@@ -361,6 +381,52 @@ class DatabaseManager:
                 logger.info("Migration: added 'client_key_name' column to request_logs table")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+
+            # ── Migration: add `description`, `status`, `created_at`, `updated_at` to model_mappings ──
+            # 每个 ALTER TABLE 独立 try/except，避免一个失败导致后续列无法添加
+            # 注意：SQLite 不支持 ALTER TABLE ADD COLUMN 使用非常量默认值（如 CURRENT_TIMESTAMP）
+            try:
+                cursor.execute("PRAGMA table_info(model_mappings)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "description" not in columns:
+                    cursor.execute("ALTER TABLE model_mappings ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+                    logger.info("Migration: added 'description' column to model_mappings table")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("PRAGMA table_info(model_mappings)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "status" not in columns:
+                    cursor.execute("ALTER TABLE model_mappings ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+                    logger.info("Migration: added 'status' column to model_mappings table")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("PRAGMA table_info(model_mappings)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "created_at" not in columns:
+                    cursor.execute("ALTER TABLE model_mappings ADD COLUMN created_at TEXT DEFAULT '1970-01-01 00:00:00'")
+                    logger.info("Migration: added 'created_at' column to model_mappings table")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("PRAGMA table_info(model_mappings)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "updated_at" not in columns:
+                    cursor.execute("ALTER TABLE model_mappings ADD COLUMN updated_at TEXT DEFAULT '1970-01-01 00:00:00'")
+                    logger.info("Migration: added 'updated_at' column to model_mappings table")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── Migration: add `sort_order` to mapping_models ──
+            try:
+                cursor.execute("PRAGMA table_info(mapping_models)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "sort_order" not in columns:
+                    cursor.execute("ALTER TABLE mapping_models ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+                    logger.info("Migration: added 'sort_order' column to mapping_models table")
+            except sqlite3.OperationalError:
+                pass
 
             logger.info("Database tables initialized")
 

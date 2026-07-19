@@ -1,6 +1,6 @@
 import logging
 import httpx
-from provider.models.account import ModelScopeAccount
+from models.account import ModelScopeAccount
 
 logger = logging.getLogger(__name__)
 

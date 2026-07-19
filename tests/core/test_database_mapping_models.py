@@ -24,6 +24,7 @@ def test_mapping_models_table_exists():
         'alias_name': 'TEXT',
         'supplier_id': 'INTEGER',
         'model_name': 'TEXT',
+        'sort_order': 'INTEGER',
         'created_at': 'TIMESTAMP',
         'updated_at': 'TIMESTAMP',
     }

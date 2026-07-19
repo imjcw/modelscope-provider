@@ -1,16 +1,8 @@
 <template>
-  <Teleport to="body">
-    <!-- Overlay -->
-    <div v-if="modelValue" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" @click.self="close"></div>
-
-    <!-- Drawer -->
-    <div v-show="modelValue" class="fixed top-0 right-0 bottom-0 w-[1300px] bg-ls-bg border-l border-ls-border z-50 flex flex-col shadow-2xl"
-      :class="showDrawer ? 'translate-x-0' : 'translate-x-full'"
-      :style="{ transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)' }">
-
-      <template v-if="modelValue">
+  <Drawer :model-value="!!modelValue" @update:model-value="close" no-header width="1300px">
+    <template v-if="modelValue">
       <!-- Header -->
-      <div class="flex items-center justify-between px-5 py-3 border-b border-ls-border bg-ls-card flex-shrink-0">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-ls-border flex-shrink-0" style="background: #1a1a1e;">
         <div>
           <h2 class="text-base font-semibold text-white">请求日志</h2>
           <p class="text-xs text-gray-500 mt-0.5">{{ modelValue.request_id }} · {{ formatMsTime(modelValue.timestamp) }}</p>
@@ -20,11 +12,6 @@
             :class="modelValue.status_code >= 400 ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'">
             {{ modelValue.status_code }}
           </span>
-          <button @click="close" class="text-gray-500 hover:text-white p-1">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
         </div>
       </div>
 
@@ -121,8 +108,10 @@
                         <div class="flex items-center gap-2 mb-1">
                           <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
                         </div>
-                        <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.content" />
-                        <pre v-if="renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
+                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                          <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.content" />
+                          <pre v-if="renderModes[String(i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
+                        </div>
                       </div>
                     </template>
                     <!-- Normal message content -->
@@ -141,14 +130,20 @@
                           <span v-if="tc.id" class="text-xs text-gray-500 font-mono">{{ tc.id }}</span>
                         </div>
                         <div class="mb-2">
-                          <span class="text-gray-500">入参:</span>
-                          <MarkdownRender :source="tc.arguments" />
+                          <div class="flex items-center gap-2 mb-1">
+                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
+                          </div>
+                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                            <MarkdownRender :source="tc.arguments" />
+                          </div>
                         </div>
                         <div v-if="tc.result" class="mt-2 pt-2 border-t border-ls-border">
                           <div class="flex items-center gap-2 mb-1">
                             <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
                           </div>
-                          <MarkdownRender :source="tc.result" />
+                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                            <MarkdownRender :source="tc.result" />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -246,15 +241,21 @@
                       <span class="text-xs text-gray-400 font-medium">{{ tc.name }}</span>
                       <span v-if="tc.id" class="text-xs text-gray-500 font-mono">{{ tc.id }}</span>
                     </div>
-                    <div class="text-xs text-gray-300 mb-2">
-                      <span class="text-gray-500">入参:</span>
-                      <MarkdownRender :source="tc.arguments" />
+                    <div class="mb-2">
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
+                      </div>
+                      <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                        <MarkdownRender :source="tc.arguments" />
+                      </div>
                     </div>
                     <div v-if="tc.result" class="mt-2 pt-2 border-t border-ls-border">
                       <div class="flex items-center gap-2 mb-1">
                         <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
                       </div>
-                      <MarkdownRender :source="tc.result" />
+                      <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                        <MarkdownRender :source="tc.result" />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -299,22 +300,14 @@
             </div>
           </div>
 
-          <!-- Token 统计 -->
+          <!-- Token -->
           <div class="p-4 border-b border-ls-border">
-            <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Token 统计</h3>
-            <div class="space-y-2">
-              <div class="flex justify-between text-sm"><span class="text-gray-400">输入 Token</span><span class="text-white font-mono">{{ (modelValue.input_tokens || 0).toLocaleString() }}</span></div>
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-400">Cache 命中</span>
-                <span class="font-mono text-green-400">{{ ((modelValue.cached_tokens || 0) + (modelValue.prompt_partial_cached || 0)).toLocaleString() }}</span>
-              </div>
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-400">Cache 未命中</span>
-                <span class="font-mono text-gray-500">{{ Math.max(0, (modelValue.input_tokens || 0) - (modelValue.cached_tokens || 0) - (modelValue.prompt_partial_cached || 0)).toLocaleString() }}</span>
-              </div>
-              <div class="flex justify-between text-sm"><span class="text-gray-400">输出 Token</span><span class="text-white font-mono">{{ (modelValue.output_tokens || 0).toLocaleString() }}</span></div>
-              <div class="flex justify-between text-sm"><span class="text-gray-400">总 Token</span><span class="text-white font-mono">{{ ((modelValue.input_tokens || 0) + (modelValue.output_tokens || 0)).toLocaleString() }}</span></div>
-            </div>
+            <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Token</h3>
+            <TokenStack
+              :input="modelValue.input_tokens || 0"
+              :output="modelValue.output_tokens || 0"
+              :cache="(modelValue.cached_tokens || 0) + (modelValue.prompt_partial_cached || 0)"
+            />
           </div>
 
           <!-- 请求时序 -->
@@ -383,23 +376,21 @@
         </div>
 
       </div>
-      </template>
-
-    </div>
-  </Teleport>
+    </template>
+  </Drawer>
 </template>
 
 <script setup>
-import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { Teleport } from 'vue'
+import { computed, ref, watch } from 'vue'
+import Drawer from '@/components/Drawer.vue'
 import MarkdownRender from '@/components/MarkdownRender.vue'
+import TokenStack from '@/components/TokenStack.vue'
 
 const props = defineProps({
   modelValue: { type: Object, default: null },
 })
 
 const emit = defineEmits(['update:modelValue'])
-const showDrawer = ref(false)
 const showHistory = ref(false)
 
 // ── Find the index of the last user message (the one that triggered this request) ──
@@ -435,52 +426,35 @@ const responseRenderMode = ref('md')
 const renderModes = ref({})
 
 const close = () => {
-  showDrawer.value = false
-  setTimeout(() => {
-    emit('update:modelValue', null)
-  }, 350)
+  emit('update:modelValue', null)
 }
-
-const handleKeydown = (e) => {
-  if (e.key === 'Escape') close()
-}
-onMounted(() => window.addEventListener('keydown', handleKeydown))
-onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
 
 watch(() => props.modelValue, (val) => {
+  renderModes.value = {}
+  responseExpanded.value = true
+  responseRenderMode.value = 'md'
+  showHistory.value = false
+
   if (val) {
-    nextTick(() => {
-      showDrawer.value = true
-      renderModes.value = {}
-      responseExpanded.value = true
-      responseRenderMode.value = 'md'
-      showHistory.value = false
+    // History messages: all collapsed
+    const hist = {}
+    for (let i = 0; i < historyMessages.value.length; i++) {
+      hist[String(i)] = true
+    }
+    historyCollapsed.value = hist
 
-      // History messages: all collapsed
-      const hist = {}
-      for (let i = 0; i < historyMessages.value.length; i++) {
-        hist[String(i)] = true
+    // Current messages: collapse system/tool/tool_call, leave user/assistant expanded
+    const curr = {}
+    for (let i = currentStartIndex.value; i < conversationMessages.value.length; i++) {
+      const msg = conversationMessages.value[i]
+      if (msg.role === 'system' || msg.role === 'tool' || msg.role === 'tool_call') {
+        curr[String(i)] = true
       }
-      historyCollapsed.value = hist
-
-      // Current messages: collapse system/tool/tool_call, leave user/assistant expanded
-      const curr = {}
-      for (let i = currentStartIndex.value; i < conversationMessages.value.length; i++) {
-        const msg = conversationMessages.value[i]
-        if (msg.role === 'system' || msg.role === 'tool' || msg.role === 'tool_call') {
-          curr[String(i)] = true
-        }
-      }
-      collapsedMsgs.value = curr
-    })
+    }
+    collapsedMsgs.value = curr
   } else {
-    showDrawer.value = false
     collapsedMsgs.value = {}
     historyCollapsed.value = {}
-    renderModes.value = {}
-    responseExpanded.value = true
-    responseRenderMode.value = 'md'
-    showHistory.value = false
   }
 }, { immediate: true })
 

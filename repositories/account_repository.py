@@ -2,7 +2,7 @@ import logging
 import uuid
 from typing import List, Optional
 
-from provider.core.database import DatabaseManager
+from core.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,13 @@ class AccountRepository:
             cursor = conn.execute(
                 "SELECT * FROM accounts WHERE account_id = ?", (account_id,)
             )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def find_by_name(self, name: str) -> Optional[dict]:
+        """Get account by name (name is UNIQUE)."""
+        with self.db.get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM accounts WHERE name = ?", (name,))
             row = cursor.fetchone()
             return dict(row) if row else None
 

@@ -1,9 +1,16 @@
 """Admin API routes for the management panel."""
-from fastapi import APIRouter, Depends, HTTPException, Request
+import sys
+import time
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List, Literal
 
 router = APIRouter()
+
+# Track app start time for uptime calculation (set during startup)
+APP_START_TIME: Optional[float] = None
 
 
 # ── Dependency ──────────────────────────────────────────────────────────────
@@ -42,10 +49,21 @@ class SupplierUpdate(BaseModel):
 class MappingUpsert(BaseModel):
     alias_name: str
     actual_model_id: str
+    description: str = ""
+    status: str = "active"
+
+
+class MappingUpdate(BaseModel):
+    description: Optional[str] = None
+    status: Optional[str] = None
 
 
 class MappingBulkUpdate(BaseModel):
     mappings: Dict[str, str]
+
+
+class MappingReorder(BaseModel):
+    ordered_ids: List[int] = Field(..., description="Binding IDs in desired order")
 
 
 class ConfigUpdate(BaseModel):
@@ -99,6 +117,74 @@ def list_suppliers(service=Depends(get_admin_service)):
             **sup,
             "models": models
         })
+    return result
+
+
+# ── Supplier Import / Export ───────────────────────────────────────────────
+# NOTE: These routes must come BEFORE /suppliers/{supplier_id} to avoid
+# FastAPI treating "export"/"import" as a path param.
+
+@router.get("/suppliers/export")
+def export_suppliers(format: str = "json", service=Depends(get_admin_service)):
+    """Export all suppliers with their models as JSON or YAML file download."""
+    data = service.export_suppliers()
+
+    if format == "yaml":
+        import yaml
+        content = yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        return Response(
+            content=content,
+            media_type="application/yaml",
+            headers={"Content-Disposition": 'attachment; filename="suppliers_export.yaml"'},
+        )
+
+    # Default: JSON
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        content=data,
+        headers={"Content-Disposition": 'attachment; filename="suppliers_export.json"'},
+    )
+
+
+@router.post("/suppliers/import")
+async def import_suppliers(
+    file: UploadFile = File(..., description="JSON or YAML file with supplier data"),
+    strategy: str = Form("skip", description="How to handle duplicates: 'skip' or 'overwrite'"),
+    service=Depends(get_admin_service),
+):
+    """Import suppliers from an uploaded JSON or YAML file."""
+    import yaml
+
+    contents = await file.read()
+    raw = contents.decode("utf-8")
+
+    # Auto-detect format from filename or content
+    filename = (file.filename or "").lower()
+    is_yaml = filename.endswith((".yaml", ".yml"))
+
+    try:
+        if is_yaml:
+            data = yaml.safe_load(raw)
+        else:
+            import json
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                # Fallback: try YAML (some JSON is valid YAML)
+                data = yaml.safe_load(raw)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"文件解析失败: {str(e)}")
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="无效的导入格式：根对象必须是字典")
+
+    try:
+        result = service.import_suppliers(data, strategy=strategy)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
+
     return result
 
 
@@ -207,6 +293,24 @@ def bulk_update_mappings(body: MappingBulkUpdate, service=Depends(get_admin_serv
     return service.get_mappings()
 
 
+@router.patch("/mappings/{alias_name}")
+def update_mapping(alias_name: str, body: MappingUpdate, service=Depends(get_admin_service)):
+    """Update mapping fields (description, status)."""
+    updated = service.update_mapping(alias_name, **body.model_dump(exclude_unset=True))
+    if not updated:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    return updated
+
+
+@router.patch("/mappings/{alias_name}/status")
+def toggle_mapping_status(alias_name: str, service=Depends(get_admin_service)):
+    """Toggle mapping status between 'active' and 'disabled'."""
+    toggled = service.toggle_mapping_status(alias_name)
+    if not toggled:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    return toggled
+
+
 @router.delete("/mappings/{alias_name}")
 def delete_mapping(alias_name: str, service=Depends(get_admin_service)):
     service.delete_mapping(alias_name)
@@ -217,7 +321,7 @@ def delete_mapping(alias_name: str, service=Depends(get_admin_service)):
 
 @router.get("/mappings/{alias_name}/models")
 def list_mapping_models(alias_name: str, service=Depends(get_admin_service)):
-    """Get all models bound to a mapping alias."""
+    """Get all models bound to a mapping alias (with model_type, context_length)."""
     return service.get_mapping_models(alias_name)
 
 
@@ -229,14 +333,32 @@ def add_mapping_model(
 ):
     """Add a model to a mapping alias."""
     try:
+        # Determine next sort_order
+        existing = service.get_mapping_models(alias_name)
+        next_order = len(existing)
         return service.add_mapping_model(
             alias_name,
             supplier_id=body.supplier_id,
             model_name=body.model_name,
+            sort_order=next_order,
         )
     except Exception as e:
         if "UNIQUE constraint" in str(e):
             raise HTTPException(status_code=409, detail=f"Model {body.model_name} already bound to this alias")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/mappings/{alias_name}/models/reorder")
+def reorder_mapping_models(
+    alias_name: str,
+    body: MappingReorder,
+    service=Depends(get_admin_service)
+):
+    """Reorder binding list for an alias. Body: {ordered_ids: [id1, id2, ...]}."""
+    try:
+        result = service.reorder_mapping_models(alias_name, body.ordered_ids)
+        return result
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -246,6 +368,18 @@ def remove_mapping_model(model_id: int, service=Depends(get_admin_service)):
     if not service.remove_mapping_model(model_id):
         raise HTTPException(status_code=404, detail="Mapping model not found")
     return {"ok": True}
+
+
+# ── Mapping usage (使用情况) ─────────────────────────────────────────────────
+
+@router.get("/mappings/{alias_name}/logs")
+def get_mapping_logs(
+    alias_name: str,
+    days: int = 7,
+    service=Depends(get_admin_service),
+):
+    """Usage stats for one virtual model (日志 drawer). Operation history removed."""
+    return service.get_mapping_usage(alias_name, days=days)
 
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -261,6 +395,54 @@ def update_config(body: ConfigBulkUpdate, service=Depends(get_admin_service)):
     return service.get_config()
 
 
+# ── App Info ─────────────────────────────────────────────────────────────────
+
+def _format_uptime(start_time: Optional[float]) -> str:
+    if start_time is None:
+        return "—"
+    delta = time.time() - start_time
+    days = int(delta // 86400)
+    hours = int((delta % 86400) // 3600)
+    mins = int((delta % 3600) // 60)
+    return f"{days}d {hours}h {mins}m"
+
+
+def _get_db_size() -> str:
+    """Return human-readable SQLite database file size."""
+    try:
+        from core.config import ConfigManager
+        db_url = ConfigManager.get_database_url()
+        db_path = db_url.replace("sqlite:///", "") if db_url.startswith("sqlite:///") else db_url
+        size_bytes = Path(db_path).stat().st_size
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 ** 2:
+            return f"{size_bytes / 1024:.1f} KB"
+        else:
+            return f"{size_bytes / (1024 ** 2):.1f} MB"
+    except Exception:
+        return "—"
+
+
+@router.get("/info")
+def get_app_info(request: Request):
+    """Return runtime info: version, uptime, Python, uvicorn, db_size."""
+    import importlib.metadata as im
+
+    version = "0.2.0"
+    try:
+        uvicorn_version = im.version("uvicorn")
+    except Exception:
+        uvicorn_version = "—"
+    return {
+        "version": version,
+        "uptime": _format_uptime(APP_START_TIME),
+        "python": sys.version.split()[0],
+        "uvicorn": uvicorn_version,
+        "db_size": _get_db_size(),
+    }
+
+
 # ── Logs ────────────────────────────────────────────────────────────────────
 
 @router.get("/logs")
@@ -271,6 +453,7 @@ def list_logs(
     account_id: Optional[str] = None,
     model: Optional[str] = None,
     is_stream: Optional[bool] = None,
+    client_key_name: Optional[str] = None,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
     service=Depends(get_admin_service),
@@ -279,6 +462,7 @@ def list_logs(
         page=page, page_size=page_size,
         status_code=status_code, account_id=account_id,
         model=model, is_stream=is_stream,
+        client_key_name=client_key_name,
         start_time=start_time, end_time=end_time,
     )
     return {"records": records, "total": total, "page": page, "page_size": page_size}
@@ -297,6 +481,14 @@ def get_log_detail(log_id: int, service=Depends(get_admin_service)):
 @router.get("/stats")
 def get_stats(days: int = 30, service=Depends(get_admin_service)):
     return service.get_stats(days=days)
+
+
+# ── Model Quotas ──────────────────────────────────────────────────────────────
+
+@router.get("/model-quota")
+def get_model_quotas(service=Depends(get_admin_service)):
+    """Get model-level quota info aggregated by supplier + model."""
+    return service.get_model_quotas()
 
 
 # ── Alerts ──────────────────────────────────────────────────────────────────
@@ -342,3 +534,100 @@ def list_alerts(days: int = 7, service=Depends(get_admin_service)):
             })
 
     return alerts
+
+
+# ── Client API Keys ─────────────────────────────────────────────────────────
+
+class ClientKeyCreate(BaseModel):
+    name: str = Field(..., description="Client API key name (unique)")
+    description: str = Field(default="", description="Optional description")
+
+
+class ClientKeyUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+
+@router.get("/client-keys")
+def list_client_keys(service=Depends(get_admin_service)):
+    """Get all client API keys with usage stats."""
+    keys = service.get_client_keys()
+    # Mask key values for list response
+    result = []
+    for k in keys:
+        kv = k.get("key_value", "")
+        masked = kv[:8] + "****" + kv[-8:] if len(kv) > 16 else "****"
+        result.append({**k, "key_value_masked": masked})
+    return result
+
+
+@router.post("/client-keys")
+def create_client_key(body: ClientKeyCreate, service=Depends(get_admin_service)):
+    """Create a new client API key."""
+    try:
+        key = service.create_client_key(name=body.name, description=body.description)
+        return key
+    except Exception as e:
+        if "UNIQUE constraint" in str(e):
+            raise HTTPException(status_code=409, detail=f"Key name '{body.name}' already exists")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/client-keys/{key_id}")
+def update_client_key(key_id: int, body: ClientKeyUpdate, service=Depends(get_admin_service)):
+    """Update client API key (name, description, status)."""
+    kwargs = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    updated = service.update_client_key(key_id, **kwargs)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Client key not found")
+    # Mask key value in response
+    kv = updated.get("key_value", "")
+    masked = kv[:8] + "****" + kv[-8:] if len(kv) > 16 else "****"
+    return {**updated, "key_value_masked": masked}
+
+
+@router.delete("/client-keys/{key_id}")
+def delete_client_key(key_id: int, service=Depends(get_admin_service)):
+    """Delete a client API key."""
+    if not service.delete_client_key(key_id):
+        raise HTTPException(status_code=404, detail="Client key not found")
+    return {"ok": True}
+
+
+@router.get("/client-keys/{key_id}/logs")
+def get_client_key_logs(
+    key_id: int,
+    page: int = 0,
+    page_size: int = 50,
+    status_code: Optional[int] = None,
+    model: Optional[str] = None,
+    service=Depends(get_admin_service),
+):
+    """Get usage logs for a specific client API key."""
+    records, total = service.get_key_usage(
+        key_id=key_id,
+        page=page,
+        page_size=page_size,
+        status_code=status_code,
+        model=model,
+    )
+    return {"records": records, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/client-keys/{key_id}/stats")
+def get_client_key_stats(key_id: int, days: int = 30, service=Depends(get_admin_service)):
+    """Get aggregate statistics for a specific client API key."""
+    stats = service.get_key_stats(key_id=key_id, days=days)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Client key not found")
+    return stats
+
+
+@router.get("/client-keys/{key_id}/docs")
+def get_client_key_docs(key_id: int, service=Depends(get_admin_service)):
+    """Generate integration documentation for a specific client API key."""
+    docs = service.get_key_docs(key_id=key_id)
+    if not docs:
+        raise HTTPException(status_code=404, detail="Client key not found")
+    return {"markdown": docs}

@@ -1,12 +1,20 @@
 """Test cases for MappingModelRepository."""
 import pytest
+import sqlite3
 from provider.core.database import DatabaseManager
 from provider.repositories.mapping_model_repository import MappingModelRepository
 
 
 @pytest.fixture
 def test_db():
-    """Create test database with accounts."""
+    """Create test database with accounts and parent mapping entries."""
+    # Start from a clean DB file to ensure FK constraints are active
+    try:
+        import os
+        os.remove('modelscope_proxy_test.db')
+    except FileNotFoundError:
+        pass
+
     db = DatabaseManager('modelscope_proxy_test.db')
     db.initialize_tables()
     # Create test accounts for foreign key constraint
@@ -19,9 +27,15 @@ def test_db():
     assert acc2 is not None
     assert acc1['id'] == 1
     assert acc2['id'] == 2
+    # Create parent model_mappings entries (FK prerequisite for mapping_models)
+    from provider.repositories.mapping_repository import MappingRepository
+    mapping_repo = MappingRepository(db)
+    mapping_repo.create('test-alias', 'test-alias')
+    mapping_repo.create('alias1', 'alias1')
+    mapping_repo.create('alias2', 'alias2')
+    mapping_repo.create('alias3', 'alias3')
     yield db, acc1, acc2
     # Cleanup
-    import sqlite3
     conn = sqlite3.connect('modelscope_proxy_test.db')
     conn.execute("DROP TABLE IF EXISTS mapping_models")
     conn.execute("DROP TABLE IF EXISTS model_mappings")
@@ -122,9 +136,8 @@ def test_updated_at_timestamp(repo, test_db):
     """Test that updated_at is set when adding a model."""
     db, acc1, acc2 = test_db
     import time
-    time.sleep(0.1)  # Ensure timestamp difference
     result1 = repo.add_model('test-alias', acc1['id'], 'qwen-max')
-    time.sleep(0.1)
+    time.sleep(1.1)  # SQLite CURRENT_TIMESTAMP has second-level precision
     result2 = repo.add_model('test-alias', acc2['id'], 'deepseek-chat')
     # updated_at should be different for each
     assert result1['updated_at'] != result2['updated_at']

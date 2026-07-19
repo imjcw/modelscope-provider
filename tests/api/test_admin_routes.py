@@ -216,3 +216,40 @@ def test_list_alerts(client):
 def test_list_alerts_days_param(client):
     r = client.get("/api/admin/alerts?days=14")
     assert r.status_code == 200
+
+
+# ── Mapping usage ──────────────────────────────────────────────────────────
+
+def test_mapping_usage_shape(client):
+    aid = _tid("mkguse")
+    r = client.put("/api/admin/mappings/bulk", json={"mappings": {aid: "actual-1"}})
+    assert r.status_code == 200
+    r = client.get(f"/api/admin/mappings/{aid}/logs")
+    assert r.status_code == 200
+    data = r.json()
+    for key in ("alias", "period_days", "usage"):
+        assert key in data
+    assert data["alias"] == aid
+    usage = data["usage"]
+    for k in ("requests", "input_tokens", "output_tokens", "cache_tokens",
+              "error_count", "cache_hit_rate", "per_model"):
+        assert k in usage
+
+
+def test_mapping_usage_defaults_to_zero(client):
+    """An alias that exists but has no requests returns well-formed zeros."""
+    aid = _tid("mkguse2")
+    client.put("/api/admin/mappings/bulk", json={"mappings": {aid: "actual-1"}})
+    r = client.get(f"/api/admin/mappings/{aid}/logs")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["usage"]["requests"] == 0
+    assert data["usage"]["input_tokens"] == 0
+
+
+def test_mapping_usage_days_param(client):
+    aid = _tid("mkguse3")
+    client.put("/api/admin/mappings/bulk", json={"mappings": {aid: "actual-1"}})
+    r = client.get(f"/api/admin/mappings/{aid}/logs?days=30")
+    assert r.status_code == 200
+    assert r.json()["period_days"] == 30

@@ -76,7 +76,7 @@ class AliasRouter:
         account_dict, model_name = selected
 
         # 转换为 ModelScopeAccount
-        from provider.models.account import ModelScopeAccount
+        from models.account import ModelScopeAccount
 
         ms_account = ModelScopeAccount(
             account_id=account_dict["account_id"],

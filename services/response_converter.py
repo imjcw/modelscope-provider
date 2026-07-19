@@ -10,9 +10,10 @@ class ResponseConverter:
     def convert_to_openai(self, ms_response: Dict[str, Any]) -> Dict[str, Any]:
         """Convert ModelScope response to OpenAI format."""
         try:
-            choices = ms_response.get("choices", [])
+            # Handle null/missing choices (some upstream APIs return "choices": null)
+            choices = ms_response.get("choices") or []
             message = choices[0].get("message", {}) if choices else {}
-            usage = ms_response.get("usage", {})
+            usage = ms_response.get("usage") or {}
             openai_response = {
                 "id": ms_response.get("id", ""),
                 "object": "chat.completion",
