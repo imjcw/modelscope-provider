@@ -267,6 +267,12 @@ class DatabaseManager:
                 ON operation_logs(alias_name, id DESC)
             """)
 
+            # Unique index on accounts.name (paired with the baseline `name` column).
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_name
+                ON accounts(name)
+            """)
+
             logger.info("Database tables initialized")
 
     def seed_default_config(self):
