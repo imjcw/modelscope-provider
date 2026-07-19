@@ -2,7 +2,7 @@
   <div>
     <PageHeader title="系统配置" subtitle="全局参数和服务设置"></PageHeader>
 
-    <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
 
       <!-- Server Settings -->
       <div class="bg-ls-card rounded-lg border border-ls-border">

@@ -435,3 +435,9 @@ input[type="number"] {
   color: var(--text-muted);
   line-height: 1;
 }
+
+/* === Responsive: drawer full-screen on Pad/mobile === */
+.drawer-full {
+  width: 100% !important;
+  max-width: 100%;
+}

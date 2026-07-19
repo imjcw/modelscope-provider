@@ -28,23 +28,23 @@
       <div class="flex flex-wrap gap-3 mb-5 items-center">
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
           <label class="text-xs text-gray-500 flex-shrink-0">时间</label>
-          <div class="w-56"><DateRangePicker @update="onTimeChange" /></div>
+          <div class="flex-1 min-w-0 lg:w-56"><DateRangePicker @update="onTimeChange" /></div>
         </div>
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
           <label class="text-xs text-gray-500 flex-shrink-0">供应商</label>
-          <div class="w-36"><CSelect v-model="filters.accountId" :options="ACCOUNT_OPTIONS" size="sm" placeholder="选择供应商" /></div>
+          <div class="flex-1 min-w-0 lg:w-36"><CSelect v-model="filters.accountId" :options="ACCOUNT_OPTIONS" size="sm" placeholder="选择供应商" /></div>
         </div>
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
           <label class="text-xs text-gray-500 flex-shrink-0">模型</label>
-          <div class="w-36"><CSelect v-model="filters.model" :options="MODEL_OPTIONS" size="sm" placeholder="选择模型" /></div>
+          <div class="flex-1 min-w-0 lg:w-36"><CSelect v-model="filters.model" :options="MODEL_OPTIONS" size="sm" placeholder="选择模型" /></div>
         </div>
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
           <label class="text-xs text-gray-500 flex-shrink-0">状态</label>
-          <div class="w-20"><CSelect v-model="filters.statusCode" :options="STATUS_CODE_OPTIONS" size="sm" placeholder="全部" /></div>
+          <div class="flex-1 min-w-0 lg:w-20"><CSelect v-model="filters.statusCode" :options="STATUS_CODE_OPTIONS" size="sm" placeholder="全部" /></div>
         </div>
         <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
           <label class="text-xs text-gray-500 flex-shrink-0">流式</label>
-          <div class="w-20"><CSelect v-model="filters.isStream" :options="STREAM_OPTIONS" size="sm" placeholder="全部" /></div>
+          <div class="flex-1 min-w-0 lg:w-20"><CSelect v-model="filters.isStream" :options="STREAM_OPTIONS" size="sm" placeholder="全部" /></div>
         </div>
       </div>
 
@@ -55,7 +55,7 @@
         <div v-if="filteredLogs.length === 0 && !loading" class="text-center text-gray-500 py-12">
           暂无日志记录
         </div>
-        <div v-else class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
+        <div v-else class="bg-ls-card rounded-lg border border-ls-border overflow-hidden overflow-x-auto">
           <table class="w-full text-xs">
             <thead>
               <tr class="text-gray-500 border-b border-ls-border bg-ls-bg">

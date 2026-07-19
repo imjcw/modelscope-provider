@@ -49,7 +49,7 @@
             <div v-for="i in 5" :key="i" class="border-t border-ls-border/50"></div>
           </div>
           <!-- SVG line chart -->
-          <svg class="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <svg class="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
             <polyline :points="trendLines.input" fill="none" stroke="#60a5fa" stroke-width="0.8" :vector-effect="'non-scaling-stroke'" />
             <polyline :points="trendLines.output" fill="none" stroke="#34d399" stroke-width="0.8" :vector-effect="'non-scaling-stroke'" />
             <polyline :points="trendLines.cached" fill="none" stroke="#fbbf24" stroke-width="0.8" :vector-effect="'non-scaling-stroke'" />
