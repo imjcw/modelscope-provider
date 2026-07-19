@@ -209,6 +209,7 @@ const TREND_OPTIONS = [
 
 const loading = ref(true)
 const error = ref(null)
+const dailyTokens = ref({})  // store for resize rebuild
 
 // Stat cards
 const statCards = ref([
@@ -273,10 +274,9 @@ const buildPolylinePoints = (values, w, h) => {
 }
 
 // ── Build heatmap from daily data ──
-// GitHub-style: columns = weeks, rows = 7 weekdays (Sun=0 top, Sat=6 bottom)
-// Render 52 weeks (1 year) ending at this Saturday.
-// Fixed cell size computed from container width.
-const buildHeatmap = (dailyTokens, heatmapCounts) => {
+// GitHub-style: always 7 rows (Sun=0 top, Sat=6 bottom)
+// Columns computed dynamically: fixed cell size, fit as many columns as container allows.
+const buildHeatmap = (dailyTokens) => {
   const dates = Object.keys(dailyTokens).sort()
   if (!dates.length) {
     heatmapCols.value = []
@@ -308,24 +308,23 @@ const buildHeatmap = (dailyTokens, heatmapCounts) => {
     }
   })
 
-  // Compute fixed cell size from container width
+  // Fixed cell size, compute how many columns fit in the container
   const containerEl = heatmapCard.value
   const containerWidth = containerEl ? containerEl.clientWidth - 40 : 900
   const GAP = 3
-  const WEEKS = 52
-  const rawSize = Math.floor((containerWidth - WEEKS * GAP) / WEEKS)
-  heatmapCellSize.value = Math.max(6, Math.min(14, rawSize))
-  heatmapColWidth.value = heatmapCellSize.value + GAP
+  const CELL = 12  // fixed cell size in px
+  const MAX_COLS = Math.max(1, Math.floor((containerWidth - GAP) / (CELL + GAP)))
+  const MIN_COLS = 12
+  const cols = Math.max(MIN_COLS, Math.min(MAX_COLS, 73))
+  heatmapCellSize.value = CELL
+  heatmapColWidth.value = CELL + GAP
 
-  // Date range: 52 weeks ending at this Saturday
+  // Date range: ending at this Saturday, going back `cols` weeks
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const todayDayOfWeek = today.getDay()
   const endDate = new Date(today)
   endDate.setDate(endDate.getDate() + (todayDayOfWeek === 0 ? 0 : 7 - todayDayOfWeek))
-
-  const startDate = new Date(endDate)
-  startDate.setDate(startDate.getDate() - 52 * 7)
 
   const toKey = (d) => {
     const y = d.getFullYear()
@@ -334,13 +333,13 @@ const buildHeatmap = (dailyTokens, heatmapCounts) => {
     return `${y}-${m}-${dd}`
   }
 
-  // Build grid: grid[col][row] where row 0=Sun, row 6=Sat
+  // Build grid: grid[col][row] where col 0=oldest, row 0=Sun, row 6=Sat
   const grid = []
-  for (let wi = 0; wi < 52; wi++) {
+  for (let wi = 0; wi < cols; wi++) {
     const col = []
     for (let ri = 0; ri < 7; ri++) {
-      const day = new Date(startDate)
-      day.setDate(day.getDate() + wi * 7 + ri)
+      const day = new Date(endDate)
+      day.setDate(day.getDate() - (cols - 1 - wi) * 7 + (ri - 6))
       const key = toKey(day)
       col.push(lookup[key] || {
         date: key, tokens: 0, intensity: 0, weekday: day.getDay(),
@@ -352,18 +351,15 @@ const buildHeatmap = (dailyTokens, heatmapCounts) => {
 
   heatmapCols.value = grid
 
-  // Date labels: show every 4th column
+  // Date labels: show a few labels spaced across columns
+  const labelStep = Math.max(1, Math.floor(cols / 5))
   heatmapDateLabels.value = grid.map((col, ci) => {
-    if (ci % 4 === 0) {
-      for (const cell of col) {
-        if (cell.date) {
-          const parts = cell.date.split('-')
-          return `${parts[1]}/${parts[2]}`
-        }
-      }
+    if (ci % labelStep === 0) {
+      const parts = col[0].date.split('-')
+      return `${parts[1]}/${parts[2]}`
     }
     return ''
-  }).filter(l => l !== '')
+  })
 }
 
 const showTooltip = (event, cell) => {
@@ -523,7 +519,8 @@ const loadData = async () => {
       }).sort((a, b) => b.requests - a.requests)
 
       // ── Heatmap ──
-      buildHeatmap(s.daily_tokens || {}, s.heatmap || {})
+      dailyTokens.value = s.daily_tokens || {}
+      buildHeatmap(dailyTokens.value)
     }
   } catch (e) {
     error.value = e.message || '加载数据失败'
@@ -540,19 +537,13 @@ const watchTrendDays = () => {
 
 onMounted(() => loadData())
 
-// Recalculate cell sizes on resize
+// Rebuild heatmap on resize (dynamic column count)
 let resizeTimer = null
 const handleResize = () => {
   clearTimeout(resizeTimer)
   resizeTimer = setTimeout(() => {
-    if (!loading.value && heatmapCols.value.length) {
-      const containerEl = heatmapCard.value
-      const containerWidth = containerEl ? containerEl.clientWidth - 40 : 900
-      const GAP = 3
-      const WEEKS = 52
-      const rawSize = Math.floor((containerWidth - WEEKS * GAP) / WEEKS)
-      heatmapCellSize.value = Math.max(6, Math.min(14, rawSize))
-      heatmapColWidth.value = heatmapCellSize.value + GAP
+    if (dailyTokens.value) {
+      buildHeatmap(dailyTokens.value)
     }
   }, 300)
 }
