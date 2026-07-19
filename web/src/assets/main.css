@@ -24,6 +24,12 @@ html, body, #app {
   --accent: #89b4fa;
   --accent-dim: #74c7ec;
   --ring: #89b4fa33;
+  --ls-bg: #0e0e10;
+  --ls-card: #1a1a1e;
+  --ls-elevated: #232329;
+  --ls-accent: #5e6ad2;
+  --ls-accentHover: #6b7bf2;
+  --ls-border: #1f1f23;
 }
 
 /* ── Shared Drawer (form/edit — no close on backdrop click) ── */

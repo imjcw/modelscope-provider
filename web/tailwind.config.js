@@ -7,14 +7,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Linear style tokens
+        // Linear style tokens (now CSS variable references for theme support)
         'ls': {
-          bg: '#0e0e10',
-          card: '#1a1a1e',
-          elevated: '#232329',
-          accent: '#5e6ad2',
-          accentHover: '#6b7bf2',
-          border: '#1f1f23',
+          bg: 'var(--ls-bg)',
+          card: 'var(--ls-card)',
+          elevated: 'var(--ls-elevated)',
+          accent: 'var(--ls-accent)',
+          accentHover: 'var(--ls-accentHover)',
+          border: 'var(--ls-border)',
         },
       },
       fontFamily: {
