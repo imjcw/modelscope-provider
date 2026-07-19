@@ -38,6 +38,25 @@ def fake_migrations():
     return [_AddColumn(), _AddAnother()]
 
 
+class _Boom(Migration):
+    version = 3
+    description = "Explodes"
+
+    def up(self, conn):
+        raise RuntimeError("boom")
+
+
+def test_run_up_failure_leaves_no_version_record(db):
+    """up() 抛异常时不应写入 schema_versions。"""
+    migrator = Migrator(db, migrations=[_Boom()])
+    with pytest.raises(RuntimeError, match="boom"):
+        migrator.run()
+
+    with db.get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM schema_versions").fetchone()[0]
+        assert count == 0
+
+
 def test_run_applies_pending_migrations(db, fake_migrations):
     with db.get_connection() as conn:
         conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")

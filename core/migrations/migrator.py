@@ -49,6 +49,7 @@ class Migrator:
         for m in pending:
             logger.info(f"Running migration {m.version}: {m.description}")
             with self.db.get_connection() as conn:
+                conn.execute("BEGIN")
                 m.up(conn)
                 conn.execute(
                     "INSERT INTO schema_versions (version, description) VALUES (?, ?)",
