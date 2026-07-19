@@ -117,74 +117,8 @@
         </div>
       </div>
 
-      <!-- Detail Drawer -->
-      <div v-if="selectedLog" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex justify-end" @click.self="selectedLog = null">
-        <div class="w-[640px] h-full bg-ls-bg border-l border-ls-border overflow-y-auto p-6">
-          <div class="flex items-center justify-between mb-6">
-            <div>
-              <h2 class="text-lg font-semibold text-white">日志详情</h2>
-              <p class="text-xs text-gray-500 mt-0.5">{{ selectedLog.request_id }} · {{ selectedLog.timestamp }}</p>
-            </div>
-            <button @click="selectedLog = null" class="text-gray-500 hover:text-white">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-          </div>
-
-          <!-- Meta -->
-          <div class="bg-ls-card rounded-lg border border-ls-border p-5 mb-4">
-            <h3 class="text-xs text-gray-500 font-medium mb-3">请求信息</h3>
-            <div class="grid grid-cols-2 gap-x-8 gap-y-2.5">
-              <div v-for="(v, k) in logMeta" :key="k">
-                <p class="text-xs text-gray-500">{{ k }}</p>
-                <p class="text-sm text-white">{{ v }}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Status & Response -->
-          <div class="bg-ls-card rounded-lg border border-ls-border p-5 mb-4">
-            <h3 class="text-xs text-gray-500 font-medium mb-3">响应</h3>
-            <div class="flex items-center gap-3 mb-3">
-              <span class="inline-flex items-center rounded-md px-2 py-0.5 text-sm"
-                :class="selectedLog.status_code >= 400 ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'">
-                {{ selectedLog.status_code }} {{ selectedLog.status_code >= 400 ? 'Error' : 'OK' }}
-              </span>
-              <span class="text-xs text-gray-500">{{ selectedLog.latency_ms }}ms</span>
-            </div>
-            <pre class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono overflow-x-auto leading-relaxed whitespace-pre-wrap">{{ selectedLog.raw_response || '{}' }}</pre>
-          </div>
-
-          <!-- Messages -->
-          <div class="bg-ls-card rounded-lg border border-ls-border p-5 mb-4">
-            <h3 class="text-xs text-gray-500 font-medium mb-3">Messages</h3>
-            <div class="space-y-2">
-              <details v-for="(msg, i) in sampleMessages" :key="i" class="group bg-ls-bg rounded-lg border border-ls-border">
-                <summary class="flex items-center gap-2 px-3 py-2 cursor-pointer list-none hover:bg-ls-elevated transition-colors">
-                  <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
-                  <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs"
-                    :class="msg.role === 'system' ? 'bg-ls-accent/10 text-ls-accent' : msg.role === 'user' ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'">
-                    {{ msg.role }}
-                  </span>
-                  <span class="text-xs text-gray-400 truncate">{{ msg.content.slice(0, 60) }}{{ msg.content.length > 60 ? '...' : '' }}</span>
-                </summary>
-                <pre class="px-3 pb-3 text-xs text-gray-300 font-mono whitespace-pre-wrap">{{ msg.content }}</pre>
-              </details>
-            </div>
-          </div>
-
-          <!-- Token usage -->
-          <div class="bg-ls-card rounded-lg border border-ls-border p-5">
-            <h3 class="text-xs text-gray-500 font-medium mb-3">Token 用量</h3>
-            <div class="space-y-2">
-              <div class="flex justify-between text-sm"><span class="text-gray-400">输入 Token</span><span class="text-white font-mono">{{ selectedLog.input_tokens.toLocaleString() }}</span></div>
-              <div class="flex justify-between text-sm"><span class="text-gray-400">输出 Token</span><span class="text-white font-mono">{{ selectedLog.output_tokens.toLocaleString() }}</span></div>
-              <div class="flex justify-between text-sm"><span class="text-gray-400">总 Token</span><span class="text-white font-mono">{{ (selectedLog.input_tokens + selectedLog.output_tokens).toLocaleString() }}</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- Detail Panel -->
+      <LogDetailPanel v-model="selectedLog" />
     </div>
     </div>
   </div>
@@ -193,8 +127,9 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { getLogs, getLogDetail, getSuppliers, getSupplierModels } from '@/api'
+import { getLogs, getSuppliers, getSupplierModels } from '@/api'
 import CSelect from '@/components/CSelect.vue'
+import LogDetailPanel from './LogDetailPanel.vue'
 
 const ACCOUNT_OPTIONS = ref([
   { label: '选择供应商', value: '' },
@@ -246,21 +181,6 @@ const formatTime = (ts) => {
   return `${cst.getUTCFullYear()}-${pad(cst.getUTCMonth() + 1)}-${pad(cst.getUTCDate())} ${pad(cst.getUTCHours())}:${pad(cst.getUTCMinutes())}:${pad(cst.getUTCSeconds())}.${String(cst.getUTCMilliseconds()).padStart(3, '0')}`
 }
 
-const logMeta = computed(() => {
-  if (!selectedLog.value) return {}
-  const l = selectedLog.value
-  return {
-    '请求 ID': l.request_id,
-    '时间': l.timestamp,
-    '模型': l.model,
-    '实际模型': l.actual_model_id || l.model,
-    '供应商': l.account_name || l.account_id || '',
-    '状态': l.status_code >= 400 ? l.status_code + ' Error' : '200 OK',
-    '流式': l.is_stream ? '是' : '否',
-    '延迟': l.latency_ms + 'ms',
-  }
-})
-
 const loadLogs = async () => {
   loading.value = true
   try {
@@ -278,14 +198,8 @@ const loadLogs = async () => {
   loading.value = false
 }
 
-const showDetail = async (log) => {
+const showDetail = (log) => {
   selectedLog.value = log
-  try {
-    const res = await getLogDetail(log.id || log.request_id)
-    Object.assign(log, res.data)
-  } catch (e) {
-    console.error('Failed to load log detail:', e)
-  }
 }
 
 watch(page, () => loadLogs())
