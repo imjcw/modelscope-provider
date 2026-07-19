@@ -3,7 +3,7 @@
     <!-- Overlay -->
     <div v-if="modelValue" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" @click.self="close"></div>
 
-    <!-- Drawer (v-show keeps element in DOM so CSS transition always fires) -->
+    <!-- Drawer -->
     <div v-show="modelValue" class="fixed top-0 right-0 bottom-0 w-[1300px] bg-ls-bg border-l border-ls-border z-50 flex flex-col shadow-2xl"
       :class="showDrawer ? 'translate-x-0' : 'translate-x-full'"
       :style="{ transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)' }">
@@ -45,76 +45,198 @@
               </div>
             </div>
 
-            <!-- Request messages -->
-            <div v-for="(msg, i) in conversationMessages" :key="'req-' + i"
-              class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
-              <button @click="toggleExpanded(i)"
+            <!-- ── History messages (before the last user message) ── -->
+            <template v-if="historyMessages.length > 0">
+              <button @click="showHistory = !showHistory"
+                class="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-ls-border text-xs text-gray-500 hover:text-white hover:border-gray-500 transition-colors">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="transition-transform" :class="showHistory ? 'rotate-180' : ''">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+                <span>{{ showHistory ? '收起历史消息' : '加载历史消息' }}</span>
+                <span class="text-gray-600">{{ historyMessages.length }} 条</span>
+              </button>
+              <div v-if="showHistory" class="space-y-2">
+                <div v-for="(msg, i) in historyMessages" :key="'hist-' + i"
+                  class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
+                  <button @click="toggleHistoryCollapsed(i)"
+                    class="flex items-center gap-2 px-4 py-2.5 w-full text-left hover:bg-ls-elevated transition-colors">
+                    <span v-if="msg.role === 'system'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-ls-accent/10 text-ls-accent">System</span>
+                    <span v-else-if="msg.role === 'user'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-green-500/10 text-green-400">User</span>
+                    <span v-else-if="msg.role === 'assistant'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-yellow-500/10 text-yellow-400">Assistant</span>
+                    <span v-else-if="msg.role === 'tool_call'" class="inline-flex items-center gap-2">
+                      <span :class="toolTypeColor(msg.toolName || 'tool')" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
+                        {{ toolTypeLabel(msg.toolName || 'tool') }}
+                      </span>
+                      <span class="text-xs text-gray-400">{{ msg.toolName || 'Tool' }}</span>
+                      <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
+                    </span>
+                    <span v-else-if="msg.role === 'tool'" class="inline-flex items-center gap-2">
+                      <span :class="toolTypeColor(msg.toolName || 'tool')" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
+                        {{ toolTypeLabel(msg.toolName || 'tool') }}
+                      </span>
+                      <span class="text-xs text-gray-400">{{ msg.toolName || 'Tool' }}</span>
+                      <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
+                    </span>
+                    <span v-if="msg.content" @click.stop="toggleHistoryRender(i)"
+                      class="text-xs text-gray-500 hover:text-white px-1.5 py-0.5 rounded transition-colors"
+                      :class="renderModes[String(i)] === 'raw' ? 'bg-ls-elevated text-gray-300' : ''">
+                      {{ renderModes[String(i)] === 'raw' ? 'RAW' : 'MD' }}
+                    </span>
+                    <span class="ml-auto text-gray-500 text-xs transition-transform" :class="!historyCollapsed[String(i)] ? 'rotate-90' : ''">▶</span>
+                  </button>
+                  <div v-if="!historyCollapsed[String(i)]" class="px-4 py-3 text-xs text-gray-300">
+                    <!-- Tool call card: 入参 + 出参 (merged from tool role) -->
+                    <template v-if="msg.role === 'tool_call'">
+                      <div class="text-xs text-gray-300 mb-2">
+                        <span class="text-gray-500">入参:</span>
+                        <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
+                        <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                      </div>
+                      <div v-if="msg.toolResult" class="mt-2 pt-2 border-t border-ls-border">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
+                        </div>
+                        <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.toolResult" />
+                        <pre v-if="renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
+                      </div>
+                    </template>
+                    <!-- Tool card: 入参 + 出参 -->
+                    <template v-if="msg.role === 'tool'">
+                      <div class="text-xs text-gray-300 mb-2">
+                        <span class="text-gray-500">入参:</span>
+                        <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
+                        <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                      </div>
+                      <div v-if="msg.content" class="mt-2 pt-2 border-t border-ls-border">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
+                        </div>
+                        <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.content" />
+                        <pre v-if="renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
+                      </div>
+                    </template>
+                    <!-- Normal message content -->
+                    <div v-if="msg.role !== 'tool' && msg.role !== 'tool_call' && msg.content && renderModes[String(i)] !== 'raw'">
+                      <MarkdownRender :source="msg.content" />
+                    </div>
+                    <pre v-if="msg.role !== 'tool' && msg.role !== 'tool_call' && msg.content && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
+                    <!-- Assistant toolCalls with inline results -->
+                    <div v-if="msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0" class="mt-3 pt-3 border-t border-ls-border space-y-2">
+                      <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                        <div class="flex items-center gap-2 mb-2">
+                          <span :class="toolTypeColor(tc.name)" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
+                            {{ toolTypeLabel(tc.name) }}
+                          </span>
+                          <span class="text-xs text-gray-400 font-medium">{{ tc.name }}</span>
+                          <span v-if="tc.id" class="text-xs text-gray-500 font-mono">{{ tc.id }}</span>
+                        </div>
+                        <div class="text-xs text-gray-300 mb-2">
+                          <span class="text-gray-500">入参:</span>
+                          <MarkdownRender :source="tc.arguments" />
+                        </div>
+                        <div v-if="tc.result" class="mt-2 pt-2 border-t border-ls-border">
+                          <div class="flex items-center gap-2 mb-1">
+                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
+                          </div>
+                          <MarkdownRender :source="tc.result" />
+                        </div>
+                      </div>
+                    </div>
+                    <span v-if="!msg.content && !msg.toolCalls && msg.role !== 'tool' && msg.role !== 'tool_call'" class="text-gray-600 text-xs italic">—</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- ── Current conversation (from the last user message onwards) ── -->
+            <div v-for="(msg, i) in currentMessages" :key="'cur-' + i"
+              :class="['bg-ls-card rounded-lg border overflow-hidden', i === 0 ? 'border-ls-accent' : 'border-ls-border']">
+              <button @click="toggleExpanded(currentStartIndex + i)"
                 class="flex items-center gap-2 px-4 py-2.5 w-full text-left hover:bg-ls-elevated transition-colors">
                 <span v-if="msg.role === 'system'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-ls-accent/10 text-ls-accent">System</span>
                 <span v-else-if="msg.role === 'user'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-green-500/10 text-green-400">User</span>
                 <span v-else-if="msg.role === 'assistant'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-yellow-500/10 text-yellow-400">Assistant</span>
-                <span v-else-if="msg.role === 'tool'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">Tool</span>
-                <span v-else-if="msg.role === 'tool_call'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">
-                  <span v-if="msg.toolCalls && msg.toolCalls[0]" :class="toolTypeColor(msg.toolCalls[0].name)">
-                    {{ toolTypeLabel(msg.toolCalls[0].name) }}
+                <span v-else-if="msg.role === 'tool_call'" class="inline-flex items-center gap-2">
+                  <span :class="toolTypeColor(msg.toolName || 'tool')" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
+                    {{ toolTypeLabel(msg.toolName || 'tool') }}
                   </span>
-                  <span class="ml-1 text-xs text-gray-400">{{ msg.toolCalls && msg.toolCalls[0] ? msg.toolCalls[0].name : 'Tool' }}</span>
-                  <span v-if="msg.toolCalls && msg.toolCalls[0]?.id" class="ml-1 text-xs text-gray-500 font-mono">{{ msg.toolCalls[0].id }}</span>
+                  <span class="text-xs text-gray-400">{{ msg.toolName || 'Tool' }}</span>
+                  <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
                 </span>
-                <!-- Markdown / Raw toggle -->
-                <button v-if="msg.content" @click.stop="toggleRender(i)"
+                <span v-else-if="msg.role === 'tool'" class="inline-flex items-center gap-2">
+                  <span :class="toolTypeColor(msg.toolName || 'tool')" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
+                    {{ toolTypeLabel(msg.toolName || 'tool') }}
+                  </span>
+                  <span class="text-xs text-gray-400">{{ msg.toolName || 'Tool' }}</span>
+                  <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
+                </span>
+                <span v-if="i === 0 && msg.role === 'user'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] bg-green-500/20 text-green-300 border border-green-500/30">本次输入</span>
+                <button v-if="msg.content" @click.stop="toggleRender(currentStartIndex + i)"
                   class="text-xs text-gray-500 hover:text-white px-1.5 py-0.5 rounded transition-colors"
-                  :class="renderModes[i] === 'raw' ? 'bg-ls-elevated text-gray-300' : ''">
-                  {{ renderModes[i] === 'raw' ? 'RAW' : 'MD' }}
+                  :class="renderModes[String(currentStartIndex + i)] === 'raw' ? 'bg-ls-elevated text-gray-300' : ''">
+                  {{ renderModes[String(currentStartIndex + i)] === 'raw' ? 'RAW' : 'MD' }}
                 </button>
-                <span class="ml-auto text-gray-500 text-xs transition-transform" :class="expandedMap.get(i) ? 'rotate-90' : ''">▶</span>
+                <span class="ml-auto text-gray-500 text-xs transition-transform" :class="expandedMap.get(currentStartIndex + i) ? 'rotate-90' : ''">▶</span>
               </button>
-              <!-- Expanded content: Markdown or Raw -->
-              <div v-if="expandedMap.get(i)" class="px-4 py-3 text-xs text-gray-300">
-                <!-- Normal messages: show content -->
-                <template v-if="msg.role !== 'tool_call'">
-                  <MarkdownRender v-if="msg.content && renderModes[i] !== 'raw'" :source="msg.content" />
-                  <pre v-if="msg.content && renderModes[i] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
-                  <span v-if="!msg.content && !msg.toolCalls" class="text-gray-600 text-xs italic">—</span>
+              <div v-if="expandedMap.get(currentStartIndex + i)" class="px-4 py-3 text-xs text-gray-300">
+                <!-- Tool call card: 入参 + 出参 (merged from tool role) -->
+                <template v-if="msg.role === 'tool_call'">
+                  <div class="text-xs text-gray-300 mb-2">
+                    <span class="text-gray-500">入参:</span>
+                    <MarkdownRender v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolArguments" />
+                    <pre v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                  </div>
+                  <div v-if="msg.toolResult" class="mt-2 pt-2 border-t border-ls-border">
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
+                    </div>
+                    <MarkdownRender v-if="renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolResult" />
+                    <pre v-if="renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
+                  </div>
                 </template>
-                <!-- Tool call: header already shows tool name, just show args/result -->
-                <template v-else-if="msg.toolCalls && msg.toolCalls.length > 0">
-                  <div v-for="(tc, ti) in msg.toolCalls" :key="ti">
-                    <div v-if="ti > 0" class="pt-2 mt-2 border-t border-ls-border"></div>
+                <!-- Tool card: 入参 + 出参 -->
+                <template v-if="msg.role === 'tool'">
+                  <div class="text-xs text-gray-300 mb-2">
+                    <span class="text-gray-500">入参:</span>
+                    <MarkdownRender v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolArguments" />
+                    <pre v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                  </div>
+                  <div v-if="msg.content" class="mt-2 pt-2 border-t border-ls-border">
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
+                    </div>
+                    <MarkdownRender v-if="renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.content" />
+                    <pre v-if="renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
+                  </div>
+                </template>
+                <!-- Normal message content -->
+                <div v-if="msg.role !== 'tool' && msg.role !== 'tool_call' && msg.content && renderModes[String(currentStartIndex + i)] !== 'raw'">
+                  <MarkdownRender :source="msg.content" />
+                </div>
+                <pre v-if="msg.role !== 'tool' && msg.role !== 'tool_call' && msg.content && renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
+                <!-- Assistant toolCalls with inline results -->
+                <div v-if="msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0" class="mt-3 pt-3 border-t border-ls-border space-y-2">
+                  <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                    <div class="flex items-center gap-2 mb-2">
+                      <span :class="toolTypeColor(tc.name)" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
+                        {{ toolTypeLabel(tc.name) }}
+                      </span>
+                      <span class="text-xs text-gray-400 font-medium">{{ tc.name }}</span>
+                      <span v-if="tc.id" class="text-xs text-gray-500 font-mono">{{ tc.id }}</span>
+                    </div>
                     <div class="text-xs text-gray-300 mb-2">
-                      <span class="text-gray-500">Args:</span>
+                      <span class="text-gray-500">入参:</span>
                       <MarkdownRender :source="tc.arguments" />
                     </div>
                     <div v-if="tc.result" class="mt-2 pt-2 border-t border-ls-border">
                       <div class="flex items-center gap-2 mb-1">
-                        <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">Result</span>
+                        <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
                       </div>
                       <MarkdownRender :source="tc.result" />
                     </div>
                   </div>
-                </template>
-              </div>
-              <!-- Tool calls nested in assistant messages (not tool_call role) -->
-              <div v-if="expandedMap.get(i) && msg.toolCalls && msg.role !== 'tool_call'" class="px-4 py-3 space-y-2">
-                <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                  <div class="flex items-center gap-2 mb-2">
-                    <span :class="toolTypeColor(tc.name)" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
-                      {{ toolTypeLabel(tc.name) }}
-                    </span>
-                    <span class="text-xs text-gray-400 font-medium">{{ tc.name }}</span>
-                    <span v-if="tc.id" class="text-xs text-gray-500 font-mono">{{ tc.id }}</span>
-                  </div>
-                  <div class="text-xs text-gray-300 mb-2">
-                    <span class="text-gray-500">Args:</span>
-                    <MarkdownRender :source="tc.arguments" />
-                  </div>
-                  <div v-if="tc.result" class="mt-2 pt-2 border-t border-ls-border">
-                    <div class="flex items-center gap-2 mb-1">
-                      <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">Result</span>
-                    </div>
-                    <MarkdownRender :source="tc.result" />
-                  </div>
                 </div>
+                <span v-if="!msg.content && !msg.toolCalls && msg.role !== 'tool' && msg.role !== 'tool_call'" class="text-gray-600 text-xs italic">—</span>
               </div>
             </div>
 
@@ -147,7 +269,6 @@
                 class="flex items-center gap-2 px-4 py-2.5 w-full text-left hover:bg-ls-elevated transition-colors">
                 <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-yellow-500/10 text-yellow-400">Assistant</span>
                 <span v-if="responseChunks.length > 1" class="text-xs text-gray-600">{{ responseChunks.length }} chunks</span>
-                <!-- Markdown / Raw toggle -->
                 <button @click.stop="toggleResponseRender"
                   class="text-xs text-gray-500 hover:text-white px-1.5 py-0.5 rounded transition-colors"
                   :class="responseRenderMode === 'raw' ? 'bg-ls-elevated text-gray-300' : ''">
@@ -296,8 +417,6 @@
             </div>
           </div>
 
-          <!-- 请求数据 removed -->
-
         </div>
 
       </div>
@@ -318,12 +437,39 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 const showDrawer = ref(false)
+const showHistory = ref(false)
 
-// Expand state
+// ── Find the index of the last user message (the one that triggered this request) ──
+const lastUserIndex = computed(() => {
+  const msgs = conversationMessages.value
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'user') return i
+  }
+  return -1
+})
+
+// Messages before the last user message = history
+const historyMessages = computed(() => {
+  return lastUserIndex.value >= 0
+    ? conversationMessages.value.slice(0, lastUserIndex.value)
+    : []
+})
+
+// Messages from the last user message onwards = current conversation
+const currentMessages = computed(() => {
+  if (lastUserIndex.value >= 0) {
+    return conversationMessages.value.slice(lastUserIndex.value)
+  }
+  return conversationMessages.value
+})
+const currentStartIndex = computed(() => lastUserIndex.value >= 0 ? lastUserIndex.value : 0)
+
+// ── Expand / collapse state ──
 const collapsedMsgs = ref({})
+const historyCollapsed = ref({})
 const responseExpanded = ref(true)
-const responseRenderMode = ref('md')  // 'md' | 'raw'
-const renderModes = ref({})  // index -> 'md' | 'raw'
+const responseRenderMode = ref('md')
+const renderModes = ref({})
 
 const close = () => {
   showDrawer.value = false
@@ -332,14 +478,12 @@ const close = () => {
   }, 350)
 }
 
-// ESC to close
 const handleKeydown = (e) => {
   if (e.key === 'Escape') close()
 }
 onMounted(() => window.addEventListener('keydown', handleKeydown))
 onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
 
-// When modelValue changes, show drawer after next tick
 watch(() => props.modelValue, (val) => {
   if (val) {
     nextTick(() => {
@@ -347,26 +491,42 @@ watch(() => props.modelValue, (val) => {
       renderModes.value = {}
       responseExpanded.value = true
       responseRenderMode.value = 'md'
-      // Collapse system, tool, and tool_call messages by default
-      const collapsed = {}
-      for (let i = 0; i < conversationMessages.value.length; i++) {
+      showHistory.value = false
+
+      // History messages: all collapsed
+      const hist = {}
+      for (let i = 0; i < historyMessages.value.length; i++) {
+        hist[String(i)] = true
+      }
+      historyCollapsed.value = hist
+
+      // Current messages: collapse system/tool, leave user/assistant/tool_call expanded
+      const curr = {}
+      for (let i = currentStartIndex.value; i < conversationMessages.value.length; i++) {
         const msg = conversationMessages.value[i]
-        if (msg.role === 'system' || msg.role === 'tool' || msg.role === 'tool_call') {
-          collapsed[String(i)] = true
+        if (msg.role === 'system' || msg.role === 'tool') {
+          curr[String(i)] = true
         }
       }
-      collapsedMsgs.value = collapsed
+      collapsedMsgs.value = curr
     })
   } else {
     showDrawer.value = false
     collapsedMsgs.value = {}
+    historyCollapsed.value = {}
     renderModes.value = {}
     responseExpanded.value = true
     responseRenderMode.value = 'md'
+    showHistory.value = false
   }
 }, { immediate: true })
 
 function toggleRender(i) {
+  const key = String(i)
+  renderModes.value[key] = renderModes.value[key] === 'raw' ? 'md' : 'raw'
+}
+
+function toggleHistoryRender(i) {
   const key = String(i)
   renderModes.value[key] = renderModes.value[key] === 'raw' ? 'md' : 'raw'
 }
@@ -376,17 +536,23 @@ function toggleResponseRender() {
 }
 
 // ── Parse raw_request to extract conversation messages ──
+// Strategy:
+//   1. assistant with tool_calls → split into individual "tool_call" cards
+//      (each shows: tool type, name, id, 入参)
+//   2. tool role messages → merge into the matching tool_call card by tool_call_id,
+//      becoming the 出参.
 const conversationMessages = computed(() => {
   if (!props.modelValue?.raw_request) return []
   try {
     const parsed = JSON.parse(props.modelValue.raw_request)
     const messages = parsed.messages || []
     const out = []
+
+    // Pass 1: flatten all messages, split assistant tool_calls into individual entries
     for (const msg of messages) {
       const content = typeof msg.content === 'string' ? msg.content : ''
       const calls = msg.tool_calls || msg.toolCalls
 
-      // Assistant with tool calls: split into content + separate tool call entries
       if (msg.role === 'assistant' && calls && Array.isArray(calls)) {
         if (content) {
           out.push({ role: 'assistant', content, toolCalls: null })
@@ -397,28 +563,54 @@ const conversationMessages = computed(() => {
           out.push({
             role: 'tool_call',
             content: '',
-            toolCalls: [{
-              id: tc.id || '',
-              name: tc.function?.name || 'unknown',
-              arguments: typeof args === 'string' ? args : JSON.stringify(args, null, 2),
-              result: '',
-            }],
+            toolName: tc.function?.name || 'unknown',
+            toolId: tc.id || '',
+            toolArguments: typeof args === 'string' ? args : JSON.stringify(args, null, 2),
+            toolResult: '',
           })
         }
       } else {
-        // Plain message
-        const toolCalls = calls && Array.isArray(calls)
-          ? calls.map(tc => ({
-              id: tc.id || '',
-              name: tc.function?.name || 'unknown',
-              arguments: typeof tc.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {}, null, 2),
-              result: '',
-            }))
-          : null
-        out.push({ role: msg.role, content, toolCalls })
+        out.push({
+          role: msg.role,
+          content,
+          toolCalls: null,
+          toolResult: '',
+          // Preserve tool_call_id on tool role messages so Pass 2 can match
+          tool_call_id: msg.tool_call_id || msg.toolCallId || '',
+        })
       }
     }
-    return out
+
+    // Pass 2: merge tool results into matching tool_call entries by tool_call_id
+    const result = []
+    let i = 0
+    while (i < out.length) {
+      const msg = out[i]
+
+      if (msg.role === 'tool_call' && msg.toolId) {
+        // Look ahead for tool results with matching tool_call_id
+        let j = i + 1
+        while (j < out.length && out[j].role === 'tool') {
+          const toolMsg = out[j]
+          const tcId = toolMsg.tool_call_id || toolMsg.toolCallId || ''
+          // If this tool result matches the current tool_call, attach it and consume
+          if (tcId === msg.toolId) {
+            msg.toolResult = typeof toolMsg.content === 'string' ? toolMsg.content : ''
+            j++ // consume this tool message (don't add to result)
+            continue
+          }
+          // If it's a tool result for a different tool_call, stop looking ahead
+          break
+        }
+        result.push(msg)
+        i = j
+      } else {
+        result.push(msg)
+        i++
+      }
+    }
+
+    return result
   } catch (e) {
     return []
   }
@@ -442,13 +634,20 @@ function toggleExpanded(i) {
   }
 }
 
+function toggleHistoryCollapsed(i) {
+  const key = String(i)
+  if (historyCollapsed.value[key]) {
+    delete historyCollapsed.value[key]
+  } else {
+    historyCollapsed.value[key] = true
+  }
+}
+
 // ── Parse raw_response into chunks ──
 const responseChunks = computed(() => {
   const raw = props.modelValue?.raw_response
   if (!raw) return []
-
   const chunks = []
-
   try {
     const parsed = JSON.parse(raw)
     const choices = parsed.choices || []
@@ -462,7 +661,6 @@ const responseChunks = computed(() => {
     }
     return chunks
   } catch (e) {}
-
   if (raw.startsWith('data:')) {
     const lines = raw.split('\n')
     for (const line of lines) {
@@ -482,7 +680,6 @@ const responseChunks = computed(() => {
     }
     return chunks
   }
-
   try {
     let pos = 0
     while (pos < raw.length) {
@@ -515,44 +712,30 @@ const responseChunks = computed(() => {
     }
     return chunks
   } catch (e) {}
-
   return [raw]
 })
 
-const responseContentText = computed(() => {
-  return responseChunks.value.join('')
-})
+const responseContentText = computed(() => responseChunks.value.join(''))
 
-// ── Tool calls from tool_calls_info field ──
 const toolCallCards = computed(() => {
   const raw = props.modelValue?.tool_calls_info
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) {
-      return parsed.map(t => ({ ...t, expanded: false }))
-    }
+    if (Array.isArray(parsed)) return parsed.map(t => ({ ...t, expanded: false }))
     return []
-  } catch {
-    return []
-  }
+  } catch { return [] }
 })
 
-// Tool stats: count by name
 const toolStats = computed(() => {
   const cards = toolCallCards.value
   const counts = {}
-  for (const t of cards) {
-    counts[t.name] = (counts[t.name] || 0) + 1
-  }
+  for (const t of cards) counts[t.name] = (counts[t.name] || 0) + 1
   return Object.entries(counts).map(([name, count]) => ({ name, count }))
 })
 
-const totalToolCalls = computed(() => {
-  return toolCallCards.value.length
-})
+const totalToolCalls = computed(() => toolCallCards.value.length)
 
-// Count thinking/reasoning blocks in raw_request messages
 const thinkingCount = computed(() => {
   if (!props.modelValue?.raw_request) return 0
   try {
@@ -560,56 +743,38 @@ const thinkingCount = computed(() => {
     const messages = parsed.messages || []
     let count = 0
     for (const msg of messages) {
-      // Check for thinking/reasoning content in assistant messages
-      if (msg.role === 'assistant') {
-        if (msg.thinking || msg.reasoning_content || msg.reasoning) {
-          count++
-        }
-      }
+      if (msg.role === 'assistant' && (msg.thinking || msg.reasoning_content || msg.reasoning)) count++
     }
     return count
-  } catch {
-    return 0
-  }
+  } catch { return 0 }
 })
 
-// ── Timing helpers ──
 const ttfr = computed(() => {
   const start = props.modelValue?.request_start
   const first = props.modelValue?.first_response
   if (!start || !first) return null
-  try {
-    const diff = Math.round((new Date(first) - new Date(start)) / 1)
-    return formatDuration(diff)
-  } catch { return null }
+  try { return formatDuration(Math.round((new Date(first) - new Date(start)) / 1)) } catch { return null }
 })
 
 const totalDuration = computed(() => {
   const start = props.modelValue?.request_start
   const end = props.modelValue?.end_time
   if (!start || !end) return null
-  try {
-    const diff = Math.round((new Date(end) - new Date(start)) / 1)
-    return formatDuration(diff)
-  } catch { return null }
+  try { return formatDuration(Math.round((new Date(end) - new Date(start)) / 1)) } catch { return null }
 })
 
-// ── Tool type helpers ──
 function toolTypeColor(name) {
   const n = (name || '').toLowerCase()
   if (n.startsWith('mcp_')) return 'bg-blue-500/10 text-blue-400'
   if (n.startsWith('skill:')) return 'bg-orange-500/10 text-orange-400'
   return 'bg-ls-accent/10 text-ls-accent'
 }
-
 function toolTypeLabel(name) {
   const n = (name || '').toLowerCase()
   if (n.startsWith('mcp_')) return 'MCP'
   if (n.startsWith('skill:')) return 'Skill'
   return 'Tool'
 }
-
-// ── Formatting ──
 function formatMsTime(ts) {
   if (!ts) return ''
   try {
@@ -617,47 +782,25 @@ function formatMsTime(ts) {
     if (isNaN(d.getTime())) return ts
     const pad = (n, l = 2) => String(n).padStart(l, '0')
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`
-  } catch {
-    return ts
-  }
+  } catch { return ts }
 }
-
-const formatTime = formatMsTime  // alias for backward compat
-
-// Format duration in ms to human-readable string
 function formatDuration(ms) {
   if (!ms || ms <= 0) return ''
   if (ms < 1000) return `${ms}ms`
   const totalSec = Math.round(ms / 1000)
-  if (totalSec < 60) {
-    return `${totalSec}s`
-  }
+  if (totalSec < 60) return `${totalSec}s`
   const min = Math.floor(totalSec / 60)
   const sec = totalSec % 60
-  if (min < 60) {
-    return sec > 0 ? `${min}m ${sec}s` : `${min}m`
-  }
+  if (min < 60) return sec > 0 ? `${min}m ${sec}s` : `${min}m`
   const hr = Math.floor(min / 60)
   const m = min % 60
   return m > 0 ? `${hr}h ${m}m` : `${hr}h`
 }
-
-const formatJson = (str) => {
-  if (!str) return '(empty)'
-  try { return JSON.stringify(JSON.parse(str), null, 2) } catch { return str }
-}
-
-// ── Response headers parser ──
 const responseHeaders = computed(() => {
   const raw = props.modelValue?.response_headers
   if (!raw) return null
-  try {
-    return typeof raw === 'string' ? JSON.parse(raw) : raw
-  } catch {
-    return null
-  }
+  try { return typeof raw === 'string' ? JSON.parse(raw) : raw } catch { return null }
 })
-
 const copyText = (text) => navigator.clipboard.writeText(text).catch(() => {})
 
 </script>
