@@ -10,6 +10,13 @@
             <p class="text-xs text-gray-500 mt-0.5">{{ modelValue.request_id }} · {{ formatMsTime(modelValue.timestamp) }}</p>
           </div>
           <div class="flex items-center gap-2">
+            <button @click="close"
+              class="p-1 rounded-md text-gray-400 hover:text-white hover:bg-ls-elevated transition-colors"
+              aria-label="关闭">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
             <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs"
               :class="modelValue.status_code >= 400 ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'">
               {{ modelValue.status_code }}
