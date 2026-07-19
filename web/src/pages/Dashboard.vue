@@ -32,44 +32,52 @@
             <span class="text-xs text-gray-500">较多</span>
           </div>
         </div>
-        <div class="relative overflow-visible">
-            <div class="flex gap-[3px] flex-wrap min-w-0">
-              <div
-                v-for="(col, ci) in heatmapCols"
-                :key="ci"
-                class="flex flex-col gap-[3px]"
-                :style="{ width: heatmapColWidth + 'px' }"
-              >
-                <div
-                  v-for="(cell, ri) in col"
-                  :key="ri"
-                  class="rounded-sm cursor-pointer transition-opacity hover:opacity-80"
-                  :style="{
-                    width: heatmapCellSize + 'px',
-                    height: heatmapCellSize + 'px',
-                    backgroundColor: cell.empty ? '#232329' : (cell.value > 0 ? `rgba(137,180,250,${0.12 + cell.value * 0.18})` : '#232329')
-                  }"
-                  :title="''"
-                  @mouseenter="showTooltip($event, cell)"
-                  @mouseleave="hideTooltip"
-                ></div>
-              </div>
-            </div>
-            <!-- Tooltip -->
+        <div class="relative">
+          <div
+            class="flex gap-[3px]"
+            :style="{ width: gridWidth + 'px' }"
+          >
             <div
-              v-if="tooltip.visible"
-              class="fixed z-50 pointer-events-none bg-ls-elevated border border-ls-border rounded-md px-3 py-2 text-xs shadow-lg"
-              :style="{ left: tooltip.x + 'px', top: (tooltip.y - 48) + 'px' }"
+              v-for="(col, ci) in heatmapCols"
+              :key="ci"
+              class="flex flex-col gap-[3px] flex-shrink-0"
+              :style="{ width: heatmapColWidth + 'px' }"
             >
-              <div class="font-semibold text-white mb-1">{{ tooltip.date }}</div>
-              <div class="text-gray-400">请求数: <span class="text-white">{{ tooltip.requests }}</span></div>
-              <div class="text-gray-400">Token: <span class="text-white">{{ tooltip.tokens }}</span></div>
-              <div class="text-gray-400">缓存命中率: <span class="text-white">{{ tooltip.cacheRate }}</span></div>
+              <div
+                v-for="(cell, ri) in col"
+                :key="ri"
+                class="rounded-sm cursor-pointer transition-opacity hover:opacity-80"
+                :style="{
+                  width: heatmapCellSize + 'px',
+                  height: heatmapCellSize + 'px',
+                  backgroundColor: cell.empty ? '#232329' : (cell.value > 0 ? `rgba(137,180,250,${0.12 + cell.value * 0.18})` : '#232329')
+                }"
+                :title="''"
+                @mouseenter="showTooltip($event, cell)"
+                @mouseleave="hideTooltip"
+              ></div>
             </div>
           </div>
+          <!-- Tooltip -->
+          <div
+            v-if="tooltip.visible"
+            class="fixed z-50 pointer-events-none bg-ls-elevated border border-ls-border rounded-md px-3 py-2 text-xs shadow-lg"
+            :style="{ left: tooltip.x + 'px', top: (tooltip.y - 48) + 'px' }"
+          >
+            <div class="font-semibold text-white mb-1">{{ tooltip.date }}</div>
+            <div class="text-gray-400">请求数: <span class="text-white">{{ tooltip.requests }}</span></div>
+            <div class="text-gray-400">Token: <span class="text-white">{{ tooltip.tokens }}</span></div>
+            <div class="text-gray-400">缓存命中率: <span class="text-white">{{ tooltip.cacheRate }}</span></div>
+          </div>
+        </div>
         <!-- X-axis: dates -->
-        <div class="flex justify-between text-[9px] text-gray-600 mt-1.5">
-          <span v-for="d in heatmapDateLabels" :key="d">{{ d }}</span>
+        <div class="flex gap-[3px] text-[9px] text-gray-600 mt-1.5" :style="{ width: gridWidth + 'px' }">
+          <span
+            v-for="(d, i) in heatmapDateLabels"
+            :key="i"
+            class="text-center truncate"
+            :style="{ width: heatmapColWidth + 'px' }"
+          >{{ d }}</span>
         </div>
       </div>
 
@@ -238,6 +246,7 @@ const groupedModelQuotas = computed(() => {
 const heatmapCols = ref([])
 const heatmapDateLabels = ref([])
 const heatmapCard = ref(null) // for measuring container width
+const gridWidth = ref(720) // explicit width of the heatmap grid
 const heatmapCellSize = ref(10) // px, computed dynamically
 const heatmapColWidth = ref(12) // px (cell + gap)
 const tooltip = ref({ visible: false, x: 0, y: 0, date: '', requests: 0, tokens: '', cacheRate: '—' })
@@ -318,6 +327,8 @@ const buildHeatmap = (dailyTokens) => {
   const cols = Math.max(MIN_COLS, Math.min(MAX_COLS, 73))
   heatmapCellSize.value = CELL
   heatmapColWidth.value = CELL + GAP
+  // Grid width = cols * (CELL + GAP) - GAP (last column has no trailing gap)
+  gridWidth.value = cols * (CELL + GAP) - GAP
 
   // Date range: ending at this Saturday, going back `cols` weeks
   const today = new Date()
@@ -544,6 +555,11 @@ const handleResize = () => {
   resizeTimer = setTimeout(() => {
     if (dailyTokens.value) {
       buildHeatmap(dailyTokens.value)
+      // Adjust container width to match new grid
+      if (heatmapCard.value) {
+        const innerWidth = heatmapCard.value.clientWidth - 40
+        gridWidth.value = Math.min(innerWidth, gridWidth.value)
+      }
     }
   }, 300)
 }
