@@ -12,9 +12,13 @@ from core.migrations.registry import clear_registry, get_all_migrations, registe
 # returns sorted instances; take their classes so the body can do `Cls().up(conn)`.
 clear_registry()
 import core.migrations.migrations  # noqa: E402,F401  # triggers @register for all versioned migrations
-AccountQuotasTokens, RequestLogsResponseHeaders, AccountsName, RequestLogsAccountName, RequestLogsClientKeyName = [
-    type(m) for m in get_all_migrations()
-]
+by_version = {m.version: type(m) for m in get_all_migrations()}
+# Named aliases pinned by version for the existing tests below (bodies left unchanged).
+AccountQuotasTokens = by_version[1]
+RequestLogsResponseHeaders = by_version[2]
+AccountsName = by_version[3]
+RequestLogsAccountName = by_version[4]
+RequestLogsClientKeyName = by_version[8]
 
 
 @pytest.fixture
@@ -166,3 +170,108 @@ class TestMigration004_RequestLogsAccountName:
             assert "account_name" in cols
             name = conn.execute("SELECT account_name FROM request_logs LIMIT 1").fetchone()[0]
             assert name == "MyAccount"
+
+
+class TestMigration005_AccountsDropRegion:
+    def test_drops_region_column(self, db):
+        with db.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL UNIQUE,
+                    api_key TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    region TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute(
+                "INSERT INTO accounts (account_id, api_key, base_url, region) VALUES ('a1', 'k', 'u', 'us')"
+            )
+
+        with db.get_connection() as conn:
+            by_version[5]().up(conn)
+
+        with db.get_connection() as conn:
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(accounts)")]
+            assert "region" not in cols
+            # Data preserved
+            row = conn.execute("SELECT account_id FROM accounts").fetchone()
+            assert row[0] == "a1"
+
+
+class TestMigration006_RequestLogsTiming:
+    def test_adds_all_timing_columns(self, db):
+        with db.get_connection() as conn:
+            conn.execute("CREATE TABLE request_logs (id INTEGER PRIMARY KEY)")
+
+        with db.get_connection() as conn:
+            by_version[6]().up(conn)
+
+        with db.get_connection() as conn:
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(request_logs)")]
+            for expected in ("request_start", "first_response", "end_time", "cached_tokens", "prompt_partial_cached"):
+                assert expected in cols
+
+
+class TestMigration007_ModelMappingsRebuild:
+    def test_fixes_unique_constraint(self, db):
+        with db.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE model_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alias_name TEXT NOT NULL,
+                    actual_model_id TEXT NOT NULL,
+                    region TEXT
+                )
+            """)
+
+        with db.get_connection() as conn:
+            by_version[7]().up(conn)
+
+        with db.get_connection() as conn:
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(model_mappings)")]
+            assert "region" not in cols
+
+
+class TestMigration009_ModelMappingsMetadata:
+    def test_adds_metadata_columns(self, db):
+        with db.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE model_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alias_name TEXT NOT NULL UNIQUE,
+                    actual_model_id TEXT NOT NULL
+                )
+            """)
+
+        with db.get_connection() as conn:
+            by_version[9]().up(conn)
+
+        with db.get_connection() as conn:
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(model_mappings)")]
+            for expected in ("description", "status", "created_at", "updated_at"):
+                assert expected in cols
+
+
+class TestMigration010_MappingModelsSortOrder:
+    def test_adds_sort_order(self, db):
+        with db.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE mapping_models (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alias_name TEXT NOT NULL,
+                    supplier_id INTEGER NOT NULL,
+                    model_name TEXT NOT NULL,
+                    UNIQUE(alias_name, supplier_id, model_name)
+                )
+            """)
+
+        with db.get_connection() as conn:
+            by_version[10]().up(conn)
+
+        with db.get_connection() as conn:
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(mapping_models)")]
+            assert "sort_order" in cols
