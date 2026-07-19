@@ -212,7 +212,7 @@
         <div v-if="bindingList.length > 0" class="tag-list">
           <div v-for="b in bindingList" :key="b.id" class="tag-item">
             <span>{{ b.supplier_name || `供应商${b.supplier_id}` }} / {{ b.model_name }}</span>
-            <button @click="removeBinding(b.id)" class="tag-delete">×</button>
+            <button @click="removeBinding(formAlias, b.id)" class="tag-delete">×</button>
           </div>
         </div>
         <p v-else class="text-xs text-gray-500">暂无绑定模型，请求时将直接使用虚拟模型ID</p>
@@ -299,6 +299,13 @@ const loadSuppliers = async () => {
     console.error('Failed to load suppliers:', e)
   }
 }
+
+// 当前表单中的虚拟模型ID（编辑时来自 currentMapping，添加时来自 form）
+const formAlias = computed(() =>
+  isEditing.value && currentMapping.value
+    ? currentMapping.value.alias_name
+    : form.value.alias
+)
 
 const addBinding = async () => {
   if (!selectedSupplier.value || !selectedModel.value) {
