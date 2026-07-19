@@ -1,7 +1,7 @@
 <script setup>
 import { inject } from 'vue'
 const props = defineProps({
-  title: String,
+  title: { type: String, required: true },
   subtitle: { type: String, default: '' },
 })
 const sidebarOpen = inject('sidebarOpen', null)

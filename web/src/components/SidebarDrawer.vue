@@ -30,7 +30,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch } from 'vue'
 import SidebarNav from './SidebarNav.vue'
 
 const props = defineProps({ modelValue: Boolean })
