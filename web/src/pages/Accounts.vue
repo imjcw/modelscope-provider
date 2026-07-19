@@ -156,7 +156,7 @@
       <!-- ═══════════════════════════════════════════
            视图 3：表格
            ═══════════════════════════════════════════ -->
-      <div v-else-if="viewMode === 'table'" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
+      <div v-else-if="viewMode === 'table'" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
             <tr class="text-gray-500 border-b border-ls-border text-xs">

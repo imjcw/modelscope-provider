@@ -20,7 +20,7 @@
         <!-- ═══════════════════════════════════════════
              虚拟模型列表（表格形式）
              ═══════════════════════════════════════════ -->
-        <div v-if="mappings.length > 0" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
+        <div v-if="mappings.length > 0" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-gray-500 border-b border-ls-border text-xs">
