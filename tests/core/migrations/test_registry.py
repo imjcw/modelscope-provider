@@ -3,8 +3,15 @@ from core.migrations.base import Migration
 from core.migrations.registry import clear_registry, get_all_migrations, register
 
 
-def test_register_and_get_all_migrations():
+@pytest.fixture(autouse=True)
+def _clean_registry():
+    """每个测试前后清空注册表，保证隔离。"""
     clear_registry()
+    yield
+    clear_registry()
+
+
+def test_register_and_get_all_migrations():
 
     @register
     class FakeMigration(Migration):
@@ -21,7 +28,6 @@ def test_register_and_get_all_migrations():
 
 
 def test_get_all_migrations_sorted_by_version():
-    clear_registry()
 
     @register
     class M2(Migration):

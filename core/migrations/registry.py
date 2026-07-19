@@ -7,7 +7,8 @@ _ALL_MIGRATIONS: list[type[Migration]] = []
 
 def register(cls: type[Migration]) -> type[Migration]:
     """Class decorator: register a migration class in the global registry."""
-    _ALL_MIGRATIONS.append(cls)
+    if cls not in _ALL_MIGRATIONS:
+        _ALL_MIGRATIONS.append(cls)
     return cls
 
 
