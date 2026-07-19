@@ -77,7 +77,7 @@
                       <span class="text-xs text-gray-400">{{ msg.toolName || 'Tool' }}</span>
                       <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
                     </span>
-                    <span v-if="msg.content" @click.stop="toggleHistoryRender(i)"
+                    <span v-if="msg.content || msg.toolArguments || msg.toolResult" @click.stop="toggleHistoryRender(i)"
                       class="text-xs text-gray-500 hover:text-white px-1.5 py-0.5 rounded transition-colors"
                       :class="renderModes[String(i)] === 'raw' ? 'bg-ls-elevated text-gray-300' : ''">
                       {{ renderModes[String(i)] === 'raw' ? 'RAW' : 'MD' }}
@@ -87,7 +87,7 @@
                   <div v-if="!historyCollapsed[String(i)]" class="px-4 py-3 text-xs text-gray-300">
                     <!-- Tool call card: 入参 + 出参 (merged from tool role) -->
                     <template v-if="msg.role === 'tool_call'">
-                      <div class="text-xs text-gray-300 mb-2">
+                      <div class="mb-2">
                         <span class="text-gray-500">入参:</span>
                         <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
                         <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
@@ -102,7 +102,7 @@
                     </template>
                     <!-- Tool card: 入参 + 出参 -->
                     <template v-if="msg.role === 'tool'">
-                      <div class="text-xs text-gray-300 mb-2">
+                      <div class="mb-2">
                         <span class="text-gray-500">入参:</span>
                         <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
                         <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
@@ -130,7 +130,7 @@
                           <span class="text-xs text-gray-400 font-medium">{{ tc.name }}</span>
                           <span v-if="tc.id" class="text-xs text-gray-500 font-mono">{{ tc.id }}</span>
                         </div>
-                        <div class="text-xs text-gray-300 mb-2">
+                        <div class="mb-2">
                           <span class="text-gray-500">入参:</span>
                           <MarkdownRender :source="tc.arguments" />
                         </div>
@@ -171,7 +171,7 @@
                   <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
                 </span>
                 <span v-if="i === 0 && msg.role === 'user'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] bg-green-500/20 text-green-300 border border-green-500/30">本次输入</span>
-                <button v-if="msg.content" @click.stop="toggleRender(currentStartIndex + i)"
+                <button v-if="msg.content || msg.toolArguments || msg.toolResult" @click.stop="toggleRender(currentStartIndex + i)"
                   class="text-xs text-gray-500 hover:text-white px-1.5 py-0.5 rounded transition-colors"
                   :class="renderModes[String(currentStartIndex + i)] === 'raw' ? 'bg-ls-elevated text-gray-300' : ''">
                   {{ renderModes[String(currentStartIndex + i)] === 'raw' ? 'RAW' : 'MD' }}
@@ -181,26 +181,26 @@
               <div v-if="expandedMap.get(currentStartIndex + i)" class="px-4 py-3 text-xs text-gray-300">
                 <!-- Tool call card: 入参 + 出参 (merged from tool role) -->
                 <template v-if="msg.role === 'tool_call'">
-                  <div class="text-xs text-gray-300 mb-2">
-                    <span class="text-gray-500">入参:</span>
-                    <MarkdownRender v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolArguments" />
-                    <pre v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
-                  </div>
-                  <div v-if="msg.toolResult" class="mt-2 pt-2 border-t border-ls-border">
-                    <div class="flex items-center gap-2 mb-1">
-                      <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
-                    </div>
-                    <MarkdownRender v-if="renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolResult" />
-                    <pre v-if="renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
-                  </div>
-                </template>
-                <!-- Tool card: 入参 + 出参 -->
-                <template v-if="msg.role === 'tool'">
-                  <div class="text-xs text-gray-300 mb-2">
-                    <span class="text-gray-500">入参:</span>
-                    <MarkdownRender v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolArguments" />
-                    <pre v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
-                  </div>
+                      <div class="mb-2">
+                        <span class="text-gray-500">入参:</span>
+                        <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
+                        <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                      </div>
+                      <div v-if="msg.toolResult" class="mt-2 pt-2 border-t border-ls-border">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
+                        </div>
+                        <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.toolResult" />
+                        <pre v-if="renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
+                      </div>
+                    </template>
+                    <!-- Tool card: 入参 + 出参 -->
+                    <template v-if="msg.role === 'tool'">
+                      <div class="mb-2">
+                        <span class="text-gray-500">入参:</span>
+                        <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
+                        <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                      </div>
                   <div v-if="msg.content" class="mt-2 pt-2 border-t border-ls-border">
                     <div class="flex items-center gap-2 mb-1">
                       <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
@@ -441,11 +441,11 @@ watch(() => props.modelValue, (val) => {
       }
       historyCollapsed.value = hist
 
-      // Current messages: collapse system/tool, leave user/assistant/tool_call expanded
+      // Current messages: collapse system/tool/tool_call, leave user/assistant expanded
       const curr = {}
       for (let i = currentStartIndex.value; i < conversationMessages.value.length; i++) {
         const msg = conversationMessages.value[i]
-        if (msg.role === 'system' || msg.role === 'tool') {
+        if (msg.role === 'system' || msg.role === 'tool' || msg.role === 'tool_call') {
           curr[String(i)] = true
         }
       }
