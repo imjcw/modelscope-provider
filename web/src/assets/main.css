@@ -24,6 +24,22 @@ html, body, #app {
   --accent: #89b4fa;
   --accent-dim: #74c7ec;
   --ring: #89b4fa33;
+  --ls-bg: #0e0e10;
+  --ls-card: #1a1a1e;
+  --ls-elevated: #232329;
+  --ls-accent: #5e6ad2;
+  --ls-accentHover: #6b7bf2;
+  --ls-border: #1f1f23;
+}
+
+/* ── Light theme (Catppuccin Latte) ── */
+[data-theme="light"] {
+  --ls-bg: #eff1f5;
+  --ls-card: #e6e9ef;
+  --ls-elevated: #dce0e8;
+  --ls-accent: #89b4fa;
+  --ls-accentHover: #74c7ec;
+  --ls-border: #bcc0cc;
 }
 
 /* ── Shared Drawer (form/edit — no close on backdrop click) ── */

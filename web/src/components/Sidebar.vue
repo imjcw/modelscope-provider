@@ -19,16 +19,18 @@
 
     <!-- Footer -->
     <div class="px-4 py-3 border-t border-ls-border">
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 mb-2">
         <div class="w-2 h-2 rounded-full bg-ls-accent"></div>
         <span class="text-xs text-gray-500">v0.2.0 · 运行中</span>
       </div>
+      <ThemeToggle />
     </div>
   </aside>
 </template>
 
 <script setup>
 import SidebarNav from './SidebarNav.vue'
+import ThemeToggle from './ThemeToggle.vue'
 </script>
 
 <style scoped>

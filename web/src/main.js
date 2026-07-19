@@ -3,6 +3,20 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
 import './assets/main.css'
 
+// 同步应用初始主题，避免闪屏
+(function initTheme() {
+  const saved = localStorage.getItem('themeMode')
+  if (!saved) return
+  let brightness = 'dark'
+  if (saved === 'light') {
+    brightness = 'light'
+  } else if (saved === 'system') {
+    brightness = window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+  }
+  document.documentElement.setAttribute('data-theme', brightness)
+})()
+
 // ── Router ──
 const routes = [
   { path: '/', name: 'dashboard', component: () => import('./pages/Dashboard.vue') },
