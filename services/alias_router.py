@@ -30,6 +30,8 @@ class AliasRouter:
         self.config_repo = config_repo
         # round_robin 计数器按 alias 隔离
         self._rr_counters = {}
+        # least_conn 策略的每条目请求计数
+        self._conn_counts = {}
 
     def _get_strategy(self) -> str:
         """从 system_config 实时读取策略，默认 round_robin。"""
@@ -97,8 +99,6 @@ class AliasRouter:
 
     def _least_conn(self, alias: str, candidates):
         """least_conn 策略：选择当前连接数最少的候选。"""
-        if not hasattr(self, "_conn_counts"):
-            self._conn_counts = {}
         if alias not in self._conn_counts:
             self._conn_counts[alias] = [0] * len(candidates)
         counts = self._conn_counts[alias]
