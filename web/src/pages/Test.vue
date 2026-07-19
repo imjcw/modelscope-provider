@@ -2,7 +2,7 @@
   <div>
     <PageHeader title="在线测试" subtitle="直接发送请求测试 API 代理"></PageHeader>
 
-    <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
       <!-- Request Panel -->
       <div class="bg-ls-card rounded-lg border border-ls-border">
         <div class="px-5 py-3.5 border-b border-ls-border flex items-center gap-2">
