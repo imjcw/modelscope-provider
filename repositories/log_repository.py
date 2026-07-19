@@ -2,7 +2,7 @@ import json
 import logging
 from typing import List, Optional
 
-from provider.core.database import DatabaseManager
+from core.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -19,18 +19,28 @@ class LogRepository:
                input_tokens: int = 0, output_tokens: int = 0,
                latency_ms: int = None, is_stream: bool = False,
                error_message: str = None, raw_request: str = None,
-               raw_response: str = None) -> int:
+               raw_response: str = None,
+               request_start: str = None, first_response: str = None, end_time: str = None,
+               cached_tokens: int = 0, prompt_partial_cached: int = 0,
+               client_key_name: str = None,
+               response_headers: str = None) -> int:
         """Insert a log entry."""
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO request_logs
                    (request_id, model, actual_model_id, account_id, account_name, status_code,
                     input_tokens, output_tokens, latency_ms, is_stream,
-                    error_message, raw_request, raw_response)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    error_message, raw_request, raw_response,
+                    request_start, first_response, end_time,
+                    cached_tokens, prompt_partial_cached,
+                    client_key_name, response_headers)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (request_id, model, actual_model_id, account_id, account_name, status_code,
                  input_tokens, output_tokens, latency_ms, is_stream,
-                 error_message, raw_request, raw_response),
+                 error_message, raw_request, raw_response,
+                 request_start, first_response, end_time,
+                 cached_tokens, prompt_partial_cached,
+                 client_key_name, response_headers),
             )
             return cursor.lastrowid
 
@@ -53,7 +63,8 @@ class LogRepository:
     def find_all(self, page: int = 0, page_size: int = 50,
                  status_code: int = None, account_id: str = None,
                  model: str = None, is_stream: bool = None,
-                 start_time: str = None, end_time: str = None) -> tuple:
+                 start_time: str = None, end_time: str = None,
+                 client_key_name: str = None) -> tuple:
         """Paginated query with filters. Returns (records, total)."""
         where_parts = []
         params = []
@@ -76,6 +87,9 @@ class LogRepository:
         if end_time:
             where_parts.append("timestamp <= ?")
             params.append(end_time)
+        if client_key_name:
+            where_parts.append("client_key_name = ?")
+            params.append(client_key_name)
 
         where_clause = " WHERE " + " AND ".join(where_parts) if where_parts else ""
 

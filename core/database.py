@@ -55,6 +55,26 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
+            # Migration: add total_input_tokens and total_output_tokens to account_quotas
+            try:
+                cursor.execute("PRAGMA table_info(account_quotas)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "total_input_tokens" not in columns:
+                    cursor.execute("ALTER TABLE account_quotas ADD COLUMN total_input_tokens INTEGER NOT NULL DEFAULT 0")
+                if "total_output_tokens" not in columns:
+                    cursor.execute("ALTER TABLE account_quotas ADD COLUMN total_output_tokens INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass  # Table may not exist yet; CREATE IF NOT EXISTS will handle it
+
+            # Migration: add response_headers column to request_logs
+            try:
+                cursor.execute("PRAGMA table_info(request_logs)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "response_headers" not in columns:
+                    cursor.execute("ALTER TABLE request_logs ADD COLUMN response_headers TEXT")
+            except Exception:
+                pass  # Table may not exist yet
+
             # ── Existing tables ──
 
             # Account quotas table - composite primary key
@@ -64,10 +84,28 @@ class DatabaseManager:
                     quota_date TEXT NOT NULL,
                     quota_remaining INTEGER NOT NULL DEFAULT 0,
                     quota_limit INTEGER NOT NULL DEFAULT 0,
+                    total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_output_tokens INTEGER NOT NULL DEFAULT 0,
                     unavailable_models TEXT DEFAULT '[]',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (account_id, quota_date)
+                )
+            """)
+
+            # Model quotas table - model-level quota per account
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS model_quotas (
+                    account_id TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    quota_date TEXT NOT NULL,
+                    quota_remaining INTEGER NOT NULL DEFAULT 0,
+                    quota_limit INTEGER NOT NULL DEFAULT 0,
+                    total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (account_id, model_name, quota_date)
                 )
             """)
 
@@ -163,7 +201,28 @@ class DatabaseManager:
                     is_stream BOOLEAN DEFAULT 0,
                     error_message TEXT,
                     raw_request TEXT,
-                    raw_response TEXT
+                    raw_response TEXT,
+                    response_headers TEXT,
+                    cached_tokens INTEGER DEFAULT 0,
+                    prompt_partial_cached INTEGER DEFAULT 0,
+                    request_start TEXT,
+                    first_response TEXT,
+                    end_time TEXT,
+                    client_key_name TEXT
+                )
+            """)
+
+            # ── Client API keys table - downstream client authentication ──
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS client_api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_value TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    description TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
@@ -250,6 +309,21 @@ class DatabaseManager:
             except sqlite3.OperationalError:
                 pass  # Column already dropped or doesn't exist
 
+            # ── Migration: add timing + cached token columns to request_logs ──
+            timing_columns = {
+                "request_start": "DATETIME",
+                "first_response": "DATETIME",
+                "end_time": "DATETIME",
+                "cached_tokens": "INTEGER DEFAULT 0",
+                "prompt_partial_cached": "INTEGER DEFAULT 0",
+            }
+            for col, col_type in timing_columns.items():
+                try:
+                    cursor.execute(f"ALTER TABLE request_logs ADD COLUMN {col} {col_type}")
+                    logger.info(f"Migration: added '{col}' column to request_logs table")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+
             # ── Migration: drop `region` column from model_mappings and fix UNIQUE constraint ──
             # Check if model_mappings has a 'region' column (legacy schema)
             try:
@@ -278,6 +352,15 @@ class DatabaseManager:
                     logger.info("Migration: recreated model_mappings without region column")
             except sqlite3.OperationalError:
                 pass  # Table doesn't exist yet (will be created by CREATE TABLE IF NOT EXISTS above)
+
+            # ── Migration: add `client_key_name` column to request_logs if missing ──
+            try:
+                cursor.execute(
+                    "ALTER TABLE request_logs ADD COLUMN client_key_name TEXT"
+                )
+                logger.info("Migration: added 'client_key_name' column to request_logs table")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
             logger.info("Database tables initialized")
 

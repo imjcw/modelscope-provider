@@ -240,29 +240,6 @@
               </div>
             </div>
 
-            <!-- Tool call cards (from tool_calls_info field) -->
-            <div v-if="toolCallCards.length > 0" class="space-y-2">
-              <div class="flex items-center gap-2 px-1 pt-2">
-                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">工具调用</span>
-                <span class="text-xs text-gray-600">{{ toolCallCards.length }} calls</span>
-              </div>
-              <div v-for="(tc, i) in toolCallCards" :key="'tool-' + i"
-                class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
-                <button @click="tc.expanded = !tc.expanded"
-                  class="flex items-center gap-2 px-4 py-2.5 w-full text-left hover:bg-ls-elevated transition-colors">
-                  <span :class="toolTypeColor(tc.name)" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
-                    {{ toolTypeLabel(tc.name) }}
-                  </span>
-                  <span class="text-xs text-gray-400 font-medium">{{ tc.name }}</span>
-                  <span v-if="tc.id" class="text-xs text-gray-500 font-mono">{{ tc.id }}</span>
-                  <span class="ml-auto text-gray-500 text-xs transition-transform" :class="tc.expanded ? 'rotate-90' : ''">▶</span>
-                </button>
-                <div v-if="tc.expanded" class="px-4 pb-3 text-xs text-gray-300">
-                  <pre class="bg-ls-bg rounded-lg border border-ls-border p-3 font-mono whitespace-pre-wrap overflow-x-auto">{{ JSON.stringify(tc, null, 2) }}</pre>
-                </div>
-              </div>
-            </div>
-
             <!-- Assistant response (concatenated) -->
             <div v-if="responseContentText" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
               <button @click="toggleResponseExpanded"
@@ -318,21 +295,6 @@
             </div>
           </div>
 
-          <!-- 工具与思考 -->
-          <div class="p-4 border-b border-ls-border">
-            <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">工具与思考</h3>
-            <div class="space-y-2">
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-400">工具调用</span>
-                <span class="font-mono text-white">{{ totalToolCalls }}</span>
-              </div>
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-400">思考次数</span>
-                <span class="font-mono" :class="thinkingCount > 0 ? 'text-yellow-400' : 'text-gray-500'">{{ thinkingCount }}</span>
-              </div>
-            </div>
-          </div>
-
           <!-- 请求时序 -->
           <div class="p-4 border-b border-ls-border">
             <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">请求时序</h3>
@@ -358,27 +320,6 @@
                 <div class="text-xs text-white font-mono">{{ totalDuration }}</div>
               </div>
               <div v-if="!modelValue.request_start && !modelValue.end_time" class="text-xs text-gray-600">—</div>
-            </div>
-          </div>
-
-          <!-- 工具统计 -->
-          <div v-if="toolStats.length > 0" class="p-4 border-b border-ls-border">
-            <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">工具统计</h3>
-            <div class="space-y-1.5">
-              <div v-for="(stat, i) in toolStats" :key="i"
-                class="flex items-center justify-between">
-                <span class="text-xs text-gray-400 flex items-center gap-1.5">
-                  <span :class="toolTypeColor(stat.name)" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px]">
-                    {{ toolTypeLabel(stat.name) }}
-                  </span>
-                  <span>{{ stat.name }}</span>
-                </span>
-                <span class="text-xs text-white font-mono">{{ stat.count }}</span>
-              </div>
-              <div class="flex justify-between text-xs mt-1 pt-1.5 border-t border-ls-border">
-                <span class="text-gray-500">合计</span>
-                <span class="text-white font-mono">{{ totalToolCalls }}</span>
-              </div>
             </div>
           </div>
 
@@ -716,38 +657,6 @@ const responseChunks = computed(() => {
 })
 
 const responseContentText = computed(() => responseChunks.value.join(''))
-
-const toolCallCards = computed(() => {
-  const raw = props.modelValue?.tool_calls_info
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed.map(t => ({ ...t, expanded: false }))
-    return []
-  } catch { return [] }
-})
-
-const toolStats = computed(() => {
-  const cards = toolCallCards.value
-  const counts = {}
-  for (const t of cards) counts[t.name] = (counts[t.name] || 0) + 1
-  return Object.entries(counts).map(([name, count]) => ({ name, count }))
-})
-
-const totalToolCalls = computed(() => toolCallCards.value.length)
-
-const thinkingCount = computed(() => {
-  if (!props.modelValue?.raw_request) return 0
-  try {
-    const parsed = JSON.parse(props.modelValue.raw_request)
-    const messages = parsed.messages || []
-    let count = 0
-    for (const msg of messages) {
-      if (msg.role === 'assistant' && (msg.thinking || msg.reasoning_content || msg.reasoning)) count++
-    }
-    return count
-  } catch { return 0 }
-})
 
 const ttfr = computed(() => {
   const start = props.modelValue?.request_start

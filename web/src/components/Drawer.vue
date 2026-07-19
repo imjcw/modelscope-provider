@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -36,14 +36,29 @@ watch(
   }
 )
 
+// ── ESC 键关闭 ──
+const handleEsc = (e) => {
+  if (e.key === 'Escape' && visible.value && !exiting.value) {
+    // 如果确认弹窗打开，让弹窗优先关闭
+    if (document.querySelector('.modal-overlay')) return
+    close()
+    e.stopImmediatePropagation() // 阻止其他组件响应
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', handleEsc)
+})
+
 onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleEsc)
   if (exitingTimer.value) clearTimeout(exitingTimer.value)
 })
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="drawer-overlay">
+    <div v-if="visible" class="drawer-overlay" @click.self="close">
       <div class="drawer drawer-right" :style="{ width: props.width }">
         <div class="drawer-panel" :class="{ 'exiting': exiting }">
           <div class="drawer-header">
