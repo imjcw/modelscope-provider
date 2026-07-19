@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 
-from provider.core.database import DatabaseManager
+from core.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +43,20 @@ class MappingRepository:
         """Bulk upsert mappings from a dict like {'hy3': 'hy3-actual'}.
 
         Keys are alias_name, values are actual_model_id.
+
+        Empty values fall back to the alias_name itself (virtual model ID
+        is used as the actual model ID when no explicit mapping is given).
         """
         with self.db.get_connection() as conn:
             for alias_name, actual_model_id in mappings.items():
+                # Fallback: empty value means use alias as actual model id
+                effective_id = actual_model_id if actual_model_id else alias_name
                 conn.execute(
                     """INSERT INTO model_mappings (alias_name, actual_model_id)
                        VALUES (?, ?)
                        ON CONFLICT(alias_name)
                        DO UPDATE SET actual_model_id = excluded.actual_model_id""",
-                    (alias_name, actual_model_id),
+                    (alias_name, effective_id),
                 )
             logger.info(f"Bulk upserted {len(mappings)} model mappings")
 
