@@ -12,7 +12,6 @@ const props = defineProps({
   title: { type: String, default: '' },
   width: { type: String, default: '780px' },
   noHeader: { type: Boolean, default: false },
-  responsive: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -60,9 +59,7 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div v-if="visible" class="drawer-overlay" @click.self="close">
-      <div class="drawer drawer-right"
-           :class="{ 'drawer-responsive': responsive }"
-           :style="responsive ? { '--drawer-width': props.width } : { width: props.width }">
+      <div class="drawer drawer-right" :style="{ width: props.width }">
         <div class="drawer-panel" :class="{ 'exiting': exiting }">
           <div v-if="!noHeader" class="drawer-header">
             <h2 class="drawer-title">{{ title }}</h2>
