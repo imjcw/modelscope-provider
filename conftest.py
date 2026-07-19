@@ -15,6 +15,12 @@ import types
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
+# Add root to sys.path so bare imports resolve
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+# Register `provider` namespace package pointing to root, so `provider.X.Y`
+# resolves to modules at the project root.
 if "provider" not in sys.modules:
     _provider_pkg = types.ModuleType("provider")
     _provider_pkg.__path__ = [_PROJECT_ROOT]

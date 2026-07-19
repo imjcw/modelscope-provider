@@ -1,7 +1,7 @@
 """Test cases for AliasRouter."""
 import pytest
 from provider.services.alias_router import AliasRouter, RoutingResult
-from provider.models.account import ModelScopeAccount
+from models.account import ModelScopeAccount
 
 
 class MockMappingModelRepo:
