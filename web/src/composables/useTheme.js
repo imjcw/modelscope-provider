@@ -67,7 +67,6 @@ export function useTheme() {
   return {
     currentMode: readonly(currentMode),
     prefersColorScheme: readonly(prefersColorScheme),
-    getMode: () => currentMode.value,  // convenience getter for template binding
     setMode,
   }
 }
