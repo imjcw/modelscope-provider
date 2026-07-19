@@ -23,63 +23,6 @@
       </div>
 
       <!-- ── 使用热力图 ── -->
-      <div ref="heatmapCard" class="bg-ls-card rounded-lg border border-ls-border p-5 mb-6">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="font-semibold tracking-tight text-sm">每日使用情况</h2>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-gray-500">较少</span>
-            <div v-for="i in 4" :key="i" class="w-3 h-3 rounded-sm" :style="{ backgroundColor: `rgba(137,180,250,${0.12 + i * 0.22})` }"></div>
-            <span class="text-xs text-gray-500">较多</span>
-          </div>
-        </div>
-        <div class="relative">
-          <div
-            class="flex gap-[3px]"
-            :style="{ width: gridWidth + 'px' }"
-          >
-            <div
-              v-for="(col, ci) in heatmapCols"
-              :key="ci"
-              class="flex flex-col gap-[3px] flex-shrink-0"
-              :style="{ width: heatmapColWidth + 'px' }"
-            >
-              <div
-                v-for="(cell, ri) in col"
-                :key="ri"
-                class="rounded-sm cursor-pointer transition-opacity hover:opacity-80"
-                :style="{
-                  width: heatmapCellSize + 'px',
-                  height: heatmapCellSize + 'px',
-                  backgroundColor: cell.empty ? '#232329' : (cell.value > 0 ? `rgba(137,180,250,${0.12 + cell.value * 0.18})` : '#232329')
-                }"
-                :title="''"
-                @mouseenter="showTooltip($event, cell)"
-                @mouseleave="hideTooltip"
-              ></div>
-            </div>
-          </div>
-          <!-- Tooltip -->
-          <div
-            v-if="tooltip.visible"
-            class="fixed z-50 pointer-events-none bg-ls-elevated border border-ls-border rounded-md px-3 py-2 text-xs shadow-lg"
-            :style="{ left: tooltip.x + 'px', top: (tooltip.y - 48) + 'px' }"
-          >
-            <div class="font-semibold text-white mb-1">{{ tooltip.date }}</div>
-            <div class="text-gray-400">请求数: <span class="text-white">{{ tooltip.requests }}</span></div>
-            <div class="text-gray-400">Token: <span class="text-white">{{ tooltip.tokens }}</span></div>
-            <div class="text-gray-400">缓存命中率: <span class="text-white">{{ tooltip.cacheRate }}</span></div>
-          </div>
-        </div>
-        <!-- X-axis: dates -->
-        <div class="flex gap-[3px] text-[9px] text-gray-600 mt-1.5" :style="{ width: gridWidth + 'px' }">
-          <span
-            v-for="(d, i) in heatmapDateLabels"
-            :key="i"
-            class="text-center truncate"
-            :style="{ width: heatmapColWidth + 'px' }"
-          >{{ d }}</span>
-        </div>
-      </div>
 
       <!-- ── Token 趋势折线图 ── -->
       <div class="bg-ls-card rounded-lg border border-ls-border p-5 mb-6">
@@ -217,7 +160,6 @@ const TREND_OPTIONS = [
 
 const loading = ref(true)
 const error = ref(null)
-const dailyTokens = ref({})  // store for resize rebuild
 
 // Stat cards
 const statCards = ref([
@@ -241,15 +183,6 @@ const groupedModelQuotas = computed(() => {
   }
   return Object.values(groups)
 })
-
-// ── Heatmap ──
-const heatmapCols = ref([])
-const heatmapDateLabels = ref([])
-const heatmapCard = ref(null) // for measuring container width
-const gridWidth = ref(720) // explicit width of the heatmap grid
-const heatmapCellSize = ref(10) // px, computed dynamically
-const heatmapColWidth = ref(12) // px (cell + gap)
-const tooltip = ref({ visible: false, x: 0, y: 0, date: '', requests: 0, tokens: '', cacheRate: '—' })
 
 // ── Trend line chart ──
 const trendLines = ref({ input: '', output: '', cached: '' })
@@ -282,132 +215,7 @@ const buildPolylinePoints = (values, w, h) => {
   }).join(' ')
 }
 
-// ── Build heatmap from daily data ──
-// GitHub-style: always 7 rows (Sun=0 top, Sat=6 bottom)
-// Columns computed dynamically: fixed cell size, fit as many columns as container allows.
-const buildHeatmap = (dailyTokens) => {
-  const dates = Object.keys(dailyTokens).sort()
-  if (!dates.length) {
-    heatmapCols.value = []
-    heatmapDateLabels.value = []
-    return
-  }
 
-  // Calculate max for normalization
-  const maxTokens = Math.max(...dates.map(d => {
-    const models = dailyTokens[d] || {}
-    return Object.values(models).reduce((a, b) => a + b, 0)
-  }), 1)
-
-  // Build a lookup: "YYYY-MM-DD" → { tokens, intensity, weekday, value }
-  const lookup = {}
-  dates.forEach(date => {
-    const models = dailyTokens[date] || {}
-    const total = Object.values(models).reduce((a, b) => a + b, 0)
-    const [y, m, d] = date.split('-').map(Number)
-    const dt = new Date(y, m - 1, d)
-    lookup[date] = {
-      date,
-      tokens: total,
-      intensity: total / maxTokens,
-      weekday: dt.getDay(), // 0=Sun,1=Mon,...,6=Sat
-      requests: Math.round(total / 1000),
-      value: Math.round((total / maxTokens) * 5),
-      title: `${date}: ${formatNumber(total)} tokens`,
-    }
-  })
-
-  // Fixed cell size, compute how many columns fit in the container
-  const containerEl = heatmapCard.value
-  const containerWidth = containerEl ? containerEl.clientWidth - 40 : 900
-  const GAP = 3
-  const CELL = 12  // fixed cell size in px
-  const MAX_COLS = Math.max(1, Math.floor((containerWidth - GAP) / (CELL + GAP)))
-  const MIN_COLS = 12
-  const cols = Math.max(MIN_COLS, Math.min(MAX_COLS, 73))
-  heatmapCellSize.value = CELL
-  heatmapColWidth.value = CELL + GAP
-  // Grid width = cols * (CELL + GAP) - GAP (last column has no trailing gap)
-  gridWidth.value = cols * (CELL + GAP) - GAP
-
-  // Date range: ending at this Saturday, going back `cols` weeks
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const todayDayOfWeek = today.getDay()
-  const endDate = new Date(today)
-  endDate.setDate(endDate.getDate() + (todayDayOfWeek === 0 ? 0 : 7 - todayDayOfWeek))
-
-  const toKey = (d) => {
-    const y = d.getFullYear()
-    const m = String(d.getMonth() + 1).padStart(2, '0')
-    const dd = String(d.getDate()).padStart(2, '0')
-    return `${y}-${m}-${dd}`
-  }
-
-  // Build grid: grid[col][row] where col 0=oldest, row 0=Sun, row 6=Sat
-  const grid = []
-  for (let wi = 0; wi < cols; wi++) {
-    const col = []
-    for (let ri = 0; ri < 7; ri++) {
-      const day = new Date(endDate)
-      day.setDate(day.getDate() - (cols - 1 - wi) * 7 + (ri - 6))
-      const key = toKey(day)
-      col.push(lookup[key] || {
-        date: key, tokens: 0, intensity: 0, weekday: day.getDay(),
-        requests: 0, value: 0, title: `${key}: 0 tokens`, empty: true,
-      })
-    }
-    grid.push(col)
-  }
-
-  heatmapCols.value = grid
-
-  // Date labels: show a few labels spaced across columns
-  const labelStep = Math.max(1, Math.floor(cols / 5))
-  heatmapDateLabels.value = grid.map((col, ci) => {
-    if (ci % labelStep === 0) {
-      const parts = col[0].date.split('-')
-      return `${parts[1]}/${parts[2]}`
-    }
-    return ''
-  })
-}
-
-const showTooltip = (event, cell) => {
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const tw = 200 // approximate tooltip width
-  const th = 90  // approximate tooltip height
-
-  // Default: show on the right side of cursor
-  let x = event.clientX + 12
-  let y = event.clientY - 10
-
-  // If right edge is exceeded, flip to left
-  if (x + tw > vw) {
-    x = event.clientX - tw - 12
-  }
-  // If bottom edge is exceeded, flip up
-  if (y + th > vh) {
-    y = vh - th - 8
-  }
-  // If flipped left goes off screen, clamp to 0
-  if (x < 0) x = 8
-
-  tooltip.value = {
-    visible: true,
-    x,
-    y,
-    date: cell.date,
-    requests: formatNumber(cell.requests),
-    tokens: formatNumber(cell.tokens) + ' tokens',
-    cacheRate: '—',
-  }
-}
-
-const hideTooltip = () => {
-  tooltip.value.visible = false
-}
 
 const loadData = async () => {
   loading.value = true
@@ -529,9 +337,6 @@ const loadData = async () => {
         }
       }).sort((a, b) => b.requests - a.requests)
 
-      // ── Heatmap ──
-      dailyTokens.value = s.daily_tokens || {}
-      buildHeatmap(dailyTokens.value)
     }
   } catch (e) {
     error.value = e.message || '加载数据失败'
@@ -547,23 +352,6 @@ const watchTrendDays = () => {
 }
 
 onMounted(() => loadData())
-
-// Rebuild heatmap on resize (dynamic column count)
-let resizeTimer = null
-const handleResize = () => {
-  clearTimeout(resizeTimer)
-  resizeTimer = setTimeout(() => {
-    if (dailyTokens.value) {
-      buildHeatmap(dailyTokens.value)
-      // Adjust container width to match new grid
-      if (heatmapCard.value) {
-        const innerWidth = heatmapCard.value.clientWidth - 40
-        gridWidth.value = Math.min(innerWidth, gridWidth.value)
-      }
-    }
-  }, 300)
-}
-window.addEventListener('resize', handleResize)
 
 watch(trendDays, watchTrendDays)
 </script>
