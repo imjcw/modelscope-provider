@@ -441,3 +441,14 @@ input[type="number"] {
   width: 100% !important;
   max-width: 100%;
 }
+
+.drawer-responsive {
+  width: 100% !important;
+  max-width: 100%;
+}
+@media (min-width: 1024px) {
+  .drawer-responsive {
+    width: var(--drawer-width, 780px) !important;
+    max-width: 92vw;
+  }
+}

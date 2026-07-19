@@ -1,8 +1,8 @@
 <template>
-  <Drawer :model-value="!!modelValue" @update:model-value="close" no-header width="1300px">
+  <Drawer :model-value="!!modelValue" @update:model-value="close" no-header width="900px" responsive>
     <template v-if="modelValue">
       <!-- Header -->
-      <div class="flex items-center justify-between px-5 py-3 border-b border-ls-border flex-shrink-0" style="background: #1a1a1e;">
+      <div class="flex items-center justify-between px-4 py-3 lg:px-5 border-b border-ls-border flex-shrink-0" style="background: #1a1a1e;">
         <div>
           <h2 class="text-base font-semibold text-white">请求日志</h2>
           <p class="text-xs text-gray-500 mt-0.5">{{ modelValue.request_id }} · {{ formatMsTime(modelValue.timestamp) }}</p>
@@ -16,10 +16,10 @@
       </div>
 
       <!-- Body -->
-      <div class="flex-1 flex overflow-hidden">
+      <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
         <!-- Left: Conversation Flow -->
-        <div class="flex-1 overflow-y-auto p-5">
+        <div class="flex-1 overflow-y-auto p-3 lg:p-5">
           <div class="space-y-2">
 
             <!-- Request header -->
@@ -286,7 +286,20 @@
         </div>
 
         <!-- Right: Stats Panel -->
-        <div class="w-80 flex-shrink-0 border-l border-ls-border overflow-y-auto bg-ls-card">
+        <div class="w-full lg:w-80 flex-shrink-0 border-t lg:border-t-0 lg:border-l border-ls-border overflow-y-auto bg-ls-card"
+             :class="statsExpanded ? 'max-h-[60vh]' : 'max-h-[52px] lg:max-h-none'">
+          <button @click="statsExpanded = !statsExpanded"
+                  class="lg:hidden w-full flex items-center justify-between p-3 text-left">
+            <div class="flex items-center gap-4 text-xs">
+              <span class="text-gray-400">延迟: <span class="text-white font-mono">{{ modelValue.latency_ms ? formatDuration(modelValue.latency_ms) : '-' }}</span></span>
+              <span class="text-gray-400">Token: <span class="text-white font-mono">{{ ((modelValue.input_tokens || 0) + (modelValue.output_tokens || 0)).toLocaleString() }}</span></span>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 class="text-gray-400 transition-transform" :class="statsExpanded ? 'rotate-180' : ''">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <div :class="statsExpanded ? 'block' : 'hidden lg:block'">
 
           <!-- 模型信息 -->
           <div class="p-4 border-b border-ls-border">
@@ -373,6 +386,7 @@
             </div>
           </div>
 
+          </div>
         </div>
 
       </div>
@@ -381,7 +395,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import Drawer from '@/components/Drawer.vue'
 import MarkdownRender from '@/components/MarkdownRender.vue'
 import TokenStack from '@/components/TokenStack.vue'
@@ -392,6 +406,17 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 const showHistory = ref(false)
+
+const statsExpanded = ref(false)
+
+const isMobile = ref(false)
+onMounted(() => {
+  const mq = window.matchMedia('(max-width: 1023px)')
+  isMobile.value = mq.matches
+  const handler = (e) => { isMobile.value = e.matches }
+  mq.addEventListener('change', handler)
+  onUnmounted(() => mq.removeEventListener('change', handler))
+})
 
 // ── Find the index of the last user message (the one that triggered this request) ──
 const lastUserIndex = computed(() => {
