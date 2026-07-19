@@ -88,24 +88,34 @@
                     <!-- Tool call card: 入参 + 出参 (merged from tool role) -->
                     <template v-if="msg.role === 'tool_call'">
                       <div class="mb-2">
-                        <span class="text-gray-500">入参:</span>
-                        <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
-                        <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
+                        </div>
+                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                          <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
+                          <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                        </div>
                       </div>
                       <div v-if="msg.toolResult" class="mt-2 pt-2 border-t border-ls-border">
                         <div class="flex items-center gap-2 mb-1">
                           <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
                         </div>
-                        <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.toolResult" />
-                        <pre v-if="renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
+                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                          <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.toolResult" />
+                          <pre v-if="renderModes[String(i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
+                        </div>
                       </div>
                     </template>
                     <!-- Tool card: 入参 + 出参 -->
                     <template v-if="msg.role === 'tool'">
                       <div class="mb-2">
-                        <span class="text-gray-500">入参:</span>
-                        <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
-                        <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
+                        </div>
+                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                          <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
+                          <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                        </div>
                       </div>
                       <div v-if="msg.content" class="mt-2 pt-2 border-t border-ls-border">
                         <div class="flex items-center gap-2 mb-1">
@@ -182,33 +192,45 @@
                 <!-- Tool call card: 入参 + 出参 (merged from tool role) -->
                 <template v-if="msg.role === 'tool_call'">
                       <div class="mb-2">
-                        <span class="text-gray-500">入参:</span>
-                        <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
-                        <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
+                        </div>
+                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                          <MarkdownRender v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolArguments" />
+                          <pre v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                        </div>
                       </div>
                       <div v-if="msg.toolResult" class="mt-2 pt-2 border-t border-ls-border">
                         <div class="flex items-center gap-2 mb-1">
                           <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
                         </div>
-                        <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.toolResult" />
-                        <pre v-if="renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
+                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                          <MarkdownRender v-if="renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolResult" />
+                          <pre v-if="renderModes[String(currentStartIndex + i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
+                        </div>
                       </div>
                     </template>
                     <!-- Tool card: 入参 + 出参 -->
                     <template v-if="msg.role === 'tool'">
                       <div class="mb-2">
-                        <span class="text-gray-500">入参:</span>
-                        <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
-                        <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
+                        </div>
+                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                          <MarkdownRender v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolArguments" />
+                          <pre v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
+                        </div>
                       </div>
-                  <div v-if="msg.content" class="mt-2 pt-2 border-t border-ls-border">
-                    <div class="flex items-center gap-2 mb-1">
-                      <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
-                    </div>
-                    <MarkdownRender v-if="renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.content" />
-                    <pre v-if="renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
-                  </div>
-                </template>
+                      <div v-if="msg.content" class="mt-2 pt-2 border-t border-ls-border">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
+                        </div>
+                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
+                          <MarkdownRender v-if="renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.content" />
+                          <pre v-if="renderModes[String(currentStartIndex + i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
+                        </div>
+                      </div>
+                    </template>
                 <!-- Normal message content -->
                 <div v-if="msg.role !== 'tool' && msg.role !== 'tool_call' && msg.content && renderModes[String(currentStartIndex + i)] !== 'raw'">
                   <MarkdownRender :source="msg.content" />
