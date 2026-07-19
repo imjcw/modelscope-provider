@@ -2,7 +2,7 @@
   <div class="theme-toggle">
     <select
       class="theme-select"
-      :value="currentMode.value"
+      :value="getMode()"
       @change="handleChange"
     >
       <option value="light">

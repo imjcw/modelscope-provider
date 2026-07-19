@@ -54,6 +54,11 @@ export function useTheme() {
   })
 
   const setMode = (mode) => {
+    const validModes = ['light', 'dark', 'system']
+    if (!validModes.includes(mode)) {
+      console.warn(`useTheme: invalid mode "${mode}", must be one of ${validModes.join(', ')}`)
+      return
+    }
     currentMode.value = mode
     localStorage.setItem('themeMode', mode)
     applyTheme()
@@ -62,6 +67,7 @@ export function useTheme() {
   return {
     currentMode: readonly(currentMode),
     prefersColorScheme: readonly(prefersColorScheme),
+    getMode: () => currentMode.value,  // convenience getter for template binding
     setMode,
   }
 }
