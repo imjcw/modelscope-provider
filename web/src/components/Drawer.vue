@@ -5,13 +5,14 @@
  * - 进入/退出通过 `exiting` ref 驱动 CSS 过渡
  * - 点击遮罩 / ESC 键关闭
  */
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   title: { type: String, default: '' },
   width: { type: String, default: '780px' },
   noHeader: { type: Boolean, default: false },
+  mobileFull: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -19,6 +20,15 @@ const emit = defineEmits(['update:modelValue'])
 const visible = ref(false)
 const exiting = ref(false)
 const exitingTimer = ref(null)
+const isMobile = ref(false)
+
+onMounted(() => {
+  const mq = window.matchMedia('(max-width: 1023px)')
+  isMobile.value = mq.matches
+  const handler = (e) => { isMobile.value = e.matches }
+  mq.addEventListener('change', handler)
+  onUnmounted(() => mq.removeEventListener('change', handler))
+})
 
 const close = () => {
   if (exiting.value) return
@@ -59,7 +69,9 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div v-if="visible" class="drawer-overlay" @click.self="close">
-      <div class="drawer drawer-right" :style="{ width: props.width }">
+      <div class="drawer drawer-right"
+           :class="{ 'drawer-full': mobileFull && isMobile }"
+           :style="(mobileFull && isMobile) ? {} : { width: props.width }">
         <div class="drawer-panel" :class="{ 'exiting': exiting }">
           <div v-if="!noHeader" class="drawer-header">
             <h2 class="drawer-title">{{ title }}</h2>
