@@ -335,21 +335,30 @@ async def chat_completions(
     quota_updater = services["quota_updater"]
     http_client = services["http_client"]
     admin_service = get_admin_service(fastapi_request)
+    alias_router = fastapi_request.app.state.alias_router
 
     # Authenticate client API key
     client_key_name, _ = _authenticate_client_key(fastapi_request)
 
     try:
-        # Select supplier using load balancer
-        selected_account = load_balancer.select_account(request.model)
-        logger.info(f"Selected account {selected_account.account_id} for request")
+        # 1. Try binding route
+        route_result = alias_router.route(request.model)
 
-        # Resolve model alias
-        actual_model_id = await alias_resolver.resolve_alias(
-            selected_account,
-            request.model
-        )
-        logger.info(f"Resolved model {request.model} to {actual_model_id}")
+        if route_result is not None:
+            # 2a. Has binding → use route result directly
+            selected_account = route_result.account
+            actual_model_id = route_result.model_name
+            logger.info(
+                f"AliasRouter selected account {selected_account.account_id} "
+                f"model {actual_model_id} for alias '{request.model}'"
+            )
+        else:
+            # 2b. No binding → old flow
+            selected_account = load_balancer.select_account(request.model)
+            actual_model_id = await alias_resolver.resolve_alias(
+                selected_account, request.model
+            )
+            logger.info(f"Resolved model {request.model} to {actual_model_id}")
 
         # Prepare request body (forward all OpenAI-compatible parameters)
         request_body = {
