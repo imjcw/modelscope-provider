@@ -114,6 +114,121 @@ class AdminService:
         self.supplier_model_repo.bulk_upsert(supplier_id, models)
         return self.supplier_model_repo.find_by_supplier(supplier_id)
 
+    # ── Supplier Import / Export ──
+
+    def export_suppliers(self) -> dict:
+        """Export all suppliers with their models as a structured dict.
+
+        The returned dict is JSON/YAML-serializable and includes metadata
+        (version, exported_at) plus the full supplier list including models.
+        """
+        suppliers = self.account_repo.find_all()
+        result = []
+        for sup in suppliers:
+            models = []
+            if self.supplier_model_repo is not None:
+                models = self.supplier_model_repo.find_by_supplier(sup["id"])
+            result.append({
+                "name": sup.get("name", ""),
+                "api_key": sup.get("api_key", ""),
+                "base_url": sup.get("base_url", ""),
+                "status": sup.get("status", "active"),
+                "models": [
+                    {
+                        "model_name": m.get("model_name", ""),
+                        "model_type": m.get("model_type", "text"),
+                        "context_length": m.get("context_length"),
+                    }
+                    for m in models
+                ],
+            })
+        return {
+            "version": "1.0",
+            "exported_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "suppliers": result,
+        }
+
+    def import_suppliers(self, data: dict, strategy: str = "skip") -> dict:
+        """Import suppliers from a previously exported data structure.
+
+        Args:
+            data: Parsed dict from JSON/YAML import.
+            strategy: How to handle duplicate names — "skip" (default) or "overwrite".
+
+        Returns:
+            Stats dict: {created, skipped, updated, errors, total}
+        """
+        if not isinstance(data, dict) or "suppliers" not in data:
+            raise ValueError("无效的导入格式：缺少 'suppliers' 字段")
+
+        entries = data["suppliers"]
+        if not isinstance(entries, list):
+            raise ValueError("无效的导入格式：'suppliers' 必须是列表")
+
+        stats = {"created": 0, "skipped": 0, "updated": 0, "errors": [], "total": len(entries)}
+
+        for idx, entry in enumerate(entries):
+            try:
+                # ── Validate required fields ──
+                name = entry.get("name", "").strip()
+                api_key = entry.get("api_key", "").strip()
+                base_url = entry.get("base_url", "").strip()
+                if not name or not api_key or not base_url:
+                    raise ValueError("缺少必填字段 name / api_key / base_url")
+
+                status = entry.get("status", "active")
+                models = entry.get("models", [])
+
+                # ── Check for duplicate by name ──
+                existing = self.account_repo.find_by_name(name)
+                if existing:
+                    if strategy == "skip":
+                        stats["skipped"] += 1
+                        continue
+                    elif strategy == "overwrite":
+                        self.account_repo.update(
+                            existing["id"],
+                            api_key=api_key,
+                            base_url=base_url,
+                            status=status,
+                        )
+                        if self.supplier_model_repo is not None and isinstance(models, list):
+                            self._safe_bulk_models(existing["id"], models)
+                        stats["updated"] += 1
+                        continue
+                    else:
+                        raise ValueError(f"未知的处理策略: {strategy}")
+
+                # ── Create new supplier ──
+                created = self.account_repo.create(
+                    name=name, api_key=api_key, base_url=base_url, status=status
+                )
+                if self.supplier_model_repo is not None and isinstance(models, list):
+                    self._safe_bulk_models(created["id"], models)
+                stats["created"] += 1
+
+            except Exception as e:
+                stats["errors"].append(f"第 {idx + 1} 项 ({entry.get('name', '?')}): {str(e)}")
+
+        return stats
+
+    def _safe_bulk_models(self, supplier_id: int, models: list) -> None:
+        """Bulk-insert models for a supplier, skipping invalid entries."""
+        cleaned = []
+        for m in models:
+            if not isinstance(m, dict):
+                continue
+            mn = m.get("model_name", "").strip()
+            if not mn:
+                continue
+            cleaned.append({
+                "model_name": mn,
+                "model_type": m.get("model_type", "text"),
+                "context_length": m.get("context_length"),
+            })
+        if cleaned:
+            self.supplier_model_repo.bulk_upsert(supplier_id, cleaned)
+
     # ── Mappings ──
 
     def get_mappings(self):
@@ -130,62 +245,6 @@ class AdminService:
 
     def delete_mapping(self, alias_name: str):
         return self.mapping_repo.delete_by_alias(alias_name)
-
-    def resolve_mapping_alias(self, alias: str) -> str:
-        """Resolve mapping alias to actual model ID with multi-model support.
-
-        Returns:
-            actual_model_id: The selected model name from bound suppliers
-
-        Raises:
-            ValueError: If no models are bound to this alias
-        """
-        if self.mapping_model_repo is None:
-            raise ValueError("Mapping model repo not configured")
-
-        # Fetch all models bound to this alias
-        model_entries = self.mapping_model_repo.find_by_alias(alias)
-
-        if not model_entries:
-            raise ValueError(f"No models bound to alias '{alias}'")
-
-        # Build a list of accounts for load balancing
-        accounts_for_alias = []
-        for entry in model_entries:
-            accounts_for_alias.append(
-                type('Account', (), {
-                    'account_id': f'mapping_{entry["id"]}',
-                    'base_url': '',  # Will be filled below
-                    'model_name': entry['model_name'],
-                    'actual_model_id': entry['model_name'],
-                    'current_index': 0,
-                })()
-            )
-
-        # Fetch supplier details for all suppliers in the mapping
-        supplier_ids = {entry['supplier_id'] for entry in model_entries}
-        supplier_details = {}
-        for sid in supplier_ids:
-            sup = self.account_repo.find_by_id(sid)
-            if sup:
-                supplier_details[sid] = sup
-
-        if not supplier_details:
-            raise ValueError(f"Cannot find supplier details for alias '{alias}'")
-
-        # Use the first supplier's base_url for all accounts (they're the same supplier)
-        base_url = next(iter(supplier_details.values()))['base_url']
-
-        # Override base_url for all accounts
-        for acc in accounts_for_alias:
-            acc.base_url = base_url
-
-        # Select account using load balancer
-        from services.load_balancer import LoadBalancer
-        load_balancer = LoadBalancer(accounts_for_alias)
-        selected = load_balancer.select_account(model_name=model_entries[0]['model_name'])
-
-        return selected.actual_model_id
 
     def get_mapping_models(self, alias_name: str):
         """Get all models bound to a mapping alias."""
