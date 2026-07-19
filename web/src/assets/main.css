@@ -40,7 +40,33 @@ html, body, #app {
   --ls-accent: #89b4fa;
   --ls-accentHover: #74c7ec;
   --ls-border: #bcc0cc;
+  --bg: #eff1f5;
+  --surface: #e6e9ef;
+  --surface-2: #dce0e8;
+  --border: #bcc0cc;
+  --text: #4c4f69;
+  --text-dim: #6c7086;
+  --text-muted: #8c8fa1;
+  --accent: #89b4fa;
+  --accent-dim: #74c7ec;
+  --ring: #89b4fa33;
 }
+
+/* ── Light theme: override Tailwind text color utilities ── */
+[data-theme="light"] .text-white { color: #4c4f69; }
+[data-theme="light"] .text-gray-400 { color: #6c7086; }
+[data-theme="light"] .text-gray-500 { color: #8c8fa1; }
+
+/* ── Light theme: override hardcoded dark hex backgrounds ── */
+[data-theme="light"] .bg-\\[\\#0c0c0c\\] { background: #e6e9ef; }
+[data-theme="light"] .bg-\\[\\#242424\\] { background: #dce0e8; }
+
+/* ── Light theme: override hardcoded dark hex borders ── */
+[data-theme="light"] .border-gray-800 { border-color: #bcc0cc; }
+
+/* ── Light theme: override dark hover backgrounds ── */
+[data-theme="light"] .hover\\:bg-\\[\\#242424\\]:hover { background: #dce0e8; }
+[data-theme="light"] .hover\\:bg-\\[\\#242424\\]:hover { background: #dce0e8; }
 
 /* ── Shared Drawer (form/edit — no close on backdrop click) ── */
 .drawer-overlay {
