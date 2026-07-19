@@ -13,7 +13,8 @@ class ModelMappingsRebuild(Migration):
     def up(self, conn: sqlite3.Connection) -> None:
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(model_mappings)")]
         if "region" not in cols:
-            # Already modern schema (no region); UNIQUE(alias_name) is handled by migration 009.
+            # Modern schema (no region). UNIQUE(alias_name) is enforced by the
+            # rebuilt table in this migration's region path; nothing to do here.
             return
 
         # Legacy schema with region → rebuild
