@@ -2,7 +2,6 @@ import pytest
 import sqlite3
 from core.database import DatabaseManager
 from core.migrations.base import Migration
-from core.migrations.registry import clear_registry, register
 from core.migrations.migrator import Migrator
 
 
@@ -98,7 +97,3 @@ def test_status_shows_applied_and_pending(db, fake_migrations):
     assert all(s["applied"] for s in status)
     assert status[0]["version"] == 1
     assert status[1]["version"] == 2
-
-
-def test_rollback_removes_version_and_reverts_migration():
-    pass  # rollback test deferred to Task 3 (CLI) since most migrations don't implement down()

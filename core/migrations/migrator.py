@@ -39,7 +39,7 @@ class Migrator:
     def run(self) -> None:
         """Execute all pending migrations in version order."""
         applied = self._get_applied_versions()
-        migrations = self._get_migrations()
+        migrations = sorted(self._get_migrations(), key=lambda m: m.version)
         pending = [m for m in migrations if m.version not in applied]
 
         if not pending:
@@ -49,7 +49,6 @@ class Migrator:
         for m in pending:
             logger.info(f"Running migration {m.version}: {m.description}")
             with self.db.get_connection() as conn:
-                conn.execute("BEGIN")
                 m.up(conn)
                 conn.execute(
                     "INSERT INTO schema_versions (version, description) VALUES (?, ?)",
@@ -73,7 +72,7 @@ class Migrator:
     def rollback(self, target: int) -> None:
         """Rollback to target version, calling down() in reverse order."""
         applied = self._get_applied_versions()
-        migrations = self._get_migrations()
+        migrations = sorted(self._get_migrations(), key=lambda m: m.version)
         to_revert = [m for m in migrations if m.version > target and m.version in applied]
 
         if not to_revert:
