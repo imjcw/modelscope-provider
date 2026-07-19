@@ -177,7 +177,14 @@ async def stream_response(
     )
 
     if response.status_code != 200:
-        yield f"data: {json.dumps({'error': f'API error: {response.status_code}'})}\n\n"
+        error_body = {
+            "error": {
+                "message": f"API error: {response.status_code}",
+                "type": "server_error",
+                "code": str(response.status_code),
+            }
+        }
+        yield f"data: {json.dumps(error_body)}\n\n"
         return
 
     # Inject headers as first chunk (consumer strips them out)
