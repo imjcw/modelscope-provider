@@ -3,15 +3,13 @@
 import sqlite3
 import pytest
 from core.database import DatabaseManager
-from core.migrations.registry import clear_registry, get_all_migrations, register
+from core.migrations.registry import get_all_migrations
 
-# The migrations package (__init__.py) auto-imports submodule modules solely to fire
-# their @register decorators; it does not re-export the class names. Pull the classes
-# from the registry — the same API the Migrator uses. clear_registry first, then import
-# the package to trigger registration of all on-disk migrations. get_all_migrations()
-# returns sorted instances; take their classes so the body can do `Cls().up(conn)`.
-clear_registry()
-import core.migrations.migrations  # noqa: E402,F401  # triggers @register for all versioned migrations
+# The migrations package (__init__.py) auto-imports the submodule to fire each
+# migration's @register decorator, so the global registry is fully populated on
+# import. Pull the classes from the registry — the same API the Migrator uses.
+# get_all_migrations() returns sorted instances; take their classes so the body
+# can do `Cls().up(conn)`.
 by_version = {m.version: type(m) for m in get_all_migrations()}
 # Named aliases pinned by version for the existing tests below (bodies left unchanged).
 AccountQuotasTokens = by_version[1]

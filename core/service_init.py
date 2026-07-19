@@ -14,6 +14,7 @@ from services.alias_router import AliasRouter
 from services.load_balancer import LoadBalancer
 from services.response_converter import ResponseConverter
 from services.quota_updater import QuotaUpdater
+from core.migrations import Migrator
 
 
 class ServiceInitializer:
@@ -38,6 +39,8 @@ class ServiceInitializer:
         # Initialize database
         database = DatabaseManager(self.config.get_database_url())
         database.initialize_tables()
+        # Run schema migrations (idempotent — skips already-applied migrations)
+        Migrator(database).run()
         database.seed_default_config()
 
         # Load accounts if not provided

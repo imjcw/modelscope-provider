@@ -3,6 +3,7 @@ import pytest
 import sqlite3
 from pathlib import Path
 from provider.core.database import DatabaseManager
+from provider.core.migrations import Migrator
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -41,6 +42,7 @@ def database(test_db_url):
     """Database manager fixture — uses isolated test DB, cleaned up after."""
     db = DatabaseManager(test_db_url)
     db.initialize_tables()
+    Migrator(db).run()
     yield db
     db_path = Path(_test_db_path)
     if db_path.exists():

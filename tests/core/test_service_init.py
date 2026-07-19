@@ -13,6 +13,7 @@ class MockAccount:
 async def test_initialize_all_services():
     """Test initializing all services."""
     with patch("provider.core.service_init.DatabaseManager") as mock_db, \
+         patch("provider.core.service_init.Migrator"), \
          patch("provider.core.service_init.HttpClient") as mock_http, \
          patch("provider.core.service_init.QuotaRepository"), \
          patch("provider.core.service_init.LoadBalancer"), \
@@ -55,7 +56,8 @@ async def test_initialize_all_services():
 @pytest.mark.asyncio
 async def test_initialize_services_calls_database_init():
     """Test that database initialization is called."""
-    with patch("provider.core.service_init.DatabaseManager") as mock_db:
+    with patch("provider.core.service_init.DatabaseManager") as mock_db, \
+         patch("provider.core.service_init.Migrator"):
         mock_db_instance = Mock()
         mock_db.return_value = mock_db_instance
 
