@@ -12,7 +12,7 @@ from core.migrations.registry import clear_registry, get_all_migrations, registe
 # returns sorted instances; take their classes so the body can do `Cls().up(conn)`.
 clear_registry()
 import core.migrations.migrations  # noqa: E402,F401  # triggers @register for all versioned migrations
-AccountQuotasTokens, RequestLogsResponseHeaders, RequestLogsClientKeyName = [
+AccountQuotasTokens, RequestLogsResponseHeaders, AccountsName, RequestLogsAccountName, RequestLogsClientKeyName = [
     type(m) for m in get_all_migrations()
 ]
 
@@ -97,3 +97,72 @@ class TestMigration008_ClientKeyName:
         with db.get_connection() as conn:
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(request_logs)")]
             assert "client_key_name" in cols
+
+
+class TestMigration003_AccountsName:
+    def test_adds_column_and_index(self, db):
+        with db.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL UNIQUE,
+                    api_key TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute(
+                "INSERT INTO accounts (account_id, api_key, base_url) VALUES ('acc-1', 'key', 'url')"
+            )
+
+        with db.get_connection() as conn:
+            AccountsName().up(conn)
+
+        with db.get_connection() as conn:
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(accounts)")]
+            assert "name" in cols
+            # Verify backfill
+            name = conn.execute("SELECT name FROM accounts WHERE account_id = 'acc-1'").fetchone()[0]
+            assert name == "acc-1"
+            # Verify index exists
+            indexes = [r["name"] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='accounts'"
+            )]
+            assert "idx_accounts_name" in indexes
+
+
+class TestMigration004_RequestLogsAccountName:
+    def test_adds_column_and_backfills(self, db):
+        with db.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL DEFAULT '',
+                    api_key TEXT NOT NULL,
+                    base_url TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE request_logs (
+                    id INTEGER PRIMARY KEY,
+                    account_id TEXT
+                )
+            """)
+            conn.execute(
+                "INSERT INTO accounts (account_id, name, api_key, base_url) VALUES ('acc-1', 'MyAccount', 'key', 'url')"
+            )
+            conn.execute(
+                "INSERT INTO request_logs (account_id) VALUES ('acc-1')"
+            )
+
+        with db.get_connection() as conn:
+            RequestLogsAccountName().up(conn)
+
+        with db.get_connection() as conn:
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(request_logs)")]
+            assert "account_name" in cols
+            name = conn.execute("SELECT account_name FROM request_logs LIMIT 1").fetchone()[0]
+            assert name == "MyAccount"
