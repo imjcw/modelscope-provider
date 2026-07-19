@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import time
 from pathlib import Path
 
 # Add parent directory to Python path for imports
@@ -24,6 +25,18 @@ except ImportError:
     from api.admin_routes import router as admin_router
 import logging
 
+# Configure logging: write to file (append) + console
+log_dir = Path(__file__).parent / "logs"
+log_dir.mkdir(exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(log_dir / "modelscope_provider.log", encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+
 logger = logging.getLogger(__name__)
 
 # Global services dictionary
@@ -40,6 +53,13 @@ async def initialize_services():
     # Pass accounts=None so ServiceInitializer loads from DB (with .env migration)
     _services = await initializer.initialize_all(accounts=None)
 
+    # Record app start time for uptime calculation
+    try:
+        from provider.api import admin_routes as _ar
+    except ImportError:
+        from api import admin_routes as _ar
+    _ar.APP_START_TIME = time.time()
+
     # Initialize admin service
     try:
         from provider.services.admin_service import AdminService
@@ -50,6 +70,7 @@ async def initialize_services():
         from provider.repositories.log_repository import LogRepository
         from provider.repositories.quota_repository import QuotaRepository
         from provider.repositories.supplier_model_repository import SupplierModelRepository
+        from provider.repositories.client_api_key_repository import ClientApiKeyRepository
     except ImportError:
         from services.admin_service import AdminService
         from repositories.account_repository import AccountRepository
@@ -59,6 +80,7 @@ async def initialize_services():
         from repositories.log_repository import LogRepository
         from repositories.quota_repository import QuotaRepository
         from repositories.supplier_model_repository import SupplierModelRepository
+        from repositories.client_api_key_repository import ClientApiKeyRepository
 
     db = _services["database"]
     admin_service = AdminService(
@@ -69,6 +91,7 @@ async def initialize_services():
         quota_repo=QuotaRepository(db),
         supplier_model_repo=SupplierModelRepository(db),
         mapping_model_repo=MappingModelRepository(db),
+        client_key_repo=ClientApiKeyRepository(db),
     )
     _admin_service = admin_service
     logger.info(f"Loaded {len(_services['accounts'])} accounts, admin service initialized")
@@ -87,6 +110,7 @@ async def lifespan(app: FastAPI):
     services = await initialize_services()
     app.state.services = services
     app.state.admin_service = _admin_service
+    app.state.alias_router = _services["alias_router"]
     logger.info("ModelScope Proxy started")
     yield
     logger.info("ModelScope Proxy shutting down")

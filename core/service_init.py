@@ -1,16 +1,19 @@
 from typing import List, Optional
-from provider.core.config import ConfigManager
-from provider.core.database import DatabaseManager
-from provider.core.http_client import HttpClient
-from provider.models.account import ModelScopeAccount
-from provider.models.alias_resolver import ModelAliasResolver
-from provider.repositories.config_repository import ConfigRepository
-from provider.repositories.mapping_repository import MappingRepository
-from provider.repositories.quota_repository import QuotaRepository
-from provider.repositories.supplier_model_repository import SupplierModelRepository
-from provider.services.load_balancer import LoadBalancer
-from provider.services.response_converter import ResponseConverter
-from provider.services.quota_updater import QuotaUpdater
+from core.config import ConfigManager
+from core.database import DatabaseManager
+from core.http_client import HttpClient
+from models.account import ModelScopeAccount
+from models.alias_resolver import ModelAliasResolver
+from repositories.account_repository import AccountRepository
+from repositories.config_repository import ConfigRepository
+from repositories.mapping_model_repository import MappingModelRepository
+from repositories.mapping_repository import MappingRepository
+from repositories.quota_repository import QuotaRepository
+from repositories.supplier_model_repository import SupplierModelRepository
+from services.alias_router import AliasRouter
+from services.load_balancer import LoadBalancer
+from services.response_converter import ResponseConverter
+from services.quota_updater import QuotaUpdater
 
 
 class ServiceInitializer:
@@ -49,6 +52,9 @@ class ServiceInitializer:
         quota_repository = QuotaRepository(database)
         mapping_repository = MappingRepository(database)
         supplier_model_repo = SupplierModelRepository(database)
+        mapping_model_repo = MappingModelRepository(database)
+        account_repo = AccountRepository(database)
+        config_repo = ConfigRepository(database)
 
         # Initialize services
         load_balancer = LoadBalancer(accounts, supplier_model_repo=supplier_model_repo)
@@ -56,6 +62,11 @@ class ServiceInitializer:
         quota_updater = QuotaUpdater(quota_repository)
         alias_resolver = ModelAliasResolver(
             await http_client.create_client(), mapping_repo=mapping_repository
+        )
+        alias_router = AliasRouter(
+            mapping_model_repo=mapping_model_repo,
+            account_repo=account_repo,
+            config_repo=config_repo,
         )
 
         services = {
@@ -68,6 +79,7 @@ class ServiceInitializer:
             "response_converter": response_converter,
             "quota_updater": quota_updater,
             "alias_resolver": alias_resolver,
+            "alias_router": alias_router,
             "accounts": accounts,
         }
 
