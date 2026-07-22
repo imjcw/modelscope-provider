@@ -1,27 +1,30 @@
 <template>
-  <aside class="w-56 bg-ls-bg border-r border-ls-border flex flex-col flex-shrink-0 h-screen">
+  <aside class="fixed top-0 left-0 bottom-0 w-60 bg-ls-shell border-r border-ls-border flex flex-col z-40">
     <!-- Logo -->
-    <div class="px-5 py-5">
-      <div class="flex items-center gap-2.5">
-        <div class="w-7 h-7 rounded-lg bg-[#0c0c0c] border border-gray-800 flex items-center justify-center font-bold text-[11px] tracking-tight">
-          <span class="text-ls-accent">A</span><span class="text-[#89b4fa]">P</span>
-        </div>
-        <span class="font-semibold tracking-tight text-sm">
-          <span class="text-ls-accent">A</span><span class="text-white">I</span>
-          <span class="text-white">&nbsp;</span>
-          <span class="text-[#89b4fa]">P</span><span class="text-white">rovider</span>
-        </span>
-      </div>
+    <div class="px-6 py-5 border-b border-ls-border flex items-center gap-2">
+      <span class="font-bold tracking-tight text-lg">
+        <span class="gradient-neon">AI</span>
+        <span class="text-ls-text"> Provider</span>
+      </span>
     </div>
 
-    <!-- Navigation -->
-    <SidebarNav @select="() => {}" />
+    <!-- Nav（分组标签在 SidebarNav 内，SidebarDrawer 共用） -->
+    <div class="flex-1 px-3 py-4 overflow-y-auto">
+      <SidebarNav @select="() => {}" />
+    </div>
 
-    <!-- Footer -->
-    <div class="px-4 py-3 border-t border-ls-border">
+    <!-- Footer：用户块（demo 布局）+ 版本 + 主题切换 -->
+    <div class="border-t border-ls-border px-3 py-4">
+      <div class="flex items-center gap-3 px-3 mb-3">
+        <div class="w-7 h-7 rounded-lg bg-ls-border border border-ls-borderLight flex items-center justify-center text-xs font-medium text-ls-text">J</div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-ls-text truncate">imjcw</p>
+          <p class="text-xs text-ls-muted truncate">admin@modelscope.ai</p>
+        </div>
+      </div>
       <div class="flex items-center gap-2 mb-2">
-        <div class="w-2 h-2 rounded-full bg-ls-accent"></div>
-        <span class="text-xs text-gray-500">v0.2.0 · 运行中</span>
+        <div class="w-2 h-2 rounded-full bg-green-400"></div>
+        <span class="text-xs text-ls-muted">v0.2.0 · 运行中</span>
       </div>
       <ThemeToggle />
     </div>
@@ -32,6 +35,3 @@
 import SidebarNav from './SidebarNav.vue'
 import ThemeToggle from './ThemeToggle.vue'
 </script>
-
-<style scoped>
-</style>

@@ -90,21 +90,21 @@ function positionPopover() {
         'c-select-trigger',
         sizeClasses[size] || sizeClasses.md,
         'w-full text-left inline-flex items-center justify-between',
-        'bg-[#0c0c0c] rounded-lg border border-gray-800',
-        'text-white placeholder:text-gray-500',
-        'focus:outline-none focus:border-[#6366f1] focus:ring-1 focus:ring-[#6366f1]/20',
+        'bg-ls-bg rounded-lg border border-ls-border',
+        'text-ls-text placeholder:text-ls-muted',
+        'focus:outline-none focus:border-ls-accent focus:ring-1 focus:ring-ls-accent/20',
         'transition-all duration-200',
-        open ? 'border-[#6366f1] ring-1 ring-[#6366f1]/20' : '',
+        open ? 'border-ls-accent ring-1 ring-ls-accent/20' : '',
       ]"
     >
-      <span class="truncate" :class="selectedOption ? 'text-white' : 'text-gray-500'">
+      <span class="truncate" :class="selectedOption ? 'text-ls-text' : 'text-ls-muted'">
         {{ selectedOption ? selectedOption.label : placeholder }}
       </span>
       <svg
         width="14" height="14" viewBox="0 0 24 24"
         fill="none" stroke="currentColor" stroke-width="2"
         stroke-linecap="round" stroke-linejoin="round"
-        class="text-gray-500 transition-transform duration-200 flex-shrink-0 ml-2"
+        class="text-ls-muted transition-transform duration-200 flex-shrink-0 ml-2"
         :class="open ? 'rotate-180' : ''"
       >
         <polyline points="6 9 12 15 18 9"></polyline>
@@ -119,7 +119,7 @@ function positionPopover() {
         :style="popoverStyle"
         @click.stop
       >
-        <div class="bg-[#181818] border border-gray-800 rounded-lg shadow-lg shadow-black/30 py-1.5 animate-in">
+        <div class="bg-ls-card border border-ls-border rounded-lg shadow-lg shadow-black/30 py-1.5 animate-in">
           <button
             v-for="(option, i) in options"
             :key="i"
@@ -128,8 +128,8 @@ function positionPopover() {
             class="w-full text-left px-3 py-2 text-sm transition-colors duration-100 flex items-center gap-2"
             :class="
               option.value === modelValue
-                ? 'bg-[#6366f1]/10 text-[#a5b4fc]'
-                : 'text-white hover:bg-[#242424]'
+                ? 'bg-ls-accent/10 text-ls-accent'
+                : 'text-ls-text hover:bg-ls-elevated'
             "
           >
             <span v-if="option.value === modelValue" class="w-4 h-4 flex items-center justify-center flex-shrink-0">

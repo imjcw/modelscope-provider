@@ -1,51 +1,47 @@
 <template>
   <div>
-    <header class="bg-ls-bg/80 backdrop-blur-md border-b border-ls-border px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight text-white">使用指南</h1>
-        <p class="text-xs text-gray-500 mt-0.5">将代理服务接入你的工具和项目</p>
-      </div>
-      <div class="flex items-center gap-3">
-        <span class="text-xs text-gray-500">API 基础地址</span>
+    <PageHeader title="使用指南" subtitle="将代理服务接入你的工具和项目">
+      <template #action>
+        <span class="text-xs text-ls-muted">API 基础地址</span>
         <div class="flex items-center gap-1 bg-ls-card rounded-md border border-ls-border px-2.5 py-1">
           <code class="text-xs font-mono text-ls-accent">{{ apiBaseUrl }}</code>
-          <button @click="copyBaseUrl" class="text-gray-400 hover:text-white ml-1" title="复制">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-            </svg>
-          </button>
+          <CopyButton :text="apiBaseUrl" :size="12" class="ml-1"
+            color-class="text-ls-dim hover:text-ls-text"
+            :toast-text="'已复制: ' + apiBaseUrl" />
         </div>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
-    <div class="p-6 space-y-6">
+    <div class="px-6 md:px-8 py-6 space-y-6">
       <!-- 步骤导航 -->
-      <div class="bg-ls-card rounded-lg border border-ls-border p-5">
-        <h2 class="font-semibold text-white mb-4">三步开始使用</h2>
+      <CCard>
+        <h2 class="font-semibold text-ls-text mb-4">三步开始使用</h2>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div v-for="(step, i) in steps" :key="i" class="flex items-start gap-3">
             <div class="w-7 h-7 rounded-full bg-ls-accent/20 text-ls-accent flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-0.5">{{ i + 1 }}</div>
             <div>
-              <p class="text-sm text-white font-medium">{{ step.title }}</p>
-              <p class="text-xs text-gray-500 mt-0.5">{{ step.desc }}</p>
+              <p class="text-sm text-ls-text font-medium">{{ step.title }}</p>
+              <p class="text-xs text-ls-muted mt-0.5">{{ step.desc }}</p>
             </div>
           </div>
         </div>
-      </div>
+      </CCard>
 
       <!-- 接入方式标签页 -->
-      <div class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3 border-b border-ls-border flex items-center gap-1 overflow-x-auto">
-          <button v-for="(tab, i) in tabs" :key="i" @click="activeTab = i"
-            :class="activeTab === i ? 'bg-ls-accent text-white' : 'text-gray-400 hover:text-white'"
-            class="px-3 py-1.5 text-xs rounded-md transition-colors whitespace-nowrap">{{ tab }}</button>
-        </div>
+      <CCard no-padding>
+        <template #header>
+          <div class="px-5 py-3 flex items-center gap-1 overflow-x-auto">
+            <button v-for="(tab, i) in tabs" :key="i" @click="activeTab = i"
+              :class="activeTab === i ? 'bg-ls-accent text-ls-bg' : 'text-ls-dim hover:text-ls-text'"
+              class="px-3 py-1.5 text-xs rounded-md transition-colors whitespace-nowrap">{{ tab }}</button>
+          </div>
+        </template>
 
         <!-- Tab: OpenAI SDK -->
         <div v-show="activeTab === 0" class="p-5 space-y-5">
           <div>
-            <h3 class="text-sm font-medium text-white">Python · OpenAI SDK</h3>
-            <p class="text-xs text-gray-500 mt-0.5">只需修改 base_url，其余代码不变</p>
+            <h3 class="text-sm font-medium text-ls-text">Python · OpenAI SDK</h3>
+            <p class="text-xs text-ls-muted mt-0.5">只需修改 base_url，其余代码不变</p>
           </div>
           <pre class="code-block"><code>{{ pythonSdkCode }}</code></pre>
           <div class="bg-ls-bg rounded-md border border-ls-border p-3">
@@ -53,15 +49,15 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
               <span class="text-xs text-green-400">注意</span>
             </div>
-            <p class="text-xs text-gray-400">api_key 可以填任意字符串，代理服务不会校验。base_url 指向本服务的 `/api/v1` 路径即可。</p>
+            <p class="text-xs text-ls-dim">api_key 可以填任意字符串，代理服务不会校验。base_url 指向本服务的 `/api/v1` 路径即可。</p>
           </div>
         </div>
 
         <!-- Tab: JavaScript SDK -->
         <div v-show="activeTab === 1" class="p-5 space-y-5">
           <div>
-            <h3 class="text-sm font-medium text-white">JavaScript / TypeScript · OpenAI SDK</h3>
-            <p class="text-xs text-gray-500 mt-0.5">npm 包 <code class="text-ls-accent">@openai/openai</code> 同样兼容</p>
+            <h3 class="text-sm font-medium text-ls-text">JavaScript / TypeScript · OpenAI SDK</h3>
+            <p class="text-xs text-ls-muted mt-0.5">npm 包 <code class="text-ls-accent">@openai/openai</code> 同样兼容</p>
           </div>
           <pre class="code-block"><code>{{ jsSdkCode }}</code></pre>
         </div>
@@ -69,13 +65,13 @@
         <!-- Tab: curl -->
         <div v-show="activeTab === 2" class="p-5 space-y-5">
           <div>
-            <h3 class="text-sm font-medium text-white">curl · 直接 HTTP 调用</h3>
-            <p class="text-xs text-gray-500 mt-0.5">适合快速验证或无 SDK 环境</p>
+            <h3 class="text-sm font-medium text-ls-text">curl · 直接 HTTP 调用</h3>
+            <p class="text-xs text-ls-muted mt-0.5">适合快速验证或无 SDK 环境</p>
           </div>
           <pre class="code-block"><code>{{ curlCode }}</code></pre>
           <div>
-            <h3 class="text-sm font-medium text-white mt-3">流式响应（SSE）</h3>
-            <p class="text-xs text-gray-500 mt-0.5">添加 <code class="text-ls-accent">"stream": true</code> 即可</p>
+            <h3 class="text-sm font-medium text-ls-text mt-3">流式响应（SSE）</h3>
+            <p class="text-xs text-ls-muted mt-0.5">添加 <code class="text-ls-accent">"stream": true</code> 即可</p>
           </div>
           <pre class="code-block"><code>{{ curlStreamCode }}</code></pre>
         </div>
@@ -83,16 +79,16 @@
         <!-- Tab: 第三方工具 -->
         <div v-show="activeTab === 3" class="p-5 space-y-5">
           <div>
-            <h3 class="text-sm font-medium text-white">第三方工具对接</h3>
-            <p class="text-xs text-gray-500 mt-0.5">兼容 OpenAI API 的工具均可直接接入</p>
+            <h3 class="text-sm font-medium text-ls-text">第三方工具对接</h3>
+            <p class="text-xs text-ls-muted mt-0.5">兼容 OpenAI API 的工具均可直接接入</p>
           </div>
 
           <!-- 通用配置说明 -->
           <div class="bg-ls-bg rounded-md border border-ls-border p-4">
-            <h4 class="text-xs font-medium text-white mb-2">通用配置</h4>
+            <h4 class="text-xs font-medium text-ls-text mb-2">通用配置</h4>
             <div class="space-y-1.5">
               <div v-for="row in commonConfig" :key="row.label" class="flex items-center gap-3 text-xs">
-                <span class="text-gray-500 w-32 flex-shrink-0">{{ row.label }}</span>
+                <span class="text-ls-muted w-32 flex-shrink-0">{{ row.label }}</span>
                 <code class="text-ls-accent font-mono bg-ls-card px-1.5 py-0.5 rounded">{{ row.value }}</code>
               </div>
             </div>
@@ -102,13 +98,13 @@
           <div class="space-y-3">
             <div v-for="tool in tools" :key="tool.name" class="bg-ls-bg rounded-md border border-ls-border p-4">
               <div class="flex items-center justify-between mb-2">
-                <h4 class="text-xs font-medium text-white">{{ tool.name }}</h4>
+                <h4 class="text-xs font-medium text-ls-text">{{ tool.name }}</h4>
                 <span class="text-xs text-ls-accent px-1.5 py-0.5 rounded bg-ls-accent/10">已兼容</span>
               </div>
               <div class="space-y-1 text-xs">
-                <div class="flex items-center gap-2"><span class="text-gray-500 w-20">API Host</span><code class="font-mono text-gray-300">{{ tool.host }}</code></div>
-                <div class="flex items-center gap-2"><span class="text-gray-500 w-20">API Path</span><code class="font-mono text-gray-300">{{ tool.path }}</code></div>
-                <p class="text-gray-500 mt-1">{{ tool.desc }}</p>
+                <div class="flex items-center gap-2"><span class="text-ls-muted w-20">API Host</span><code class="font-mono text-ls-dim">{{ tool.host }}</code></div>
+                <div class="flex items-center gap-2"><span class="text-ls-muted w-20">API Path</span><code class="font-mono text-ls-dim">{{ tool.path }}</code></div>
+                <p class="text-ls-muted mt-1">{{ tool.desc }}</p>
               </div>
             </div>
           </div>
@@ -117,11 +113,11 @@
         <!-- Tab: 请求格式 -->
         <div v-show="activeTab === 4" class="p-5 space-y-5">
           <div>
-            <h3 class="text-sm font-medium text-white">请求 / 响应格式</h3>
-            <p class="text-xs text-gray-500 mt-0.5">完全兼容 OpenAI API 格式</p>
+            <h3 class="text-sm font-medium text-ls-text">请求 / 响应格式</h3>
+            <p class="text-xs text-ls-muted mt-0.5">完全兼容 OpenAI API 格式</p>
           </div>
           <div>
-            <p class="text-xs text-gray-400 mb-1.5">请求体</p>
+            <p class="text-xs text-ls-dim mb-1.5">请求体</p>
             <pre class="code-block"><code>{{ requestFormat }}</code></pre>
           </div>
           <div>
@@ -157,23 +153,19 @@
             </table>
           </div>
         </div>
-      </div>
+      </CCard>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, inject } from 'vue'
-
-const toast = inject('$toast')
+import { ref, computed } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
+import CCard from '@/components/CCard.vue'
+import CopyButton from '@/components/CopyButton.vue'
 
 // ── 页面级数据 ──
 const apiBaseUrl = computed(() => window.location.origin + '/api/v1')
-
-const copyBaseUrl = () => {
-  navigator.clipboard.writeText(apiBaseUrl.value)
-  toast('已复制: ' + apiBaseUrl.value, 'success')
-}
 
 // ── 三步开始使用 ──
 const steps = [

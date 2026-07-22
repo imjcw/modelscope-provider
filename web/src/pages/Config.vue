@@ -2,129 +2,93 @@
   <div>
     <PageHeader title="系统配置" subtitle="全局参数和服务设置"></PageHeader>
 
-    <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="px-6 md:px-8 py-6 grid grid-cols-1 md:grid-cols-2 gap-6">
 
       <!-- Server Settings -->
-      <div class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3.5 border-b border-ls-border"><h2 class="font-semibold tracking-tight text-sm">服务设置</h2></div>
-        <div class="p-5 space-y-4">
-          <div>
-            <label class="block text-xs text-gray-500 mb-1.5">监听地址 <span class="text-gray-600">(读取配置文件)</span></label>
-            <input v-model="config.listenHost" type="text" disabled
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-gray-400 font-mono cursor-not-allowed">
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1.5">监听端口 <span class="text-gray-600">(读取配置文件)</span></label>
-            <input v-model.number="config.listenPort" type="number" disabled
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-gray-400 font-mono cursor-not-allowed">
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1.5">API 前缀 <span class="text-gray-600">(读取配置文件)</span></label>
-            <input v-model="config.apiPrefix" type="text" disabled
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-gray-400 font-mono cursor-not-allowed">
-          </div>
-        </div>
-      </div>
+      <CCard title="服务设置" body-class="p-5 space-y-4">
+        <FormField label="监听地址" plain hint="(读取配置文件)">
+          <input v-model="config.listenHost" type="text" disabled
+            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-dim font-mono cursor-not-allowed">
+        </FormField>
+        <FormField label="监听端口" plain hint="(读取配置文件)">
+          <input v-model.number="config.listenPort" type="number" disabled
+            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-dim font-mono cursor-not-allowed">
+        </FormField>
+        <FormField label="API 前缀" plain hint="(读取配置文件)">
+          <input v-model="config.apiPrefix" type="text" disabled
+            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-dim font-mono cursor-not-allowed">
+        </FormField>
+      </CCard>
 
       <!-- Database Settings -->
-      <div class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3.5 border-b border-ls-border"><h2 class="font-semibold tracking-tight text-sm">数据库设置</h2></div>
-        <div class="p-5 space-y-4">
-          <div>
-            <label class="block text-xs text-gray-500 mb-1.5">数据库路径 <span class="text-gray-600">(读取配置文件)</span></label>
-            <input v-model="config.dbPath" type="text" disabled
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-gray-400 font-mono cursor-not-allowed">
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1.5">数据库大小</label>
-            <p class="text-sm text-gray-400 font-mono">{{ info.dbSize || '—' }}</p>
-          </div>
-        </div>
-      </div>
+      <CCard title="数据库设置" body-class="p-5 space-y-4">
+        <FormField label="数据库路径" plain hint="(读取配置文件)">
+          <input v-model="config.dbPath" type="text" disabled
+            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-dim font-mono cursor-not-allowed">
+        </FormField>
+        <FormField label="数据库大小" plain>
+          <p class="text-sm text-ls-dim font-mono">{{ info.dbSize || '—' }}</p>
+        </FormField>
+      </CCard>
 
       <!-- Log Settings -->
-      <div class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3.5 border-b border-ls-border"><h2 class="font-semibold tracking-tight text-sm">日志设置</h2></div>
-        <div class="p-5 space-y-4">
+      <CCard title="日志设置" body-class="p-5 space-y-4">
+        <FormField label="日志级别" plain>
+          <CSelect v-model="config.logLevel" :options="LOG_LEVEL_OPTIONS" placeholder="日志级别" />
+        </FormField>
+        <div class="flex items-center justify-between">
           <div>
-            <label class="block text-xs text-gray-500 mb-1.5">日志级别</label>
-            <CSelect v-model="config.logLevel" :options="LOG_LEVEL_OPTIONS" placeholder="日志级别" />
+            <p class="text-sm text-ls-text">请求日志持久化 <span class="text-ls-muted text-xs">(读取配置文件)</span></p>
+            <p class="text-xs text-ls-muted mt-0.5">将请求日志写入数据库</p>
           </div>
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-white">请求日志持久化 <span class="text-gray-600 text-xs">(读取配置文件)</span></p>
-              <p class="text-xs text-gray-500 mt-0.5">将请求日志写入数据库</p>
-            </div>
-            <label class="relative inline-flex items-center cursor-pointer opacity-50">
-              <input v-model="config.persistLogs" type="checkbox" disabled class="sr-only peer">
-              <div class="w-9 h-5 bg-gray-700 rounded-full peer peer-checked:bg-ls-accent transition-all after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
-            </label>
-          </div>
+          <CCheckbox v-model="config.persistLogs" disabled />
         </div>
-      </div>
+      </CCard>
 
       <!-- Load Balancer -->
-      <div class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3.5 border-b border-ls-border"><h2 class="font-semibold tracking-tight text-sm">负载均衡策略</h2></div>
-        <div class="p-5 space-y-4">
-          <div>
-            <label class="block text-xs text-gray-500 mb-1.5">策略</label>
-            <CSelect v-model="config.lbStrategy" :options="LB_STRATEGY_OPTIONS" placeholder="策略" />
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1.5">超时 (ms)</label>
-            <input v-model.number="config.timeoutMs" type="number"
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-ls-accent">
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1.5">重试次数</label>
-            <input v-model.number="config.retryCount" type="number"
-              class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-ls-accent">
-          </div>
-        </div>
-      </div>
+      <CCard title="负载均衡策略" body-class="p-5 space-y-4">
+        <FormField label="策略" plain>
+          <CSelect v-model="config.lbStrategy" :options="LB_STRATEGY_OPTIONS" placeholder="策略" />
+        </FormField>
+        <FormField label="超时 (ms)" plain>
+          <input v-model.number="config.timeoutMs" type="number"
+            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-text font-mono focus:outline-none focus:border-ls-accent">
+        </FormField>
+        <FormField label="重试次数" plain>
+          <input v-model.number="config.retryCount" type="number"
+            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-text font-mono focus:outline-none focus:border-ls-accent">
+        </FormField>
+      </CCard>
 
       <!-- Quota Settings -->
-      <div class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3.5 border-b border-ls-border"><h2 class="font-semibold tracking-tight text-sm">配额设置</h2></div>
-        <div class="p-5 space-y-4">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-white">配额耗尽自动禁用</p>
-              <p class="text-xs text-gray-500 mt-0.5">供应商配额耗尽时自动标记为不可用</p>
-            </div>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input v-model="config.autoDisable" type="checkbox" class="sr-only peer">
-              <div class="w-9 h-5 bg-gray-700 rounded-full peer peer-checked:bg-ls-accent transition-all after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
-            </label>
+      <CCard title="配额设置" body-class="p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-ls-text">配额耗尽自动禁用</p>
+            <p class="text-xs text-ls-muted mt-0.5">供应商配额耗尽时自动标记为不可用</p>
           </div>
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-white">每日自动重置配额</p>
-              <p class="text-xs text-gray-500 mt-0.5">每日 00:00 自动刷新配额状态</p>
-            </div>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input v-model="config.autoReset" type="checkbox" class="sr-only peer">
-              <div class="w-9 h-5 bg-gray-700 rounded-full peer peer-checked:bg-ls-accent transition-all after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
-            </label>
-          </div>
+          <CCheckbox v-model="config.autoDisable" />
         </div>
-      </div>
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-ls-text">每日自动重置配额</p>
+            <p class="text-xs text-ls-muted mt-0.5">每日 00:00 自动刷新配额状态</p>
+          </div>
+          <CCheckbox v-model="config.autoReset" />
+        </div>
+      </CCard>
 
       <!-- Data Management (Import / Export) -->
-      <div class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3.5 border-b border-ls-border"><h2 class="font-semibold tracking-tight text-sm">数据管理</h2></div>
-        <div class="p-5 space-y-5">
+      <CCard title="数据管理" body-class="p-5 space-y-5">
           <!-- Export -->
           <div class="flex items-end justify-between gap-4">
-            <div class="flex-1">
-              <label class="block text-xs text-gray-500 mb-1.5">导出格式</label>
+            <FormField label="导出格式" plain class="flex-1">
               <select v-model="exportFormat"
-                class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-ls-accent">
+                class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-text font-mono focus:outline-none focus:border-ls-accent">
                 <option value="json">JSON</option>
                 <option value="yaml">YAML</option>
               </select>
-            </div>
+            </FormField>
             <button @click="handleExport" class="btn btn-secondary whitespace-nowrap" :disabled="exporting">
               <svg v-if="!exporting" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-1.5">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -142,24 +106,22 @@
           <!-- Import -->
           <div class="space-y-3">
             <div class="flex items-end justify-between gap-4">
-              <div class="flex-1">
-                <label class="block text-xs text-gray-500 mb-1.5">导入文件 <span class="text-gray-600">(.json / .yaml)</span></label>
+              <FormField label="导入文件" plain hint="(.json / .yaml)" class="flex-1">
                 <div class="flex items-center gap-2">
-                  <button @click="triggerFileInput" class="btn-secondary px-3 py-2 text-sm rounded-lg border border-ls-border text-gray-300 hover:text-white transition-colors">
+                  <button @click="triggerFileInput" class="btn-secondary px-3 py-2 text-sm rounded-lg border border-ls-border text-ls-dim hover:text-ls-text transition-colors">
                     选择文件
                   </button>
-                  <span class="text-sm text-gray-400 truncate">{{ selectedFileName || '未选择文件' }}</span>
+                  <span class="text-sm text-ls-dim truncate">{{ selectedFileName || '未选择文件' }}</span>
                   <input ref="fileInput" type="file" accept=".json,.yaml,.yml" @change="handleFileSelect" class="hidden">
                 </div>
-              </div>
-              <div>
-                <label class="block text-xs text-gray-500 mb-1.5">重复处理</label>
+              </FormField>
+              <FormField label="重复处理" plain>
                 <select v-model="importStrategy"
-                  class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-ls-accent">
+                  class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-text font-mono focus:outline-none focus:border-ls-accent">
                   <option value="skip">跳过已有</option>
                   <option value="overwrite">覆盖已有</option>
                 </select>
-              </div>
+              </FormField>
             </div>
             <div class="flex items-center justify-between">
               <p class="text-xs text-gray-600">导入将批量添加或更新供应商及其关联模型</p>
@@ -187,19 +149,15 @@
               <li v-for="(err, i) in importResult.errors" :key="i" class="text-xs text-red-400 font-mono">• {{ err }}</li>
             </ul>
           </div>
-        </div>
-      </div>
+      </CCard>
 
       <!-- About -->
-      <div class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3.5 border-b border-ls-border"><h2 class="font-semibold tracking-tight text-sm">关于</h2></div>
-        <div class="p-5 space-y-2">
-          <div class="flex justify-between text-sm"><span class="text-gray-500">版本</span><span class="text-white font-mono">{{ info.version || '—' }}</span></div>
-          <div class="flex justify-between text-sm"><span class="text-gray-500">运行时长</span><span class="text-white font-mono">{{ info.uptime || '—' }}</span></div>
-          <div class="flex justify-between text-sm"><span class="text-gray-500">Python</span><span class="text-white font-mono">{{ info.python || '—' }}</span></div>
-          <div class="flex justify-between text-sm"><span class="text-gray-500">Uvicorn</span><span class="text-white font-mono">{{ info.uvicorn || '—' }}</span></div>
-        </div>
-      </div>
+      <CCard title="关于" body-class="p-5 space-y-2">
+        <div class="flex justify-between text-sm"><span class="text-gray-500">版本</span><span class="text-white font-mono">{{ info.version || '—' }}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-gray-500">运行时长</span><span class="text-white font-mono">{{ info.uptime || '—' }}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-gray-500">Python</span><span class="text-white font-mono">{{ info.python || '—' }}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-gray-500">Uvicorn</span><span class="text-white font-mono">{{ info.uvicorn || '—' }}</span></div>
+      </CCard>
     </div>
 
     <!-- Save bar -->
@@ -218,7 +176,10 @@
 <script setup>
 import { ref, reactive, onMounted, inject } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
+import CCard from '@/components/CCard.vue'
+import FormField from '@/components/FormField.vue'
 import CSelect from '@/components/CSelect.vue'
+import CCheckbox from '@/components/CCheckbox.vue'
 import { getConfig as apiGetConfig, updateConfig as apiUpdateConfig, getAppInfo, exportSuppliers, importSuppliers } from '@/api'
 
 const toast = inject('$toast')

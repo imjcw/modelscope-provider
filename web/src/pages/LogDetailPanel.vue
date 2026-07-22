@@ -2,26 +2,21 @@
   <Teleport to="body">
     <div v-if="modelValue" class="drawer-overlay" @click.self="close">
       <div class="drawer-panel-fixed flex flex-col"
-           style="background: #1a1a1e; border-left: 1px solid var(--border); animation: slideInRight .25s cubic-bezier(.4,0,.2,1);">
+           style="background: var(--ls-card); border-left: 1px solid var(--border); animation: slideInRight .25s cubic-bezier(.4,0,.2,1);">
         <!-- Header -->
-        <div class="flex items-center justify-between px-4 py-3 lg:px-5 border-b border-ls-border flex-shrink-0" style="background: #1a1a1e;">
-          <div>
-            <h2 class="text-base font-semibold text-white">请求日志</h2>
-            <p class="text-xs text-gray-500 mt-0.5">{{ modelValue.request_id }} · {{ formatMsTime(modelValue.timestamp) }}</p>
+        <div class="flex items-center justify-between gap-3 px-4 py-3 lg:px-5 border-b border-ls-border flex-shrink-0 bg-ls-card">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2.5 flex-wrap">
+              <h2 class="text-base font-semibold text-ls-text">请求日志</h2>
+              <StatusCodeBadge :code="modelValue.status_code" small padded />
+            </div>
+            <p class="text-xs text-ls-muted mt-0.5 truncate">{{ modelValue.request_id }} · {{ fmtMsTime(modelValue.timestamp) }}</p>
           </div>
-          <div class="flex items-center gap-2">
-            <button @click="close"
-              class="p-1 rounded-md text-gray-400 hover:text-white hover:bg-ls-elevated transition-colors"
-              aria-label="关闭">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-            <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs"
-              :class="modelValue.status_code >= 400 ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'">
-              {{ modelValue.status_code }}
-            </span>
-          </div>
+          <button @click="close"
+            class="p-1 rounded-md text-ls-dim hover:text-ls-text hover:bg-ls-elevated transition-colors flex-shrink-0"
+            aria-label="关闭">
+            <CIcon name="x" :size="18" />
+          </button>
         </div>
 
         <!-- Body -->
@@ -34,9 +29,9 @@
               <!-- Request header -->
               <div class="bg-ls-card rounded-lg border border-ls-border p-3">
                 <div class="flex items-center gap-3">
-                  <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Request</span>
-                  <span class="text-xs text-gray-600">→ {{ modelValue.account_name || modelValue.account_id }}</span>
-                  <span class="text-xs text-gray-600">· {{ modelValue.model }}</span>
+                  <span class="text-xs font-medium text-ls-muted uppercase tracking-wide">Request</span>
+                  <span class="text-xs text-ls-muted">→ {{ modelValue.account_name || modelValue.account_id }}</span>
+                  <span class="text-xs text-ls-muted">· {{ modelValue.model }}</span>
                   <span v-if="modelValue.is_stream" class="text-xs text-ls-accent">stream</span>
                 </div>
               </div>
@@ -44,248 +39,45 @@
               <!-- ── History messages (before the last user message) ── -->
               <template v-if="historyMessages.length > 0">
                 <button @click="showHistory = !showHistory"
-                  class="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-ls-border text-xs text-gray-500 hover:text-white hover:border-gray-500 transition-colors">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="transition-transform" :class="showHistory ? 'rotate-180' : ''">
-                    <polyline points="6 9 12 15 18 9"/>
-                  </svg>
+                  class="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-ls-border text-xs text-ls-muted hover:text-ls-text hover:border-ls-dim transition-colors">
+                  <CIcon name="chevron-down" :size="12" class="transition-transform" :class="showHistory ? 'rotate-180' : ''" />
                   <span>{{ showHistory ? '收起历史消息' : '加载历史消息' }}</span>
-                  <span class="text-gray-600">{{ historyMessages.length }} 条</span>
+                  <span class="text-ls-muted">{{ historyMessages.length }} 条</span>
                 </button>
                 <div v-if="showHistory" class="space-y-2">
-                  <div v-for="(msg, i) in historyMessages" :key="'hist-' + i"
-                    class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
-                    <button @click="toggleHistoryCollapsed(i)"
-                      class="flex items-center gap-2 px-4 py-2.5 w-full text-left hover:bg-ls-elevated transition-colors">
-                      <span v-if="msg.role === 'system'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-ls-accent/10 text-ls-accent">System</span>
-                      <span v-else-if="msg.role === 'user'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-green-500/10 text-green-400">User</span>
-                      <span v-else-if="msg.role === 'assistant'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-yellow-500/10 text-yellow-400">Assistant</span>
-                      <span v-else-if="msg.role === 'tool_call'" class="inline-flex items-center gap-2">
-                        <span :class="toolTypeColor(msg.toolName || 'tool')" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
-                          {{ toolTypeLabel(msg.toolName || 'tool') }}
-                        </span>
-                        <span class="text-xs text-gray-400">{{ msg.toolName || 'Tool' }}</span>
-                        <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
-                      </span>
-                      <span v-else-if="msg.role === 'tool'" class="inline-flex items-center gap-2">
-                        <span :class="toolTypeColor(msg.toolName || 'tool')" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
-                          {{ toolTypeLabel(msg.toolName || 'tool') }}
-                        </span>
-                        <span class="text-xs text-gray-400">{{ msg.toolName || 'Tool' }}</span>
-                        <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
-                      </span>
-                      <span v-if="msg.content || msg.toolArguments || msg.toolResult" @click.stop="toggleHistoryRender(i)"
-                        class="text-xs text-gray-500 hover:text-white px-1.5 py-0.5 rounded transition-colors"
-                        :class="renderModes[String(i)] === 'raw' ? 'bg-ls-elevated text-gray-300' : ''">
-                        {{ renderModes[String(i)] === 'raw' ? 'RAW' : 'MD' }}
-                      </span>
-                      <span class="ml-auto text-gray-500 text-xs transition-transform" :class="!historyCollapsed[String(i)] ? 'rotate-90' : ''">▶</span>
-                    </button>
-                    <div v-if="!historyCollapsed[String(i)]" class="px-4 py-3 text-xs text-gray-300">
-                      <!-- Tool call card: 入参 + 出参 (merged from tool role) -->
-                      <template v-if="msg.role === 'tool_call'">
-                        <div class="mb-2">
-                          <div class="flex items-center gap-2 mb-1">
-                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
-                          </div>
-                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                            <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
-                            <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
-                          </div>
-                        </div>
-                        <div v-if="msg.toolResult" class="mt-2 pt-2 border-t border-ls-border">
-                          <div class="flex items-center gap-2 mb-1">
-                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
-                          </div>
-                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                            <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.toolResult" />
-                            <pre v-if="renderModes[String(i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
-                          </div>
-                        </div>
-                      </template>
-                      <!-- Tool card: 入参 + 出参 -->
-                      <template v-if="msg.role === 'tool'">
-                        <div class="mb-2">
-                          <div class="flex items-center gap-2 mb-1">
-                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
-                          </div>
-                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                            <MarkdownRender v-if="msg.toolArguments && renderModes[String(i)] !== 'raw'" :source="msg.toolArguments" />
-                            <pre v-if="msg.toolArguments && renderModes[String(i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
-                          </div>
-                        </div>
-                        <div v-if="msg.content" class="mt-2 pt-2 border-t border-ls-border">
-                          <div class="flex items-center gap-2 mb-1">
-                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
-                          </div>
-                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                            <MarkdownRender v-if="renderModes[String(i)] !== 'raw'" :source="msg.content" />
-                            <pre v-if="renderModes[String(i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
-                          </div>
-                        </div>
-                      </template>
-                      <!-- Normal message content -->
-                      <div v-if="msg.role !== 'tool' && msg.role !== 'tool_call' && msg.content && renderModes[String(i)] !== 'raw'">
-                        <MarkdownRender :source="msg.content" />
-                      </div>
-                      <pre v-if="msg.role !== 'tool' && msg.role !== 'tool_call' && msg.content && renderModes[String(i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
-                      <!-- Assistant toolCalls with inline results -->
-                      <div v-if="msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0" class="mt-3 pt-3 border-t border-ls-border space-y-2">
-                        <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                          <div class="flex items-center gap-2 mb-2">
-                            <span :class="toolTypeColor(tc.name)" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
-                              {{ toolTypeLabel(tc.name) }}
-                            </span>
-                            <span class="text-xs text-gray-400 font-medium">{{ tc.name }}</span>
-                            <span v-if="tc.id" class="text-xs text-gray-500 font-mono">{{ tc.id }}</span>
-                          </div>
-                          <div class="mb-2">
-                            <div class="flex items-center gap-2 mb-1">
-                              <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
-                            </div>
-                            <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                              <MarkdownRender :source="tc.arguments" />
-                            </div>
-                          </div>
-                          <div v-if="tc.result" class="mt-2 pt-2 border-t border-ls-border">
-                            <div class="flex items-center gap-2 mb-1">
-                              <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
-                            </div>
-                            <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                              <MarkdownRender :source="tc.result" />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <span v-if="!msg.content && !msg.toolCalls && msg.role !== 'tool' && msg.role !== 'tool_call'" class="text-gray-600 text-xs italic">—</span>
-                    </div>
-                  </div>
+                  <MessageCard v-for="(msg, i) in historyMessages" :key="'hist-' + i"
+                    :msg="msg"
+                    :expanded="!historyCollapsed[String(i)]"
+                    :render-mode="renderModes[String(i)] || 'md'"
+                    @toggle-expand="toggleHistoryCollapsed(i)"
+                    @toggle-render="toggleHistoryRender(i)" />
                 </div>
               </template>
 
               <!-- ── Current conversation (from the last user message onwards) ── -->
-              <div v-for="(msg, i) in currentMessages" :key="'cur-' + i"
-                :class="['bg-ls-card rounded-lg border overflow-hidden', i === 0 ? 'border-ls-accent' : 'border-ls-border']">
-                <button @click="toggleExpanded(currentStartIndex + i)"
-                  class="flex items-center gap-2 px-4 py-2.5 w-full text-left hover:bg-ls-elevated transition-colors">
-                  <span v-if="msg.role === 'system'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-ls-accent/10 text-ls-accent">System</span>
-                  <span v-else-if="msg.role === 'user'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-green-500/10 text-green-400">User</span>
-                  <span v-else-if="msg.role === 'assistant'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-yellow-500/10 text-yellow-400">Assistant</span>
-                  <span v-else-if="msg.role === 'tool_call'" class="inline-flex items-center gap-2">
-                    <span :class="toolTypeColor(msg.toolName || 'tool')" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
-                      {{ toolTypeLabel(msg.toolName || 'tool') }}
-                    </span>
-                    <span class="text-xs text-gray-400">{{ msg.toolName || 'Tool' }}</span>
-                    <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
-                  </span>
-                  <span v-else-if="msg.role === 'tool'" class="inline-flex items-center gap-2">
-                    <span :class="toolTypeColor(msg.toolName || 'tool')" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
-                      {{ toolTypeLabel(msg.toolName || 'tool') }}
-                    </span>
-                    <span class="text-xs text-gray-400">{{ msg.toolName || 'Tool' }}</span>
-                    <span v-if="msg.toolId" class="text-xs text-gray-500 font-mono">{{ msg.toolId }}</span>
-                  </span>
-                  <span v-if="i === 0 && msg.role === 'user'" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] bg-green-500/20 text-green-300 border border-green-500/30">本次输入</span>
-                  <button v-if="msg.content || msg.toolArguments || msg.toolResult" @click.stop="toggleRender(currentStartIndex + i)"
-                    class="text-xs text-gray-500 hover:text-white px-1.5 py-0.5 rounded transition-colors"
-                    :class="renderModes[String(currentStartIndex + i)] === 'raw' ? 'bg-ls-elevated text-gray-300' : ''">
-                    {{ renderModes[String(currentStartIndex + i)] === 'raw' ? 'RAW' : 'MD' }}
-                  </button>
-                  <span class="ml-auto text-gray-500 text-xs transition-transform" :class="expandedMap.get(currentStartIndex + i) ? 'rotate-90' : ''">▶</span>
-                </button>
-                <div v-if="expandedMap.get(currentStartIndex + i)" class="px-4 py-3 text-xs text-gray-300">
-                  <!-- Tool call card: 入参 + 出参 (merged from tool role) -->
-                  <template v-if="msg.role === 'tool_call'">
-                        <div class="mb-2">
-                          <div class="flex items-center gap-2 mb-1">
-                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
-                          </div>
-                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                            <MarkdownRender v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolArguments" />
-                            <pre v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
-                          </div>
-                        </div>
-                        <div v-if="msg.toolResult" class="mt-2 pt-2 border-t border-ls-border">
-                          <div class="flex items-center gap-2 mb-1">
-                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
-                          </div>
-                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                            <MarkdownRender v-if="renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolResult" />
-                            <pre v-if="renderModes[String(currentStartIndex + i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolResult }}</pre>
-                          </div>
-                        </div>
-                      </template>
-                      <!-- Tool card: 入参 + 出参 -->
-                      <template v-if="msg.role === 'tool'">
-                        <div class="mb-2">
-                          <div class="flex items-center gap-2 mb-1">
-                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
-                          </div>
-                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                            <MarkdownRender v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.toolArguments" />
-                            <pre v-if="msg.toolArguments && renderModes[String(currentStartIndex + i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.toolArguments }}</pre>
-                          </div>
-                        </div>
-                        <div v-if="msg.content" class="mt-2 pt-2 border-t border-ls-border">
-                          <div class="flex items-center gap-2 mb-1">
-                            <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
-                          </div>
-                          <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                            <MarkdownRender v-if="renderModes[String(currentStartIndex + i)] !== 'raw'" :source="msg.content" />
-                            <pre v-if="renderModes[String(currentStartIndex + i)] === 'raw'" class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
-                          </div>
-                        </div>
-                      </template>
-                  <!-- Normal message content -->
-                  <div v-if="msg.role !== 'tool' && msg.role !== 'tool_call' && msg.content && renderModes[String(currentStartIndex + i)] !== 'raw'">
-                    <MarkdownRender :source="msg.content" />
-                  </div>
-                  <pre v-if="msg.role !== 'tool' && msg.role !== 'tool_call' && msg.content && renderModes[String(currentStartIndex + i)] === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
-                  <!-- Assistant toolCalls with inline results -->
-                  <div v-if="msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0" class="mt-3 pt-3 border-t border-ls-border space-y-2">
-                    <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                      <div class="flex items-center gap-2 mb-2">
-                        <span :class="toolTypeColor(tc.name)" class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs">
-                          {{ toolTypeLabel(tc.name) }}
-                        </span>
-                        <span class="text-xs text-gray-400 font-medium">{{ tc.name }}</span>
-                        <span v-if="tc.id" class="text-xs text-gray-500 font-mono">{{ tc.id }}</span>
-                      </div>
-                      <div class="mb-2">
-                        <div class="flex items-center gap-2 mb-1">
-                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-blue-500/10 text-blue-400">入参</span>
-                        </div>
-                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                          <MarkdownRender :source="tc.arguments" />
-                        </div>
-                      </div>
-                      <div v-if="tc.result" class="mt-2 pt-2 border-t border-ls-border">
-                        <div class="flex items-center gap-2 mb-1">
-                          <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-purple-500/10 text-purple-400">出参</span>
-                        </div>
-                        <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
-                          <MarkdownRender :source="tc.result" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <span v-if="!msg.content && !msg.toolCalls && msg.role !== 'tool' && msg.role !== 'tool_call'" class="text-gray-600 text-xs italic">—</span>
-                </div>
-              </div>
+              <MessageCard v-for="(msg, i) in currentMessages" :key="'cur-' + i"
+                :msg="msg"
+                :expanded="expandedMap.get(currentStartIndex + i)"
+                :render-mode="renderModes[String(currentStartIndex + i)] || 'md'"
+                :highlight="i === 0"
+                :input-badge="i === 0 && msg.role === 'user'"
+                @toggle-expand="toggleExpanded(currentStartIndex + i)"
+                @toggle-render="toggleRender(currentStartIndex + i)" />
 
               <!-- Assistant response (concatenated) -->
               <div v-if="responseContentText" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
                 <button @click="toggleResponseExpanded"
                   class="flex items-center gap-2 px-4 py-2.5 w-full text-left hover:bg-ls-elevated transition-colors">
                   <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-yellow-500/10 text-yellow-400">Assistant</span>
-                  <span v-if="responseChunks.length > 1" class="text-xs text-gray-600">{{ responseChunks.length }} chunks</span>
+                  <span v-if="responseChunks.length > 1" class="text-xs text-ls-muted">{{ responseChunks.length }} chunks</span>
                   <button @click.stop="toggleResponseRender"
-                    class="text-xs text-gray-500 hover:text-white px-1.5 py-0.5 rounded transition-colors"
-                    :class="responseRenderMode === 'raw' ? 'bg-ls-elevated text-gray-300' : ''">
+                    class="text-xs text-ls-muted hover:text-ls-text px-1.5 py-0.5 rounded transition-colors"
+                    :class="responseRenderMode === 'raw' ? 'bg-ls-elevated text-ls-dim' : ''">
                     {{ responseRenderMode === 'raw' ? 'RAW' : 'MD' }}
                   </button>
-                  <span class="ml-auto text-gray-500 text-xs transition-transform" :class="responseExpanded ? 'rotate-90' : ''">▶</span>
+                  <span class="ml-auto text-ls-muted text-xs transition-transform" :class="responseExpanded ? 'rotate-90' : ''">▶</span>
                 </button>
-                <div v-if="responseExpanded" class="px-4 pb-3 text-xs text-gray-300">
+                <div v-if="responseExpanded" class="px-4 pb-3 text-xs text-ls-dim">
                   <MarkdownRender v-if="responseRenderMode !== 'raw'" :source="responseContentText" />
                   <pre v-if="responseRenderMode === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 font-mono whitespace-pre-wrap overflow-x-auto">{{ responseContentText }}</pre>
                 </div>
@@ -300,100 +92,86 @@
             <button @click="statsExpanded = !statsExpanded"
                     class="lg:hidden w-full flex items-center justify-between p-3 text-left">
               <div class="flex items-center gap-4 text-xs">
-                <span class="text-gray-400">延迟: <span class="text-white font-mono">{{ modelValue.latency_ms ? formatDuration(modelValue.latency_ms) : '-' }}</span></span>
-                <span class="text-gray-400">Token: <span class="text-white font-mono">{{ ((modelValue.input_tokens || 0) + (modelValue.output_tokens || 0)).toLocaleString() }}</span></span>
+                <span class="text-ls-dim">延迟: <span class="text-ls-text font-mono">{{ modelValue.latency_ms ? formatDuration(modelValue.latency_ms) : '-' }}</span></span>
+                <span class="text-ls-dim">Token: <span class="text-ls-text font-mono">{{ ((modelValue.input_tokens || 0) + (modelValue.output_tokens || 0)).toLocaleString() }}</span></span>
               </div>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                   class="text-gray-400 transition-transform" :class="statsExpanded ? 'rotate-180' : ''">
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
+              <CIcon name="chevron-down" :size="16" class="text-ls-dim transition-transform" :class="statsExpanded ? 'rotate-180' : ''" />
             </button>
             <div :class="statsExpanded ? 'block' : 'hidden lg:block'">
 
             <!-- 模型信息 -->
-            <div class="p-4 border-b border-ls-border">
-              <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">模型信息</h3>
+            <StatsSection title="模型信息">
               <div class="space-y-2">
-                <div class="flex justify-between text-sm"><span class="text-gray-400">模型</span><span class="text-white font-mono">{{ modelValue.model }}</span></div>
-                <div class="flex justify-between text-sm"><span class="text-gray-400">实际模型</span><span class="text-white font-mono">{{ modelValue.actual_model_id || modelValue.model }}</span></div>
-                <div class="flex justify-between text-sm"><span class="text-gray-400">供应商</span><span class="text-white">{{ modelValue.account_name || modelValue.account_id }}</span></div>
-                <div class="flex justify-between text-sm"><span class="text-gray-400">API Key</span><span class="text-white font-mono">{{ modelValue.client_key_name || '—' }}</span></div>
-                <div class="flex justify-between text-sm"><span class="text-gray-400">流式</span><span class="text-white">{{ modelValue.is_stream ? '是' : '否' }}</span></div>
+                <div class="flex justify-between text-sm"><span class="text-ls-dim">模型</span><span class="text-ls-text font-mono">{{ modelValue.model }}</span></div>
+                <div class="flex justify-between text-sm"><span class="text-ls-dim">实际模型</span><span class="text-ls-text font-mono">{{ modelValue.actual_model_id || modelValue.model }}</span></div>
+                <div class="flex justify-between text-sm"><span class="text-ls-dim">供应商</span><span class="text-ls-text">{{ modelValue.account_name || modelValue.account_id }}</span></div>
+                <div class="flex justify-between text-sm"><span class="text-ls-dim">API Key</span><span class="text-ls-text font-mono">{{ modelValue.client_key_name || '—' }}</span></div>
+                <div class="flex justify-between text-sm"><span class="text-ls-dim">流式</span><span class="text-ls-text">{{ modelValue.is_stream ? '是' : '否' }}</span></div>
               </div>
-            </div>
+            </StatsSection>
 
             <!-- Token -->
-            <div class="p-4 border-b border-ls-border">
-              <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Token</h3>
+            <StatsSection title="Token">
               <TokenStack
                 :input="modelValue.input_tokens || 0"
                 :output="modelValue.output_tokens || 0"
                 :cache="(modelValue.cached_tokens || 0) + (modelValue.prompt_partial_cached || 0)"
+                plain
               />
-            </div>
+            </StatsSection>
 
             <!-- 请求时序 -->
-            <div class="p-4 border-b border-ls-border">
-              <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">请求时序</h3>
+            <StatsSection title="请求时序">
               <div class="space-y-1.5">
                 <div v-if="modelValue.request_start">
-                  <div class="text-xs text-gray-500">请求开始</div>
-                  <div class="text-xs text-white font-mono">{{ formatMsTime(modelValue.request_start) }}</div>
+                  <div class="text-xs text-ls-muted">请求开始</div>
+                  <div class="text-xs text-ls-text font-mono">{{ fmtMsTime(modelValue.request_start) }}</div>
                 </div>
                 <div v-if="modelValue.first_response">
-                  <div class="text-xs text-gray-500">首次响应</div>
-                  <div class="text-xs text-ls-accent font-mono">{{ formatMsTime(modelValue.first_response) }}</div>
+                  <div class="text-xs text-ls-muted">首次响应</div>
+                  <div class="text-xs text-ls-accent font-mono">{{ fmtMsTime(modelValue.first_response) }}</div>
                 </div>
                 <div v-if="modelValue.request_start && ttfr">
-                  <div class="text-xs text-gray-500">首次响应耗时</div>
-                  <div class="text-xs text-white font-mono">{{ ttfr }}</div>
+                  <div class="text-xs text-ls-muted">首次响应耗时</div>
+                  <div class="text-xs text-ls-text font-mono">{{ ttfr }}</div>
                 </div>
                 <div v-if="modelValue.end_time">
-                  <div class="text-xs text-gray-500">响应结束</div>
-                  <div class="text-xs text-white font-mono">{{ formatMsTime(modelValue.end_time) }}</div>
+                  <div class="text-xs text-ls-muted">响应结束</div>
+                  <div class="text-xs text-ls-text font-mono">{{ fmtMsTime(modelValue.end_time) }}</div>
                 </div>
                 <div v-if="totalDuration">
-                  <div class="text-xs text-gray-500">总耗时</div>
-                  <div class="text-xs text-white font-mono">{{ totalDuration }}</div>
+                  <div class="text-xs text-ls-muted">总耗时</div>
+                  <div class="text-xs text-ls-text font-mono">{{ totalDuration }}</div>
                 </div>
-                <div v-if="!modelValue.request_start && !modelValue.end_time" class="text-xs text-gray-600">—</div>
+                <div v-if="!modelValue.request_start && !modelValue.end_time" class="text-xs text-ls-muted">—</div>
               </div>
-            </div>
+            </StatsSection>
 
             <!-- 性能指标 -->
-            <div class="p-4 border-b border-ls-border">
-              <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">性能指标</h3>
+            <StatsSection title="性能指标">
               <div class="space-y-2">
-                <div class="flex justify-between text-sm"><span class="text-gray-400">延迟</span><span class="text-white font-mono">{{ modelValue.latency_ms ? formatDuration(modelValue.latency_ms) : '-' }}</span></div>
-                <div class="flex justify-between text-sm"><span class="text-gray-400">状态码</span>
-                  <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs"
-                    :class="modelValue.status_code >= 400 ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'">
-                    {{ modelValue.status_code }}
-                  </span>
+                <div class="flex justify-between text-sm"><span class="text-ls-dim">延迟</span><span class="text-ls-text font-mono">{{ modelValue.latency_ms ? formatDuration(modelValue.latency_ms) : '-' }}</span></div>
+                <div class="flex justify-between text-sm"><span class="text-ls-dim">状态码</span>
+                  <StatusCodeBadge :code="modelValue.status_code" small />
                 </div>
                 <div v-if="modelValue.error_message" class="mt-2">
                   <p class="text-xs text-red-400">{{ modelValue.error_message }}</p>
                 </div>
               </div>
-            </div>
+            </StatsSection>
 
             <!-- 响应头 -->
-            <div v-if="responseHeaders" class="p-4 border-b border-ls-border">
-              <div class="flex items-center justify-between mb-3">
-                <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide">响应头</h3>
-                <button @click="copyText(JSON.stringify(responseHeaders, null, 2))" class="text-gray-500 hover:text-white">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                  </svg>
-                </button>
-              </div>
+            <StatsSection v-if="responseHeaders" title="响应头">
+              <template #action>
+                <CopyButton :text="JSON.stringify(responseHeaders, null, 2)" />
+              </template>
               <div class="space-y-1.5">
                 <div v-for="(val, key) in responseHeaders" :key="key">
-                  <div class="text-xs text-gray-500 font-mono">{{ key }}</div>
-                  <div class="text-xs text-white font-mono" :title="val">{{ val }}</div>
+                  <div class="text-xs text-ls-muted font-mono">{{ key }}</div>
+                  <div class="text-xs text-ls-text font-mono" :title="val">{{ val }}</div>
                 </div>
               </div>
-            </div>
+            </StatsSection>
 
             </div>
           </div>
@@ -408,6 +186,12 @@
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import MarkdownRender from '@/components/MarkdownRender.vue'
 import TokenStack from '@/components/TokenStack.vue'
+import CIcon from '@/components/CIcon.vue'
+import StatusCodeBadge from '@/components/StatusCodeBadge.vue'
+import CopyButton from '@/components/CopyButton.vue'
+import MessageCard from '@/components/log/MessageCard.vue'
+import StatsSection from '@/components/log/StatsSection.vue'
+import { formatTime, formatDuration } from '@/utils/format'
 
 const props = defineProps({
   modelValue: { type: Object, default: null },
@@ -553,36 +337,24 @@ const conversationMessages = computed(() => {
       }
     }
 
-    // Pass 2: merge tool results into matching tool_call entries by tool_call_id
-    const result = []
-    let i = 0
-    while (i < out.length) {
-      const msg = out[i]
-
-      if (msg.role === 'tool_call' && msg.toolId) {
-        // Look ahead for tool results with matching tool_call_id
-        let j = i + 1
-        while (j < out.length && out[j].role === 'tool') {
-          const toolMsg = out[j]
-          const tcId = toolMsg.tool_call_id || toolMsg.toolCallId || ''
-          // If this tool result matches the current tool_call, attach it and consume
-          if (tcId === msg.toolId) {
-            msg.toolResult = typeof toolMsg.content === 'string' ? toolMsg.content : ''
-            j++ // consume this tool message (don't add to result)
-            continue
-          }
-          // If it's a tool result for a different tool_call, stop looking ahead
-          break
+    // Pass 2: merge tool results into matching tool_call entries by tool_call_id.
+    // assistant 单轮可能并发多个 tool_calls，展平后顺序为
+    // [call A, call B, result A, result B]，结果与调用并不相邻，
+    // 因此需跨整个列表按 id 匹配，而不是只看紧邻消息。
+    const consumed = new Set()
+    for (const msg of out) {
+      if (msg.role !== 'tool_call' || !msg.toolId) continue
+      for (let j = 0; j < out.length; j++) {
+        if (consumed.has(j)) continue
+        const toolMsg = out[j]
+        if (toolMsg.role === 'tool' && toolMsg.tool_call_id === msg.toolId) {
+          msg.toolResult = toolMsg.content
+          consumed.add(j) // consume the tool message (don't render standalone)
         }
-        result.push(msg)
-        i = j
-      } else {
-        result.push(msg)
-        i++
       }
     }
 
-    return result
+    return out.filter((_, idx) => !consumed.has(idx))
   } catch (e) {
     return []
   }
@@ -689,6 +461,8 @@ const responseChunks = computed(() => {
 
 const responseContentText = computed(() => responseChunks.value.join(''))
 
+const fmtMsTime = (ts) => formatTime(ts, { ms: true })
+
 const ttfr = computed(() => {
   const start = props.modelValue?.request_start
   const first = props.modelValue?.first_response
@@ -703,46 +477,11 @@ const totalDuration = computed(() => {
   try { return formatDuration(Math.round((new Date(end) - new Date(start)) / 1)) } catch { return null }
 })
 
-function toolTypeColor(name) {
-  const n = (name || '').toLowerCase()
-  if (n.startsWith('mcp_')) return 'bg-blue-500/10 text-blue-400'
-  if (n.startsWith('skill:')) return 'bg-orange-500/10 text-orange-400'
-  return 'bg-ls-accent/10 text-ls-accent'
-}
-function toolTypeLabel(name) {
-  const n = (name || '').toLowerCase()
-  if (n.startsWith('mcp_')) return 'MCP'
-  if (n.startsWith('skill:')) return 'Skill'
-  return 'Tool'
-}
-function formatMsTime(ts) {
-  if (!ts) return ''
-  try {
-    const d = new Date(ts)
-    if (isNaN(d.getTime())) return ts
-    const pad = (n, l = 2) => String(n).padStart(l, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`
-  } catch { return ts }
-}
-function formatDuration(ms) {
-  if (!ms || ms <= 0) return ''
-  if (ms < 1000) return `${ms}ms`
-  const totalSec = Math.round(ms / 1000)
-  if (totalSec < 60) return `${totalSec}s`
-  const min = Math.floor(totalSec / 60)
-  const sec = totalSec % 60
-  if (min < 60) return sec > 0 ? `${min}m ${sec}s` : `${min}m`
-  const hr = Math.floor(min / 60)
-  const m = min % 60
-  return m > 0 ? `${hr}h ${m}m` : `${hr}h`
-}
 const responseHeaders = computed(() => {
   const raw = props.modelValue?.response_headers
   if (!raw) return null
   try { return typeof raw === 'string' ? JSON.parse(raw) : raw } catch { return null }
 })
-const copyText = (text) => navigator.clipboard.writeText(text).catch(() => {})
-
 </script>
 
 <style scoped>

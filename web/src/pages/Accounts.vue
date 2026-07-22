@@ -7,78 +7,58 @@
           <ViewToggle v-model="viewMode" />
 
           <button @click="openAdd" class="btn btn-primary">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
+            <CIcon name="plus" :stroke-width="2.5" />
             添加供应商
           </button>
         </div>
       </template>
     </PageHeader>
 
-    <div class="p-6">
-      <div v-if="loading" class="flex items-center justify-center h-64">
-        <div class="text-gray-500">Loading...</div>
-      </div>
-      <div v-else-if="error" class="text-red-400 text-sm p-4">Error: {{ error }}</div>
-      <div v-else>
+    <div class="px-6 md:px-8 py-6">
+      <PageState :loading="loading" :error="error">
 
       <!-- ═══════════════════════════════════════════
            视图 1：卡片行（默认）
            ═══════════════════════════════════════════ -->
       <div v-if="viewMode === 'row'" class="space-y-3">
         <div v-for="acc in suppliers" :key="acc.id"
-          class="bg-ls-card rounded-lg border border-ls-border p-5 flex items-center justify-between hover:border-gray-700 transition-all"
+          class="bg-ls-card rounded-lg border border-ls-border p-5 flex items-center justify-between hover:border-ls-dim/50 transition-all neon-glow"
           :class="{ 'opacity-50': acc.status !== 'active' }">
           <div class="flex items-center gap-4 flex-1 min-w-0">
-            <div class="w-10 h-10 rounded-md bg-ls-elevated flex items-center justify-center flex-shrink-0">
-              <span class="font-semibold text-sm text-gray-300">{{ (acc.name || '').slice(0, 2).toUpperCase() }}</span>
-            </div>
+            <Avatar :text="acc.name" />
             <div class="min-w-0">
-              <p class="font-medium text-sm text-white truncate">{{ acc.name }}</p>
-              <p class="text-xs text-gray-500 mt-0.5">{{ maskKey(acc.api_key) }}</p>
+              <p class="font-medium text-sm text-ls-text truncate">{{ acc.name }}</p>
+              <p class="text-xs text-ls-muted mt-0.5">{{ maskKey(acc.api_key) }}</p>
               <div class="flex items-center gap-1 flex-wrap mt-2">
                 <template v-if="(acc.models || []).length > 0">
                   <span v-for="(m, i) in acc.models.slice(0, 3)" :key="i"
                     class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-ls-elevated border border-ls-border gap-1">
-                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: getModelTypeColor(m.model_type) }"></span>
-                    <span class="text-white">{{ m.model_name }}</span>
-                    <span v-if="m.context_length" class="text-gray-500">({{ formatContextLength(m.context_length) }})</span>
+                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: modelTypeColor(m.model_type) }"></span>
+                    <span class="text-ls-text">{{ m.model_name }}</span>
+                    <span v-if="m.context_length" class="text-ls-muted">({{ formatContextLength(m.context_length) }})</span>
                   </span>
                   <span v-if="acc.models.length > 3"
-                    class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-ls-elevated border border-ls-border text-gray-500">
+                    class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-ls-elevated border border-ls-border text-ls-muted">
                     +{{ acc.models.length - 3 }}
                   </span>
                 </template>
                 <!-- 模型用量入口 -->
                 <button @click="openModelInfo(acc)" class="model-info-btn" title="查看模型用量与限制">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V5"/><path d="M15 17v-8"/>
-                  </svg>
+                  <CIcon name="chart" :size="12" :stroke-width="2.2" />
                 </button>
               </div>
             </div>
           </div>
           <div class="flex items-center gap-6 flex-shrink-0">
-            <div class="text-xs text-gray-500 w-28">
-              <span class="text-white font-medium">{{ acc.quota_remaining }}</span> / {{ acc.quota_limit }}
-              <div class="w-20 bg-ls-bg rounded-full h-1 mt-1">
-                <div class="bg-ls-accent h-1 rounded-full" :style="{ width: usagePct(acc) + '%' }"></div>
-              </div>
+            <div class="text-xs text-ls-muted w-28">
+              <span class="text-ls-text font-medium">{{ acc.quota_remaining }}</span> / {{ acc.quota_limit }}
+              <ProgressBar :pct="usagePct(acc)" class="mt-1" />
             </div>
             <div class="flex items-center gap-1">
               <CCheckbox :model-value="acc.status === 'active'" @update:modelValue="(val) => toggleSupplier(val, acc)" />
             </div>
-            <button @click="openEdit(acc)" class="text-gray-500 hover:text-white transition-colors" title="编辑">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-            </button>
-            <button @click="openDeleteConfirm(acc)" class="text-gray-500 hover:text-red-400 transition-colors" title="删除">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-              </svg>
-            </button>
+            <IconButton icon="edit" title="编辑" @click="openEdit(acc)" />
+            <IconButton icon="trash" title="删除" tone="danger" @click="openDeleteConfirm(acc)" />
           </div>
         </div>
       </div>
@@ -86,48 +66,42 @@
       <!-- ═══════════════════════════════════════════
            视图 2：网格卡片
            ═══════════════════════════════════════════ -->
-      <div v-else-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+      <div v-else-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div v-for="acc in suppliers" :key="acc.id"
-          class="bg-ls-card rounded-lg border border-ls-border p-5 hover:border-gray-700 transition-all flex flex-col gap-3"
+          class="bg-ls-card rounded-lg border border-ls-border p-5 hover:border-ls-dim/50 transition-all flex flex-col gap-3 neon-glow"
           :class="{ 'opacity-50': acc.status !== 'active' }">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-10 h-10 rounded-md bg-ls-elevated flex items-center justify-center flex-shrink-0">
-                <span class="font-semibold text-sm text-gray-300">{{ (acc.name || '').slice(0, 2).toUpperCase() }}</span>
-              </div>
+              <Avatar :text="acc.name" />
               <div class="min-w-0">
-                <p class="font-medium text-sm text-white truncate">{{ acc.name }}</p>
-                <p class="text-[11px] text-gray-500 mt-0.5 truncate font-mono">{{ maskKey(acc.api_key) }}</p>
+                <p class="font-medium text-sm text-ls-text truncate">{{ acc.name }}</p>
+                <p class="text-[11px] text-ls-muted mt-0.5 truncate font-mono">{{ maskKey(acc.api_key) }}</p>
               </div>
             </div>
-            <span :class="acc.status === 'active' ? 'status-badge-active' : 'status-badge-inactive'">
-              {{ acc.status === 'active' ? '活跃' : '禁用' }}
-            </span>
+            <StatusBadge :active="acc.status === 'active'" />
           </div>
 
           <!-- 配额（短进度条） -->
-          <div class="text-xs text-gray-500">
+          <div class="text-xs text-ls-muted">
             <div class="flex justify-between mb-1">
               <span>配额</span>
-              <span><span class="text-white font-medium">{{ acc.quota_remaining }}</span> / {{ acc.quota_limit }}</span>
+              <span><span class="text-ls-text font-medium">{{ acc.quota_remaining }}</span> / {{ acc.quota_limit }}</span>
             </div>
-            <div class="w-24 bg-ls-bg rounded-full h-1">
-              <div class="bg-ls-accent h-1 rounded-full" :style="{ width: usagePct(acc) + '%' }"></div>
-            </div>
+            <ProgressBar :pct="usagePct(acc)" width="w-24" />
           </div>
 
           <!-- 支持模型预览 -->
           <div class="text-xs">
-            <span class="text-gray-500">模型</span>
+            <span class="text-ls-muted">模型</span>
             <div v-if="(acc.models || []).length > 0" class="flex items-center gap-1 flex-wrap mt-1">
               <span v-for="(m, i) in acc.models.slice(0, 3)" :key="i"
                 class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] bg-ls-elevated border border-ls-border">
-                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: getModelTypeColor(m.model_type) }"></span>
-                <span class="text-gray-300">{{ m.model_name }}</span>
+                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: modelTypeColor(m.model_type) }"></span>
+                <span class="text-ls-dim">{{ m.model_name }}</span>
               </span>
-              <span v-if="(acc.models || []).length > 3" class="text-[10px] text-gray-500">+{{ acc.models.length - 3 }}</span>
+              <span v-if="(acc.models || []).length > 3" class="text-[10px] text-ls-muted">+{{ acc.models.length - 3 }}</span>
             </div>
-            <span v-else class="text-gray-600">暂未配置</span>
+            <span v-else class="text-ls-muted">暂未配置</span>
           </div>
 
           <!-- 操作行 -->
@@ -138,16 +112,8 @@
                 用量
               </button>
               <span class="text-ls-border">·</span>
-              <button @click="openEdit(acc)" class="text-gray-500 hover:text-white transition-colors" title="编辑">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                </svg>
-              </button>
-              <button @click="openDeleteConfirm(acc)" class="text-gray-500 hover:text-red-400 transition-colors" title="删除">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                </svg>
-              </button>
+              <IconButton icon="edit" title="编辑" @click="openEdit(acc)" />
+              <IconButton icon="trash" title="删除" tone="danger" @click="openDeleteConfirm(acc)" />
             </div>
           </div>
         </div>
@@ -156,133 +122,83 @@
       <!-- ═══════════════════════════════════════════
            视图 3：表格
            ═══════════════════════════════════════════ -->
-      <div v-else-if="viewMode === 'table'" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="text-gray-500 border-b border-ls-border text-xs">
-              <th class="text-left px-5 py-3 font-medium">供应商</th>
-              <th class="text-left px-5 py-3 font-medium">状态</th>
-              <th class="text-left px-5 py-3 font-medium">配额</th>
-              <th class="text-left px-5 py-3 font-medium">模型数</th>
-              <th class="text-left px-5 py-3 font-medium">模型用量</th>
-              <th class="text-right px-5 py-3 font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="acc in suppliers" :key="acc.id"
-              class="border-b border-ls-border/50 hover:bg-ls-elevated/30 transition-colors"
-              :class="{ 'opacity-50': acc.status !== 'active' }">
-              <td class="px-5 py-3">
-                <div class="flex items-center gap-3">
-                  <div class="w-8 h-8 rounded-md bg-ls-elevated flex items-center justify-center flex-shrink-0">
-                    <span class="font-semibold text-xs text-gray-300">{{ (acc.name || '').slice(0, 2).toUpperCase() }}</span>
-                  </div>
-                  <div>
-                    <p class="font-medium text-white">{{ acc.name }}</p>
-                    <p class="text-xs text-gray-500 font-mono">{{ maskKey(acc.api_key) }}</p>
-                  </div>
+      <CTable v-else-if="viewMode === 'table'">
+        <thead>
+          <tr>
+            <th class="text-left">供应商</th>
+            <th class="text-left">状态</th>
+            <th class="text-left">配额</th>
+            <th class="text-left">模型数</th>
+            <th class="text-left">模型用量</th>
+            <th class="text-right">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="acc in suppliers" :key="acc.id"
+            :class="{ 'opacity-50': acc.status !== 'active' }">
+            <td>
+              <div class="flex items-center gap-3">
+                <Avatar :text="acc.name" size="sm" />
+                <div>
+                  <p class="font-medium text-ls-text">{{ acc.name }}</p>
+                  <p class="text-xs text-ls-muted font-mono">{{ maskKey(acc.api_key) }}</p>
                 </div>
-              </td>
-              <td class="px-5 py-3">
-                <CCheckbox :model-value="acc.status === 'active'" @update:modelValue="(val) => toggleSupplier(val, acc)" />
-              </td>
-              <td class="px-5 py-3 text-xs">
-                <span class="text-white">{{ acc.quota_remaining }}</span>
-                <span class="text-gray-500"> / {{ acc.quota_limit }}</span>
-                <div class="w-20 bg-ls-bg rounded-full h-1 mt-1">
-                  <div class="bg-ls-accent h-1 rounded-full" :style="{ width: usagePct(acc) + '%' }"></div>
-                </div>
-              </td>
-              <td class="px-5 py-3 text-xs text-gray-400">{{ (acc.models || []).length }}</td>
-              <td class="px-5 py-3">
-                <button @click="openModelInfo(acc)" class="model-info-btn" title="查看模型用量与限制">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V5"/><path d="M15 17v-8"/>
-                  </svg>
-                  <span class="text-xs">查看用量</span>
-                </button>
-              </td>
-              <td class="px-5 py-3">
-                <div class="flex items-center justify-end gap-1">
-                  <button @click="openEdit(acc)" class="text-gray-500 hover:text-white transition-colors" title="编辑">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                    </svg>
-                  </button>
-                  <button @click="openDeleteConfirm(acc)" class="text-gray-500 hover:text-red-400 transition-colors" title="删除">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                  </button>
-                </div>
-              </td>
-            </tr>
-            <tr v-if="suppliers.length === 0">
-              <td colspan="6" class="px-5 py-8 text-center text-gray-500">尚未配置供应商，前往供应商管理页面添加。</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              </div>
+            </td>
+            <td>
+              <CCheckbox :model-value="acc.status === 'active'" @update:modelValue="(val) => toggleSupplier(val, acc)" />
+            </td>
+            <td class="text-xs">
+              <span class="text-ls-text">{{ acc.quota_remaining }}</span>
+              <span class="text-ls-muted"> / {{ acc.quota_limit }}</span>
+              <ProgressBar :pct="usagePct(acc)" class="mt-1" />
+            </td>
+            <td class="text-xs text-ls-dim">{{ (acc.models || []).length }}</td>
+            <td>
+              <button @click="openModelInfo(acc)" class="model-info-btn" title="查看模型用量与限制">
+                <CIcon name="chart" :size="12" :stroke-width="2.2" />
+                <span class="text-xs">查看用量</span>
+              </button>
+            </td>
+            <td>
+              <div class="flex items-center justify-end gap-1">
+                <IconButton icon="edit" title="编辑" @click="openEdit(acc)" />
+                <IconButton icon="trash" title="删除" tone="danger" @click="openDeleteConfirm(acc)" />
+              </div>
+            </td>
+          </tr>
+          <tr v-if="suppliers.length === 0">
+            <td colspan="6" class="py-8 text-center text-ls-muted">尚未配置供应商，前往供应商管理页面添加。</td>
+          </tr>
+        </tbody>
+      </CTable>
 
       <!-- ── 底部统计 ── -->
-      <div class="mt-6 flex items-center justify-center gap-2 text-sm text-gray-500">
+      <div class="mt-6 flex items-center justify-center gap-2 text-sm text-ls-muted">
         共 {{ suppliers.length }} 个供应商 · {{ activeCount }} 个活跃
       </div>
-      </div>
+      </PageState>
     </div>
 
     <!-- ── 添加供应商 抽屉 ── -->
     <Drawer v-model="showAddDrawer" title="添加供应商">
       <div class="space-y-4">
-        <div>
-          <label class="form-label">别名</label>
+        <FormField label="别名">
           <input v-model="newSupplier.name" type="text" placeholder="如：智谱、阿里云"
             class="form-input" @keyup.enter="addSupplier" ref="addNameInput">
-        </div>
-        <div>
-          <label class="form-label">API Key</label>
+        </FormField>
+        <FormField label="API Key">
           <input v-model="newSupplier.api_key" type="password" placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
             class="form-input font-mono" @keyup.enter="addSupplier" autocomplete="new-password">
-        </div>
-        <div>
-          <label class="form-label">Base URL</label>
+        </FormField>
+        <FormField label="Base URL">
           <input v-model="newSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
             class="form-input font-mono" @keyup.enter="addSupplier">
-        </div>
+        </FormField>
 
         <!-- ── 支持模型 ── -->
-        <div>
-          <div class="flex items-center justify-between mb-3">
-            <label class="form-label m-0">支持模型</label>
-            <span class="text-[11px] text-gray-500">{{ newSupplier.models.length }} 个模型</span>
-          </div>
-          <div class="space-y-3">
-            <div v-for="(m, idx) in newSupplier.models" :key="idx"
-              class="bg-ls-bg rounded-lg border border-ls-border p-3"
-              :style="{ animation: 'rowIn .2s ease-out ' + idx * 50 + 'ms both' }">
-              <div class="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_28px] gap-3 items-center">
-                <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
-                  class="form-input h-10 px-3 font-mono text-sm" />
-                <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
-                <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                  class="form-input h-10 px-3 text-sm font-mono" />
-                <button type="button" @click="removeNewModel(idx)"
-                  class="action-icon" title="删除">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-          <button type="button" @click="addNewModel"
-            class="mt-3 w-full h-10 rounded-lg border border-dashed border-ls-border text-ls-accent hover:text-ls-accentHover hover:border-ls-accent/30 transition-all flex items-center justify-center gap-2 text-sm">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-            添加模型
-          </button>
-        </div>
+        <ModelListEditor :models="newSupplier.models" animate
+          @add="addNewModel" @remove="removeNewModel" />
       </div>
       <template #footer>
         <button @click="closeAdd" class="btn btn-secondary btn-esc">取消</button>
@@ -295,79 +211,38 @@
     <!-- ── 编辑供应商 抽屉 ── -->
     <Drawer v-model="showEditDrawer" title="编辑供应商">
       <div class="space-y-4">
-        <div>
-          <label class="form-label">别名</label>
+        <FormField label="别名">
           <input v-model="editingSupplier.name" type="text" placeholder="如：智谱、阿里云"
             class="form-input" @keyup.enter="saveEdit">
-        </div>
-        <div>
-          <label class="form-label">API Key</label>
+        </FormField>
+        <FormField label="API Key">
           <div class="relative">
             <input :type="showApiKey ? 'text' : 'password'" v-model="editingSupplier.api_key"
               placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
               class="form-input pr-10 font-mono" @keyup.enter="saveEdit" autocomplete="new-password">
             <button type="button" @click="showApiKey = !showApiKey"
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white p-1" title="显示/隐藏">
-              <svg v-if="showApiKey" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-              </svg>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 2.9M5 12h14"/><line x1="1" y1="1" x2="23" y2="23"/>
-              </svg>
+              class="absolute right-3 top-1/2 -translate-y-1/2 text-ls-muted hover:text-ls-text p-1" title="显示/隐藏">
+              <CIcon v-if="showApiKey" name="eye" />
+              <CIcon v-else name="eye-off" />
             </button>
           </div>
-        </div>
-        <div>
-          <label class="form-label">Base URL</label>
+        </FormField>
+        <FormField label="Base URL">
           <input v-model="editingSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
             class="form-input font-mono" @keyup.enter="saveEdit">
-        </div>
-        <div>
-          <label class="form-label">状态</label>
+        </FormField>
+        <FormField label="状态">
           <div class="flex items-center gap-3">
             <CCheckbox :model-value="editingSupplier.status === 'active'" @update:modelValue="(val) => editingSupplier.status = val ? 'active' : 'disabled'" />
-            <span class="text-sm" :class="editingSupplier.status === 'active' ? 'text-green-400' : 'text-gray-500'">
+            <span class="text-sm" :class="editingSupplier.status === 'active' ? 'text-green-400' : 'text-ls-muted'">
               {{ editingSupplier.status === 'active' ? '启用' : '禁用' }}
             </span>
           </div>
-        </div>
+        </FormField>
 
         <!-- ── 支持模型 ── -->
-        <div>
-          <div class="flex items-center justify-between mb-3">
-            <label class="form-label m-0">支持模型</label>
-            <span class="text-[11px] text-gray-500">{{ editingSupplier.models.length }} 个模型</span>
-          </div>
-          <div v-if="editingSupplier.models.length === 0"
-            class="text-center py-6 text-gray-500 text-sm">
-            暂无配置模型
-          </div>
-          <div class="space-y-3">
-            <div v-for="(m, idx) in editingSupplier.models" :key="idx"
-              class="bg-ls-bg rounded-lg border border-ls-border p-3">
-              <div class="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_28px] gap-3 items-center">
-                <input v-model="m.model_name" type="text" placeholder="模型名称，如 qwen-max"
-                  class="form-input h-10 px-3 font-mono text-sm" />
-                <CSelect v-model="m.model_type" :options="MODEL_TYPE_OPTIONS" size="md" placeholder="类型" />
-                <input v-model.number="m.context_length" type="number" placeholder="上下文"
-                  class="form-input h-10 px-3 text-sm font-mono" />
-                <button type="button" @click="removeEditModel(idx)"
-                  class="action-icon" title="删除">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-          <button type="button" @click="addEditModel"
-            class="mt-3 w-full h-10 rounded-lg border-2 border-dashed border-ls-border text-ls-accent hover:text-ls-accentHover hover:border-ls-accent/30 transition-all flex items-center justify-center gap-2 text-sm">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-            添加模型
-          </button>
-        </div>
+        <ModelListEditor :models="editingSupplier.models" empty-text="暂无配置模型"
+          @add="addEditModel" @remove="removeEditModel" />
       </div>
       <template #footer>
         <button @click="closeEdit" class="btn btn-secondary btn-esc">取消</button>
@@ -381,7 +256,7 @@
     <ConfirmModal
       v-model="showDeleteModal"
       title="确认删除"
-      :message="`确定要删除供应商 <strong class='text-white'>${deletingSupplier?.name || ''}</strong> 吗？<br><span class='text-gray-500 text-xs'>此操作不可撤销</span>`"
+      :message="`确定要删除供应商 <strong class='text-ls-text'>${deletingSupplier?.name || ''}</strong> 吗？<br><span class='text-ls-muted text-xs'>此操作不可撤销</span>`"
       danger
       :confirm-text="deleting ? '删除中...' : '确认删除'"
       :disabled="deleting"
@@ -392,57 +267,53 @@
     <ConfirmModal
       v-model="showModelDeleteModal"
       title="确认删除模型"
-      :message="`确定要删除模型 <strong class='text-white font-mono'>${pendingModelDelete?.name || ''}</strong> 吗？<br><span class='text-gray-500 text-xs'>此操作不可撤销</span>`"
+      :message="`确定要删除模型 <strong class='text-ls-text font-mono'>${pendingModelDelete?.name || ''}</strong> 吗？<br><span class='text-ls-muted text-xs'>此操作不可撤销</span>`"
       danger
       @confirm="confirmModelDelete"
     />
 
     <!-- ── 模型用量详情 抽屉 ── -->
     <Drawer v-model="showModelInfoDrawer" :title="`${modelInfoSupplier?.name || ''} · 模型用量`" width="720px">
-      <div class="text-xs text-gray-500 mb-4">
+      <div class="text-xs text-ls-muted mb-4">
         共 {{ modelInfoRows.length }} 个模型 · 展示各模型的配额限制与今日用量
       </div>
-      <div v-if="modelInfoRows.length > 0" class="bg-ls-bg rounded-lg border border-ls-border overflow-hidden">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="text-gray-500 border-b border-ls-border text-xs">
-              <th class="text-left px-4 py-3 font-medium">模型</th>
-              <th class="text-left px-4 py-3 font-medium">类型</th>
-              <th class="text-left px-4 py-3 font-medium">配额 (剩余/上限)</th>
-              <th class="text-right px-4 py-3 font-medium">Token (今日)</th>
-              <th class="text-center px-4 py-3 font-medium">状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="m in modelInfoRows" :key="m.model_name" class="border-b border-ls-border/50 hover:bg-ls-elevated/30 transition-colors">
-              <td class="px-4 py-3 font-mono text-xs text-white">{{ m.model_name }}</td>
-              <td class="px-4 py-3">
-                <span class="inline-flex items-center gap-1.5">
-                  <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: getModelTypeColor(m.model_type) }"></span>
-                  <span class="text-xs text-gray-300">{{ getModelTypeLabel(m.model_type) }}</span>
-                </span>
-              </td>
-              <td class="px-4 py-3 text-xs">
-                <span v-if="m.quota_limit > 0" class="text-gray-300">
-                  <span class="text-white font-medium">{{ m.quota_remaining }}</span> / {{ m.quota_limit }}
-                </span>
-                <span v-else class="text-gray-600">—</span>
-              </td>
-              <td class="px-4 py-3 text-right">
-                <TokenStack :input="m.today_input_tokens || 0" :output="m.today_output_tokens || 0" compact />
-              </td>
-              <td class="px-4 py-3 text-center">
-                <span v-if="m.is_unavailable" class="tag tag-danger">不可用</span>
-                <span v-else class="tag tag-success">正常</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div v-else class="text-center py-16 text-gray-500 text-sm">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="mx-auto mb-3 text-gray-600">
-          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V5"/><path d="M15 17v-8"/>
-        </svg>
+      <CTable v-if="modelInfoRows.length > 0" pad="sm">
+        <thead>
+          <tr>
+            <th class="text-left">模型</th>
+            <th class="text-left">类型</th>
+            <th class="text-left">配额 (剩余/上限)</th>
+            <th class="text-right">Token (今日)</th>
+            <th class="text-center">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="m in modelInfoRows" :key="m.model_name">
+            <td class="font-mono text-xs text-ls-text">{{ m.model_name }}</td>
+            <td>
+              <span class="inline-flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: modelTypeColor(m.model_type) }"></span>
+                <span class="text-xs text-ls-dim">{{ modelTypeLabel(m.model_type) }}</span>
+              </span>
+            </td>
+            <td class="text-xs">
+              <span v-if="m.quota_limit > 0" class="text-ls-dim">
+                <span class="text-ls-text font-medium">{{ m.quota_remaining }}</span> / {{ m.quota_limit }}
+              </span>
+              <span v-else class="text-ls-muted">—</span>
+            </td>
+            <td class="text-right">
+              <TokenStack :input="m.today_input_tokens || 0" :output="m.today_output_tokens || 0" compact />
+            </td>
+            <td class="text-center">
+              <span v-if="m.is_unavailable" class="tag tag-danger">不可用</span>
+              <span v-else class="tag tag-success">正常</span>
+            </td>
+          </tr>
+        </tbody>
+      </CTable>
+      <div v-else class="text-center py-16 text-ls-muted text-sm">
+        <CIcon name="chart" :size="40" :stroke-width="1.5" class="mx-auto mb-3 text-ls-muted" />
         暂无模型用量数据
       </div>
     </Drawer>
@@ -452,39 +323,28 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, inject } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PageState from '@/components/PageState.vue'
 import Drawer from '@/components/Drawer.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
-import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, getModelQuotas } from '@/api'
-import CSelect from '@/components/CSelect.vue'
-import CCheckbox from '@/components/CCheckbox.vue'
-import { useViewPreference } from '@/composables/useViewPreference'
-import ViewToggle from '@/components/ViewToggle.vue'
+import CTable from '@/components/CTable.vue'
+import Avatar from '@/components/Avatar.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
+import ProgressBar from '@/components/ProgressBar.vue'
+import IconButton from '@/components/IconButton.vue'
+import CIcon from '@/components/CIcon.vue'
+import FormField from '@/components/FormField.vue'
+import ModelListEditor from '@/components/ModelListEditor.vue'
 import TokenStack from '@/components/TokenStack.vue'
+import CCheckbox from '@/components/CCheckbox.vue'
+import ViewToggle from '@/components/ViewToggle.vue'
+import { useViewPreference } from '@/composables/useViewPreference'
+import { maskKey, formatContextLength } from '@/utils/format'
+import { modelTypeColor, modelTypeLabel } from '@/constants/modelType'
+import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, getModelQuotas } from '@/api'
 
 const toast = inject('$toast')
 
-// ── Select options ──
-const MODEL_TYPE_OPTIONS = [
-  { label: '文本', value: 'text' },
-  { label: '图像', value: 'image' },
-  { label: '代码', value: 'code' },
-  { label: '语音', value: 'voice' },
-  { label: '多模态', value: 'multimodal' },
-]
-const STATUS_OPTIONS = [
-  { label: '活跃', value: 'active' },
-  { label: '已禁用', value: 'disabled' },
-]
-const MODEL_TYPE_LABELS = {
-  text: '文本', image: '图像', code: '代码', voice: '语音', multimodal: '多模态',
-}
-
 // ── 视图切换（持久化到 localStorage） ──
-const VIEW_OPTIONS = [
-  { value: 'row', label: '卡片行' },
-  { value: 'grid', label: '网格卡片' },
-  { value: 'table', label: '表格' },
-]
 const viewMode = useViewPreference('suppliers_view_mode', 'row')
 
 // ── State ──
@@ -555,11 +415,6 @@ const confirmModelDelete = () => {
   }
 }
 
-const closeModelDeleteConfirm = () => {
-  showModelDeleteModal.value = false
-  pendingModelDelete.value = null
-}
-
 const openModelDeleteConfirm = (source, idx) => {
   const model = source === 'new'
     ? newSupplier.value.models[idx]
@@ -569,39 +424,9 @@ const openModelDeleteConfirm = (source, idx) => {
 }
 
 // ── Helpers ──
-const maskKey = (key) => {
-  if (!key || key.length < 20) return '****'
-  return key.slice(0, 10) + '****' + key.slice(-10)
-}
-
 const usagePct = (acc) => {
   if (!acc.quota_limit || acc.quota_limit === 0) return 0
   return Math.round((acc.quota_limit - (acc.quota_remaining || 0)) / acc.quota_limit * 100)
-}
-
-// ── Model helpers ──
-const MODEL_TYPE_COLORS = {
-  text: '#89b4fa',
-  image: '#f0c674',
-  code: '#a6e3a1',
-  voice: '#cba6f7',
-  multimodal: '#f38ba8',
-}
-
-const getModelTypeColor = (type) => MODEL_TYPE_COLORS[type] || '#89b4fa'
-const getModelTypeLabel = (type) => MODEL_TYPE_LABELS[type] || type
-
-const formatContextLength = (length) => {
-  if (!length) return ''
-  if (length >= 1000) return `${Math.round(length / 1000)}K`
-  return String(length)
-}
-
-const formatTokens = (n) => {
-  if (!n) return '0'
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'
-  return String(n)
 }
 
 const addNewModel = () => {
@@ -769,11 +594,6 @@ const openDeleteConfirm = (acc) => {
   showDeleteModal.value = true
 }
 
-const closeDeleteConfirm = () => {
-  showDeleteModal.value = false
-  deletingSupplier.value = null
-}
-
 const confirmDelete = async () => {
   if (!deletingSupplier.value) return
   deleting.value = true
@@ -793,38 +613,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* ── 状态徽章（网格 / 表格共用） ── */
-.status-badge-active,
-.status-badge-inactive {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 500;
-}
-.status-badge-active {
-  background: #a6e3a118;
-  color: #a6e3a1;
-}
-.status-badge-inactive {
-  background: var(--surface-2);
-  color: #6b7280;
-}
-.status-badge-active::before,
-.status-badge-inactive::before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.status-badge-active::before { background: #a6e3a1; }
-.status-badge-inactive::before { background: #6b7280; }
-
-/* ── 模型用量入口（卡片行/表格 → .model-info-btn 已提至 main.css） ── */
-
 /* ── 模型用量入口（网格卡片：文字链接） ── */
 .model-info-link {
   font-size: 12px;
@@ -836,6 +624,6 @@ onMounted(() => {
   transition: color .15s;
 }
 .model-info-link:hover {
-  color: #fff;
+  color: #00ffff;
 }
 </style>

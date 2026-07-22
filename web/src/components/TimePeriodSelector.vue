@@ -84,8 +84,8 @@ onMounted(() => emit('update', rangeFor('7d')))
       <button v-for="p in PRESETS" :key="p.key" type="button" @click="select(p.key)"
         class="px-3 h-8 rounded-md text-xs font-medium transition-colors"
         :class="active === p.key
-          ? 'bg-ls-surface-2 text-white'
-          : 'text-gray-500 hover:text-white'">
+          ? 'bg-ls-elevated text-ls-text'
+          : 'text-ls-muted hover:text-ls-text'">
         {{ p.label }}
       </button>
     </div>
@@ -93,10 +93,10 @@ onMounted(() => emit('update', rangeFor('7d')))
     <!-- Custom range (only when 自定义 selected) -->
     <div v-if="active === 'custom'" class="flex items-center gap-2">
       <input type="datetime-local" v-model="customStart" @change="onCustom"
-        class="h-8 rounded-lg border border-gray-800 bg-[#0c0c0c] px-2 text-xs text-white focus:outline-none focus:border-[#6366f1]" />
-      <span class="text-gray-600 text-xs">~</span>
+        class="h-8 rounded-lg border border-ls-border bg-ls-bg px-2 text-xs text-ls-text focus:outline-none focus:border-ls-accent" />
+      <span class="text-ls-muted text-xs">~</span>
       <input type="datetime-local" v-model="customEnd" @change="onCustom"
-        class="h-8 rounded-lg border border-gray-800 bg-[#0c0c0c] px-2 text-xs text-white focus:outline-none focus:border-[#6366f1]" />
+        class="h-8 rounded-lg border border-ls-border bg-ls-bg px-2 text-xs text-ls-text focus:outline-none focus:border-ls-accent" />
     </div>
   </div>
 </template>

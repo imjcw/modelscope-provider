@@ -11,96 +11,79 @@
       </template>
     </PageHeader>
 
-    <div class="p-6">
-      <div v-if="loading" class="flex items-center justify-center h-64">
-        <div class="text-gray-500">Loading...</div>
-      </div>
-      <div v-else-if="error" class="text-red-400 text-sm p-4">Error: {{ error }}</div>
-      <div v-else>
+    <div class="px-6 md:px-8 py-6">
+      <PageState :loading="loading" :error="error">
         <!-- ═══════════════════════════════════════════
              虚拟模型列表（表格形式）
              ═══════════════════════════════════════════ -->
-        <div v-if="mappings.length > 0" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="text-gray-500 border-b border-ls-border text-xs">
-                <th class="text-left px-5 py-3 font-medium">虚拟模型ID</th>
-                <th class="text-left px-5 py-3 font-medium">描述</th>
-                <th class="text-left px-5 py-3 font-medium">绑定模型</th>
-                <th class="text-left px-5 py-3 font-medium">状态</th>
-                <th class="text-left px-5 py-3 font-medium">创建时间</th>
-                <th class="text-left px-5 py-3 font-medium">日志</th>
-                <th class="text-right px-5 py-3 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="m in mappings" :key="m.alias_name"
-                class="border-b border-ls-border/50 hover:bg-ls-elevated/30 transition-colors"
-                :class="{ 'opacity-50': m.status !== 'active' }">
-                <!-- 虚拟模型ID -->
-                <td class="px-5 py-3 font-mono text-ls-accent font-semibold">{{ m.alias_name }}</td>
-                <!-- 描述 -->
-                <td class="px-5 py-3 text-gray-400 text-xs max-w-[200px] truncate" :title="m.description">
-                  <span v-if="m.description">{{ m.description }}</span>
-                  <span v-else class="text-gray-600">—</span>
-                </td>
-                <!-- 绑定模型个数 -->
-                <td class="px-5 py-3">
-                  <span v-if="m.bound_models?.length" class="tag tag-accent">
-                    {{ m.bound_models.length }} 个模型
-                  </span>
-                  <span v-else class="text-gray-600 text-xs">未绑定</span>
-                </td>
-                <!-- 状态 Toggle -->
-                <td class="px-5 py-3">
-                  <CCheckbox :model-value="m.status === 'active'" @update:modelValue="(val) => toggleStatus(m, val)" />
-                </td>
-                <!-- 创建时间 -->
-                <td class="px-5 py-3 text-xs text-gray-500">
-                  {{ formatDate(m.created_at) }}
-                </td>
-                <!-- 日志 (icon+使用统计，整体可点击) -->
-                <td class="px-5 py-3">
-                  <button type="button" @click="openLog(m)" class="model-info-btn" title="使用统计">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V5"/><path d="M15 17v-8"/>
-                    </svg>
-                    <span class="text-xs">使用统计</span>
-                  </button>
-                </td>
-                <!-- 操作 -->
-                <td class="px-5 py-3">
-                  <div class="flex items-center justify-end gap-1">
-                    <button @click="openEdit(m)" class="text-gray-500 hover:text-white p-1 transition-colors" title="编辑">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                      </svg>
-                    </button>
-                    <button @click="openDeleteConfirm(m)" class="text-gray-500 hover:text-red-400 p-1 transition-colors" title="删除">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                      </svg>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <CTable v-if="mappings.length > 0">
+          <thead>
+            <tr>
+              <th class="text-left">虚拟模型ID</th>
+              <th class="text-left">描述</th>
+              <th class="text-left">绑定模型</th>
+              <th class="text-left">状态</th>
+              <th class="text-left">创建时间</th>
+              <th class="text-left">日志</th>
+              <th class="text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in mappings" :key="m.alias_name"
+              :class="{ 'opacity-50': m.status !== 'active' }">
+              <!-- 虚拟模型ID -->
+              <td class="font-mono text-ls-accent font-semibold">{{ m.alias_name }}</td>
+              <!-- 描述 -->
+              <td class="text-ls-dim text-xs max-w-[200px] truncate" :title="m.description">
+                <span v-if="m.description">{{ m.description }}</span>
+                <span v-else class="text-ls-muted">—</span>
+              </td>
+              <!-- 绑定模型个数 -->
+              <td>
+                <span v-if="m.bound_models?.length" class="tag tag-accent">
+                  {{ m.bound_models.length }} 个模型
+                </span>
+                <span v-else class="text-ls-muted text-xs">未绑定</span>
+              </td>
+              <!-- 状态 Toggle -->
+              <td>
+                <CCheckbox :model-value="m.status === 'active'" @update:modelValue="(val) => toggleStatus(m, val)" />
+              </td>
+              <!-- 创建时间 -->
+              <td class="text-xs text-ls-muted">
+                {{ formatDate(m.created_at) }}
+              </td>
+              <!-- 日志 (icon+使用统计，整体可点击) -->
+              <td>
+                <button type="button" @click="openLog(m)" class="model-info-btn" title="使用统计">
+                  <CIcon name="chart" :size="12" :stroke-width="2.2" />
+                  <span class="text-xs">使用统计</span>
+                </button>
+              </td>
+              <!-- 操作 -->
+              <td>
+                <div class="flex items-center justify-end gap-1">
+                  <IconButton icon="edit" title="编辑" padded @click="openEdit(m)" />
+                  <IconButton icon="trash" title="删除" tone="danger" padded @click="openDeleteConfirm(m)" />
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </CTable>
 
         <!-- ── 空态 ── -->
-        <div v-if="mappings.length === 0" class="bg-ls-bg rounded-lg border-2 border-dashed border-ls-border p-12 flex flex-col items-center justify-center gap-3">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-gray-600">
-            <path d="M10 13a5 5 0 0 0 7.54 .54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-          </svg>
-          <p class="text-sm text-gray-500">暂无虚拟模型</p>
-          <button @click="openAdd" class="text-xs text-ls-accent hover:text-ls-accentHover">添加第一个虚拟模型 →</button>
-        </div>
-        <div v-else class="mt-4 flex items-center justify-center gap-2 text-sm text-gray-500">
+        <EmptyState v-if="mappings.length === 0" text="暂无虚拟模型">
+          <template #icon>
+            <CIcon name="link" :size="32" :stroke-width="1.5" class="text-ls-muted" />
+          </template>
+          <template #action>
+            <button @click="openAdd" class="text-xs text-ls-accent hover:text-ls-accentHover">添加第一个虚拟模型 →</button>
+          </template>
+        </EmptyState>
+        <div v-else class="mt-4 flex items-center justify-center gap-2 text-sm text-ls-muted">
           共 {{ mappings.length }} 个虚拟模型
         </div>
-      </div>
+      </PageState>
     </div>
 
     <!-- ═══════════════════════════════════════════
@@ -109,20 +92,18 @@
     <Drawer v-model="showFormDrawer" :title="isEditing ? '编辑虚拟模型' : '添加虚拟模型'">
       <div class="space-y-5">
         <!-- 虚拟模型ID -->
-        <div>
-          <label class="form-label">虚拟模型ID <span class="text-red-400">*</span></label>
+        <FormField label="虚拟模型ID" required>
           <input v-model="form.alias" type="text" placeholder="my-virtual-model"
             class="form-input font-mono" :disabled="isEditing"
             @keyup.enter="submitForm" ref="formAliasInput">
-          <p v-if="isEditing" class="text-[10px] text-gray-600 mt-1">虚拟模型ID不可修改</p>
-        </div>
+          <p v-if="isEditing" class="text-[10px] text-ls-muted mt-1">虚拟模型ID不可修改</p>
+        </FormField>
 
         <!-- 描述 -->
-        <div>
-          <label class="form-label">描述 <span class="text-gray-600 normal-case text-[10px]">(可选)</span></label>
+        <FormField label="描述" optional>
           <textarea v-model="form.description" rows="2" placeholder="描述该虚拟模型的用途..."
             class="form-input resize-none"></textarea>
-        </div>
+        </FormField>
 
         <!-- ── 绑定模型 ── -->
         <div class="border-t border-ls-border pt-5">
@@ -131,43 +112,13 @@
             <!-- 供应商 + 模型多选 + 添加 -->
             <div class="flex items-end gap-2">
               <div class="flex-1">
-                <label class="text-xs text-gray-500 mb-1 block">供应商</label>
+                <label class="text-xs text-ls-muted mb-1 block">供应商</label>
                 <CSelect v-model="selectedSupplier" :options="supplierOptions" placeholder="选择供应商" />
               </div>
               <div class="flex-1">
-                <label class="text-xs text-gray-500 mb-1 block">模型（可多选）</label>
-                <div class="relative" ref="modelDropdownRef">
-                  <button type="button" @click="showModelDropdown = !showModelDropdown"
-                    class="form-input text-left flex items-center justify-between"
-                    :class="{ 'border-ls-accent': showModelDropdown }">
-                    <span class="truncate" :class="selectedModels.length ? 'text-white' : 'text-gray-500'">
-                      <span v-if="selectedModels.length">{{ selectedModels.length }} 个已选</span>
-                      <span v-else>选择模型</span>
-                    </span>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                      class="text-gray-500 transition-transform flex-shrink-0 ml-2" :class="showModelDropdown ? 'rotate-180' : ''">
-                      <polyline points="6 9 12 15 18 9"/>
-                    </svg>
-                  </button>
-                  <!-- 多选下拉列表 -->
-                  <div v-if="showModelDropdown"
-                    class="absolute z-30 top-full left-0 right-0 mt-1 bg-[#181818] border border-gray-800 rounded-lg shadow-lg shadow-black/30 max-h-48 overflow-y-auto">
-                    <div v-if="modelOptions.length === 0" class="px-3 py-2 text-xs text-gray-500">该供应商暂无模型</div>
-                    <button v-for="opt in modelOptions" :key="opt.value" type="button"
-                      @click="toggleModelSelection(opt.value)"
-                      class="w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2"
-                      :class="selectedModels.includes(opt.value) ? 'bg-ls-accent/10 text-ls-accent' : 'text-white hover:bg-[#242424]'">
-                      <span class="w-4 h-4 rounded border flex items-center justify-center flex-shrink-0"
-                        :class="selectedModels.includes(opt.value) ? 'bg-ls-accent border-ls-accent' : 'border-gray-600'">
-                        <svg v-if="selectedModels.includes(opt.value)" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                          <polyline points="20 6 9 17 4 12"/>
-                        </svg>
-                      </span>
-                      <span class="truncate">{{ opt.label }}</span>
-                      <span v-if="opt.model_type" class="text-gray-500 text-[10px] ml-auto flex-shrink-0">{{ opt.model_type }}</span>
-                    </button>
-                  </div>
-                </div>
+                <label class="text-xs text-ls-muted mb-1 block">模型（可多选）</label>
+                <CMultiSelect v-model="selectedModels" :options="modelOptions"
+                  placeholder="选择模型" empty-text="该供应商暂无模型" />
               </div>
               <button @click="addSelectedModels" class="btn btn-secondary" style="height: 38px;"
                 :disabled="!selectedSupplier || selectedModels.length === 0">
@@ -197,11 +148,7 @@
                     @dragend="onDragEnd"
                     @drop.prevent="onDrop(idx)">
                     <td class="py-2 cursor-grab text-gray-600 hover:text-gray-400">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                        <circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/>
-                        <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
-                        <circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>
-                      </svg>
+                      <CIcon name="grip" :size="12" />
                     </td>
                     <td class="py-2">
                       <span class="text-gray-300">{{ b.supplier_name || `供应商${b.supplier_id}` }}</span>
@@ -209,8 +156,8 @@
                       <span class="font-mono text-ls-accent">{{ b.model_name }}</span>
                     </td>
                     <td class="py-2">
-                      <span class="tag" :class="getModelTypeTagClass(b.model_type)">
-                        {{ formatModelType(b.model_type) }}
+                      <span class="tag" :class="modelTypeTagClass(b.model_type)">
+                        {{ modelTypeLabel(b.model_type) }}
                       </span>
                     </td>
                     <td class="py-2 text-gray-400">
@@ -218,9 +165,7 @@
                     </td>
                     <td class="py-2 text-right">
                       <button @click="openBindingDeleteConfirm(b)" class="text-gray-600 hover:text-red-400 transition-colors p-0.5" title="删除">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                        </svg>
+                        <CIcon name="x" :size="12" />
                       </button>
                     </td>
                   </tr>
@@ -272,11 +217,20 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, inject } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PageState from '@/components/PageState.vue'
 import Drawer from '@/components/Drawer.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import CTable from '@/components/CTable.vue'
+import EmptyState from '@/components/EmptyState.vue'
+import FormField from '@/components/FormField.vue'
+import CMultiSelect from '@/components/CMultiSelect.vue'
+import CIcon from '@/components/CIcon.vue'
+import IconButton from '@/components/IconButton.vue'
 import LogPanel from './LogPanel.vue'
 import CSelect from '@/components/CSelect.vue'
 import CCheckbox from '@/components/CCheckbox.vue'
+import { formatDate, formatContextLength } from '@/utils/format'
+import { modelTypeLabel, modelTypeTagClass } from '@/constants/modelType'
 import {
   getSuppliers,
   getMappings,
@@ -319,8 +273,6 @@ const selectedMapping = ref(null)
 const suppliers = ref([])
 const selectedSupplier = ref(null)
 const selectedModels = ref([])
-const showModelDropdown = ref(false)
-const modelDropdownRef = ref(null)
 const bindingList = ref([])
 
 const supplierOptions = computed(() =>
@@ -332,7 +284,7 @@ const modelOptions = computed(() => {
   return (sup?.models || []).map(m => ({
     label: m.model_name,
     value: m.model_name,
-    model_type: m.model_type,
+    extra: m.model_type,
   }))
 })
 
@@ -436,15 +388,6 @@ const submitForm = async () => {
 }
 
 // ── 绑定模型操作 ──
-const toggleModelSelection = (modelName) => {
-  const idx = selectedModels.value.indexOf(modelName)
-  if (idx >= 0) {
-    selectedModels.value.splice(idx, 1)
-  } else {
-    selectedModels.value.push(modelName)
-  }
-}
-
 const addSelectedModels = async () => {
   if (!selectedSupplier.value || selectedModels.value.length === 0) {
     toast('请选择供应商和模型', 'error')
@@ -473,7 +416,6 @@ const addSelectedModels = async () => {
     // 添加后清空选择
     selectedSupplier.value = null
     selectedModels.value = []
-    showModelDropdown.value = false
   } catch (e) {
     toast('添加失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
   }
@@ -566,53 +508,6 @@ const confirmDelete = async () => {
   }
 }
 
-// ── 格式化辅助函数 ──
-const formatDate = (ts) => {
-  if (!ts) return '—'
-  try {
-    const d = new Date(ts)
-    if (isNaN(d.getTime())) return ts
-    return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-  } catch {
-    return ts
-  }
-}
-
-const formatModelType = (type) => {
-  const map = {
-    text: '文本',
-    image: '图片',
-    code: '代码',
-    voice: '语音',
-    multimodal: '多模态',
-  }
-  return map[type] || type || '—'
-}
-
-const getModelTypeTagClass = (type) => {
-  const map = {
-    text: 'tag-accent',
-    image: 'tag-warning',
-    code: 'tag-success',
-    voice: 'tag-danger',
-    multimodal: 'tag',
-  }
-  return map[type] || 'tag'
-}
-
-const formatContextLength = (len) => {
-  if (!len) return null
-  if (len >= 1000) return (len / 1000).toFixed(len % 1000 === 0 ? 0 : 1) + 'K'
-  return String(len)
-}
-
-// ── 点击外部关闭模型下拉 ──
-const handleClickOutside = (e) => {
-  if (modelDropdownRef.value && !modelDropdownRef.value.contains(e.target)) {
-    showModelDropdown.value = false
-  }
-}
-
 // ── 键盘快捷键 ──
 const handleKeyDown = (e) => {
   if (e.key === 'Escape') {
@@ -625,11 +520,9 @@ onMounted(() => {
   loadData()
   loadSuppliers()
   document.addEventListener('keydown', handleKeyDown)
-  document.addEventListener('click', handleClickOutside)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeyDown)
-  document.removeEventListener('click', handleClickOutside)
 })
 </script>

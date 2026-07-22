@@ -4,135 +4,100 @@
       <template #action>
         <div class="flex items-center gap-3">
           <!-- 定时刷新 -->
-          <div class="flex bg-ls-card rounded-lg border border-ls-border p-0.5">
-            <button v-for="opt in REFRESH_OPTIONS" :key="opt.label" type="button"
-              @click="setRefresh(opt.ms)"
-              class="px-2.5 h-8 rounded-md text-xs font-medium transition-colors"
-              :class="refreshInterval === opt.ms
-                ? 'bg-ls-elevated text-white'
-                : 'text-gray-500 hover:text-white'">
-              {{ opt.label }}
-            </button>
-          </div>
+          <SegmentedControl :model-value="refreshInterval" :options="REFRESH_OPTIONS"
+            @update:model-value="setRefresh" />
           <button @click="loadLogs()" class="btn btn-primary">↻ 刷新</button>
         </div>
       </template>
     </PageHeader>
 
-    <div class="p-6">
-      <div v-if="loading && logs.length === 0" class="flex items-center justify-center h-64">
-        <div class="text-gray-500">Loading...</div>
-      </div>
-      <div v-else>
+    <div class="px-6 md:px-8 py-6">
+      <PageState :loading="loading && logs.length === 0">
       <!-- Filters (1 row) -->
       <div class="flex flex-wrap gap-3 mb-5 items-center">
-        <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
-          <label class="text-xs text-gray-500 flex-shrink-0">时间</label>
-          <div class="flex-1 min-w-0 lg:w-56"><DateRangePicker @update="onTimeChange" /></div>
-        </div>
-        <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
-          <label class="text-xs text-gray-500 flex-shrink-0">供应商</label>
-          <div class="flex-1 min-w-0 lg:w-36"><CSelect v-model="filters.accountId" :options="ACCOUNT_OPTIONS" size="sm" placeholder="选择供应商" /></div>
-        </div>
-        <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
-          <label class="text-xs text-gray-500 flex-shrink-0">模型</label>
-          <div class="flex-1 min-w-0 lg:w-36"><CSelect v-model="filters.model" :options="MODEL_OPTIONS" size="sm" placeholder="选择模型" /></div>
-        </div>
-        <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
-          <label class="text-xs text-gray-500 flex-shrink-0">状态</label>
-          <div class="flex-1 min-w-0 lg:w-20"><CSelect v-model="filters.statusCode" :options="STATUS_CODE_OPTIONS" size="sm" placeholder="全部" /></div>
-        </div>
-        <div class="flex items-center gap-2 bg-ls-card rounded-lg border border-ls-border px-3 py-2">
-          <label class="text-xs text-gray-500 flex-shrink-0">流式</label>
-          <div class="flex-1 min-w-0 lg:w-20"><CSelect v-model="filters.isStream" :options="STREAM_OPTIONS" size="sm" placeholder="全部" /></div>
-        </div>
+        <FilterField label="时间" width="lg:w-56">
+          <DateRangePicker @update="onTimeChange" />
+        </FilterField>
+        <FilterField label="供应商" width="lg:w-36">
+          <CSelect v-model="filters.accountId" :options="ACCOUNT_OPTIONS" size="sm" placeholder="选择供应商" />
+        </FilterField>
+        <FilterField label="模型" width="lg:w-36">
+          <CSelect v-model="filters.model" :options="MODEL_OPTIONS" size="sm" placeholder="选择模型" />
+        </FilterField>
+        <FilterField label="状态" width="lg:w-20">
+          <CSelect v-model="filters.statusCode" :options="STATUS_CODE_OPTIONS" size="sm" placeholder="全部" />
+        </FilterField>
+        <FilterField label="流式" width="lg:w-20">
+          <CSelect v-model="filters.isStream" :options="STREAM_OPTIONS" size="sm" placeholder="全部" />
+        </FilterField>
       </div>
 
       <!-- ═══════════════════════════════════════════
            日志列表（表格）
            ═══════════════════════════════════════════ -->
       <div>
-        <div v-if="filteredLogs.length === 0 && !loading" class="text-center text-gray-500 py-12">
+        <div v-if="filteredLogs.length === 0 && !loading" class="text-center text-ls-muted py-12">
           暂无日志记录
         </div>
-        <div v-else class="bg-ls-card rounded-lg border border-ls-border overflow-hidden overflow-x-auto">
-          <table class="w-full text-xs">
-            <thead>
-              <tr class="text-gray-500 border-b border-ls-border bg-ls-bg">
-                <th class="text-left px-4 py-2.5 font-medium">时间</th>
-                <th class="text-left px-4 py-2.5 font-medium">请求 ID</th>
-                <th class="text-left px-4 py-2.5 font-medium">供应商</th>
-                <th class="text-left px-4 py-2.5 font-medium">模型</th>
-                <th class="text-left px-4 py-2.5 font-medium">状态</th>
-                <th class="text-left px-4 py-2.5 font-medium">输入 Token</th>
-                <th class="text-left px-4 py-2.5 font-medium">Cache 命中</th>
-                <th class="text-left px-4 py-2.5 font-medium">输出 Token</th>
-                <th class="text-left px-4 py-2.5 font-medium">延迟</th>
-                <th class="text-left px-4 py-2.5 font-medium">流式</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="log in filteredLogs" :key="log.request_id"
-                class="border-b border-ls-border/50 hover:bg-ls-elevated transition-colors cursor-pointer"
-                @click="showDetail(log)">
-                <td class="px-4 py-3 text-gray-400">{{ formatTime(log.timestamp) }}</td>
-                <td class="px-4 py-3 text-gray-300 font-mono">{{ log.request_id }}</td>
-                <td class="px-4 py-3">
-                  <span class="inline-flex items-center gap-1.5 text-gray-400">
-                    <span class="w-4 h-4 rounded bg-ls-elevated flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ (log.account_name || log.account_id || '')[0].toUpperCase() }}</span>
-                    {{ log.account_name || log.account_id }}
-                  </span>
-                </td>
-                <td class="px-4 py-3">
-                  <span class="text-white hover:underline inline-flex items-center gap-1.5">
-                    <span class="w-4 h-4 rounded bg-ls-elevated flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ log.model[0].toUpperCase() }}</span>
-                    <span class="font-mono">{{ log.model }}</span>
-                  </span>
-                </td>
-                <td class="px-4 py-3">
-                  <span class="inline-flex items-center rounded-md px-1.5 py-0.5"
-                    :class="log.status_code >= 500 ? 'bg-red-500/10 text-red-400' : log.status_code >= 400 ? 'bg-yellow-500/10 text-yellow-400' : 'bg-green-500/10 text-green-400'">
-                    {{ log.status_code }}
-                  </span>
-                </td>
-                <td class="px-4 py-3 font-mono text-white">{{ (log.input_tokens || 0).toLocaleString() }}</td>
-                <td class="px-4 py-3 font-mono"
-                  :class="(log.cached_tokens || 0) + (log.prompt_partial_cached || 0) > 0 ? 'text-green-400' : 'text-gray-600'">
-                  {{ ((log.cached_tokens || 0) + (log.prompt_partial_cached || 0)).toLocaleString() }}
-                </td>
-                <td class="px-4 py-3 font-mono text-white">{{ (log.output_tokens || 0).toLocaleString() }}</td>
-                <td class="px-4 py-3 font-mono text-white">{{ log.latency_ms }}ms</td>
-                <td class="px-4 py-3">
-                  <span class="inline-flex items-center rounded-md px-1.5 py-0.5"
-                    :class="log.is_stream ? 'bg-ls-accent/10 text-ls-accent' : 'bg-ls-elevated text-gray-400'">
-                    {{ log.is_stream ? 'P' : 'N' }}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <CTable v-else size="sm" head-bg hover="full">
+          <thead>
+            <tr>
+              <th class="text-left">时间</th>
+              <th class="text-left">请求 ID</th>
+              <th class="text-left">供应商</th>
+              <th class="text-left">模型</th>
+              <th class="text-left">状态</th>
+              <th class="text-left">输入 Token</th>
+              <th class="text-left">Cache 命中</th>
+              <th class="text-left">输出 Token</th>
+              <th class="text-left">延迟</th>
+              <th class="text-left">流式</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="log in filteredLogs" :key="log.request_id"
+              class="cursor-pointer" @click="showDetail(log)">
+              <td class="text-ls-dim">{{ formatLogTime(log.timestamp) }}</td>
+              <td class="text-ls-dim font-mono">{{ log.request_id }}</td>
+              <td>
+                <span class="inline-flex items-center gap-1.5 text-ls-dim">
+                  <span class="w-4 h-4 rounded bg-ls-elevated flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ (log.account_name || log.account_id || '')[0].toUpperCase() }}</span>
+                  {{ log.account_name || log.account_id }}
+                </span>
+              </td>
+              <td>
+                <span class="text-ls-text hover:underline inline-flex items-center gap-1.5">
+                  <span class="w-4 h-4 rounded bg-ls-elevated flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ log.model[0].toUpperCase() }}</span>
+                  <span class="font-mono">{{ log.model }}</span>
+                </span>
+              </td>
+              <td>
+                <StatusCodeBadge :code="log.status_code" />
+              </td>
+              <td class="font-mono text-ls-text">{{ (log.input_tokens || 0).toLocaleString() }}</td>
+              <td class="font-mono"
+                :class="(log.cached_tokens || 0) + (log.prompt_partial_cached || 0) > 0 ? 'text-green-400' : 'text-ls-muted'">
+                {{ ((log.cached_tokens || 0) + (log.prompt_partial_cached || 0)).toLocaleString() }}
+              </td>
+              <td class="font-mono text-ls-text">{{ (log.output_tokens || 0).toLocaleString() }}</td>
+              <td class="font-mono text-ls-text">{{ log.latency_ms }}ms</td>
+              <td>
+                <span class="inline-flex items-center rounded-md px-1.5 py-0.5"
+                  :class="log.is_stream ? 'bg-ls-accent/10 text-ls-accent' : 'bg-ls-elevated text-ls-dim'">
+                  {{ log.is_stream ? 'P' : 'N' }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </CTable>
       </div>
 
       <!-- Pagination -->
-      <div class="flex items-center justify-between mt-4">
-        <p class="text-xs text-gray-500">共 {{ total }} 条记录</p>
-        <div class="flex items-center gap-2">
-          <button @click="page = 0" :disabled="page <= 0"
-            class="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-md hover:bg-ls-card disabled:opacity-30">⇤ 首页</button>
-          <button @click="page--" :disabled="page <= 0"
-            class="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-md hover:bg-ls-card disabled:opacity-30">← 上页</button>
-          <span class="text-xs text-gray-500">{{ page + 1 }} / {{ totalPages }}</span>
-          <button @click="page++" :disabled="page >= totalPages - 1"
-            class="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-md hover:bg-ls-card disabled:opacity-30">下页 →</button>
-          <button @click="page = totalPages - 1" :disabled="page >= totalPages - 1"
-            class="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-md hover:bg-ls-card disabled:opacity-30">末页 ⇥</button>
-        </div>
-      </div>
+      <Pagination v-model:page="page" :total="total" :page-size="pageSize" />
 
       <!-- Detail Panel -->
       <LogDetailPanel v-model="selectedLog" />
-    </div>
+    </PageState>
     </div>
   </div>
 </template>
@@ -140,6 +105,13 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PageState from '@/components/PageState.vue'
+import FilterField from '@/components/FilterField.vue'
+import SegmentedControl from '@/components/SegmentedControl.vue'
+import CTable from '@/components/CTable.vue'
+import StatusCodeBadge from '@/components/StatusCodeBadge.vue'
+import Pagination from '@/components/Pagination.vue'
+import { formatTime } from '@/utils/format'
 import { getLogs, getSuppliers, getSupplierModels } from '@/api'
 import CSelect from '@/components/CSelect.vue'
 import LogDetailPanel from './LogDetailPanel.vue'
@@ -164,17 +136,16 @@ const STREAM_OPTIONS = [
 ]
 
 const REFRESH_OPTIONS = [
-  { label: '关', ms: 0 },
-  { label: '10s', ms: 10000 },
-  { label: '30s', ms: 30000 },
-  { label: '1m', ms: 60000 },
-  { label: '5m', ms: 300000 },
+  { label: '关', value: 0 },
+  { label: '10s', value: 10000 },
+  { label: '30s', value: 30000 },
+  { label: '1m', value: 60000 },
+  { label: '5m', value: 300000 },
 ]
 
 const page = ref(0)
 const pageSize = 20
 const total = ref(0)
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const loading = ref(true)
 
 const logs = ref([])
@@ -203,17 +174,8 @@ const filteredLogs = computed(() => logs.value)
 
 const selectedLog = ref(null)
 
-const formatTime = (ts) => {
-  if (!ts) return ''
-  // Treat the input as UTC (append Z)
-  const d = new Date(ts.replace(' ', 'T') + 'Z')
-  if (isNaN(d.getTime())) return ts
-  // Manually compute UTC+8 components (avoid browser timezone dependency)
-  const cst = new Date(d.getTime() + 8 * 3600000)
-  const pad = (n, l = 2) => String(n).padStart(l, '0')
-  // Use getUTC* to read the raw values, which now represent UTC+8
-  return `${cst.getUTCFullYear()}-${pad(cst.getUTCMonth() + 1)}-${pad(cst.getUTCDate())} ${pad(cst.getUTCHours())}:${pad(cst.getUTCMinutes())}:${pad(cst.getUTCSeconds())}.${String(cst.getUTCMilliseconds()).padStart(3, '0')}`
-}
+// 日志时间戳按 UTC 存储，统一以 UTC+8 + 毫秒精度展示
+const formatLogTime = (ts) => formatTime(ts, { utc8: true, ms: true })
 
 const loadLogs = async () => {
   loading.value = true

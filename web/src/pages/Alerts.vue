@@ -11,146 +11,88 @@
       </template>
     </PageHeader>
 
-    <div class="p-6">
-      <div v-if="loading" class="flex items-center justify-center h-64">
-        <div class="text-gray-500">Loading...</div>
-      </div>
-      <div v-else>
+    <div class="px-6 md:px-8 py-6">
+      <PageState :loading="loading">
       <!-- Summary cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mb-6">
-        <div class="bg-ls-card rounded-lg border border-ls-border p-5">
-          <p class="text-xs text-gray-500 mb-1">今日告警</p>
-          <p class="text-2xl font-semibold tracking-tight text-white">7</p>
-          <p class="text-xs text-gray-500 mt-1">较昨日 +2</p>
-        </div>
-        <div class="bg-ls-card rounded-lg border border-ls-border p-5">
-          <p class="text-xs text-gray-500 mb-1">本周告警</p>
-          <p class="text-2xl font-semibold tracking-tight text-white">23</p>
-          <p class="text-xs text-gray-500 mt-1">配额耗尽 18 · 请求失败 5</p>
-        </div>
-        <div class="bg-ls-card rounded-lg border border-ls-border p-5">
-          <p class="text-xs text-gray-500 mb-1">最近严重告警</p>
-          <p class="text-2xl font-semibold tracking-tight text-white">—</p>
-          <p class="text-xs text-green-400 mt-1">系统运行正常</p>
-        </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <StatCard label="今日告警" :value="String(stats.today)" :sub="stats.todaySub" />
+        <StatCard label="近 7 日告警" :value="String(stats.week)" :sub="stats.weekSub" />
+        <StatCard label="最近严重告警" :value="stats.severeValue" :sub="stats.severeSub" :sub-class="stats.severeSubClass" />
       </div>
 
       <!-- ═══════════════════════════════════════════
            视图 1：卡片行（默认）
            ═══════════════════════════════════════════ -->
-      <div v-if="viewMode === 'row'" class="bg-ls-card rounded-lg border border-ls-border">
-        <div class="px-5 py-3.5 border-b border-ls-border flex items-center justify-between">
-          <h2 class="font-semibold tracking-tight text-sm">告警记录</h2>
-          <span class="text-xs text-gray-500">共 {{ filteredAlerts.length }} 条</span>
-        </div>
+      <CCard v-if="viewMode === 'row'" title="告警记录" no-padding>
+        <template #action>
+          <span class="text-xs text-ls-muted">共 {{ filteredAlerts.length }} 条</span>
+        </template>
         <div>
           <div v-for="alert in filteredAlerts" :key="alert.id"
             class="px-5 py-3.5 border-b border-ls-border/50 flex items-start gap-3 hover:bg-ls-elevated transition-colors last:border-b-0">
             <span class="flex-shrink-0 mt-1">
-              <svg v-if="alert.level === 'warning'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-yellow-400">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-              <svg v-else-if="alert.level === 'error'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-red-400">
-                <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-              </svg>
-              <svg v-else-if="alert.level === 'info'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ls-accent">
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-              </svg>
-              <svg v-else-if="alert.level === 'critical'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-red-400">
-                <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-              </svg>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-green-400">
-                <circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/>
-              </svg>
+              <AlertLevelIcon :level="alert.level" />
             </span>
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-sm text-white">{{ alert.title }}</span>
+                <span class="text-sm text-ls-text">{{ alert.title }}</span>
                 <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs" :class="levelClass(alert.level)">{{ levelLabel(alert.level) }}</span>
-                <span class="text-xs text-gray-500 ml-auto">{{ alert.timestamp }}</span>
+                <span class="text-xs text-ls-muted ml-auto">{{ alert.timestamp }}</span>
               </div>
-              <p class="text-xs text-gray-400 mt-1">{{ alert.message }}</p>
+              <p class="text-xs text-ls-dim mt-1">{{ alert.message }}</p>
             </div>
           </div>
         </div>
-      </div>
+      </CCard>
 
       <!-- ═══════════════════════════════════════════
            视图 2：网格卡片
            ═══════════════════════════════════════════ -->
-      <div v-else-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+      <div v-else-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div v-for="alert in filteredAlerts" :key="alert.id"
-          class="bg-ls-card rounded-lg border border-ls-border p-4 hover:border-gray-700 transition-all flex flex-col gap-2">
+          class="bg-ls-card rounded-lg border border-ls-border p-4 hover:border-ls-dim/50 transition-all flex flex-col gap-2 neon-glow">
           <div class="flex items-center gap-2">
             <span class="flex-shrink-0">
-              <svg v-if="alert.level === 'warning'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-yellow-400">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-              <svg v-else-if="alert.level === 'error'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-red-400">
-                <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-              </svg>
-              <svg v-else-if="alert.level === 'info'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ls-accent">
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-              </svg>
-              <svg v-else-if="alert.level === 'critical'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-red-400">
-                <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-              </svg>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-green-400">
-                <circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/>
-              </svg>
+              <AlertLevelIcon :level="alert.level" />
             </span>
             <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs" :class="levelClass(alert.level)">{{ levelLabel(alert.level) }}</span>
-            <span class="text-xs text-gray-500 ml-auto">{{ alert.timestamp }}</span>
+            <span class="text-xs text-ls-muted ml-auto">{{ alert.timestamp }}</span>
           </div>
-          <p class="text-sm text-white">{{ alert.title }}</p>
-          <p class="text-xs text-gray-400 line-clamp-2">{{ alert.message }}</p>
+          <p class="text-sm text-ls-text">{{ alert.title }}</p>
+          <p class="text-xs text-ls-dim line-clamp-2">{{ alert.message }}</p>
         </div>
       </div>
 
       <!-- ═══════════════════════════════════════════
            视图 3：表格
            ═══════════════════════════════════════════ -->
-      <div v-else-if="viewMode === 'table'" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="text-gray-500 border-b border-ls-border text-xs">
-              <th class="text-left px-5 py-3 font-medium">级别</th>
-              <th class="text-left px-5 py-3 font-medium">标题</th>
-              <th class="text-left px-5 py-3 font-medium">内容</th>
-              <th class="text-left px-5 py-3 font-medium">时间</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="alert in filteredAlerts" :key="alert.id"
-              class="border-b border-ls-border/50 hover:bg-ls-elevated/30 transition-colors">
-              <td class="px-5 py-3">
-                <span class="inline-flex items-center gap-1.5">
-                  <svg v-if="alert.level === 'warning'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-yellow-400">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                  </svg>
-                  <svg v-else-if="alert.level === 'error' || alert.level === 'critical'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-red-400">
-                    <circle cx="12" cy="12" r="10"/>
-                  </svg>
-                  <svg v-else-if="alert.level === 'info'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ls-accent">
-                    <circle cx="12" cy="12" r="10"/>
-                  </svg>
-                  <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-green-400">
-                    <circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/>
-                  </svg>
-                  <span class="text-xs" :class="levelClass(alert.level)">{{ levelLabel(alert.level) }}</span>
-                </span>
-              </td>
-              <td class="px-5 py-3 text-sm text-white">{{ alert.title }}</td>
-              <td class="px-5 py-3 text-xs text-gray-400 max-w-xs truncate">{{ alert.message }}</td>
-              <td class="px-5 py-3 text-xs text-gray-500">{{ alert.timestamp }}</td>
-            </tr>
-            <tr v-if="filteredAlerts.length === 0">
-              <td colspan="4" class="px-5 py-8 text-center text-gray-500">暂无告警记录</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      </div>
+      <CTable v-else-if="viewMode === 'table'">
+        <thead>
+          <tr>
+            <th class="text-left">级别</th>
+            <th class="text-left">标题</th>
+            <th class="text-left">内容</th>
+            <th class="text-left">时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="alert in filteredAlerts" :key="alert.id">
+            <td>
+              <span class="inline-flex items-center gap-1.5">
+                <AlertLevelIcon :level="alert.level" simple :size="12" />
+                <span class="text-xs" :class="levelClass(alert.level)">{{ levelLabel(alert.level) }}</span>
+              </span>
+            </td>
+            <td class="text-sm text-ls-text">{{ alert.title }}</td>
+            <td class="text-xs text-ls-dim max-w-xs truncate">{{ alert.message }}</td>
+            <td class="text-xs text-ls-muted">{{ alert.timestamp }}</td>
+          </tr>
+          <tr v-if="filteredAlerts.length === 0">
+            <td colspan="4" class="py-8 text-center text-ls-muted">暂无告警记录</td>
+          </tr>
+        </tbody>
+      </CTable>
+      </PageState>
     </div>
   </div>
 </template>
@@ -158,6 +100,11 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PageState from '@/components/PageState.vue'
+import StatCard from '@/components/StatCard.vue'
+import CCard from '@/components/CCard.vue'
+import CTable from '@/components/CTable.vue'
+import AlertLevelIcon from '@/components/AlertLevelIcon.vue'
 import { getAlerts } from '@/api'
 import CSelect from '@/components/CSelect.vue'
 import ViewToggle from '@/components/ViewToggle.vue'
@@ -194,6 +141,40 @@ const loadData = async () => {
 const filteredAlerts = computed(() => {
   if (alertFilter.value === 'all') return alerts.value
   return alerts.value.filter(a => a.type === alertFilter.value || a.level === alertFilter.value)
+})
+
+// ── 顶部统计：全部由真实告警数据派生，不再硬编码 ──
+const todayKey = () => new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+const isToday = (ts) => typeof ts === 'string' && ts.slice(0, 10) === todayKey()
+const isSevere = (a) => a.level === 'error' || a.level === 'critical'
+
+const stats = computed(() => {
+  const list = alerts.value
+  const today = list.filter(isToday).length
+  const week = list.length
+
+  // 近 7 日按类型细分
+  const quota = list.filter(a => a.type === 'quota_exhausted').length
+  const apiErr = list.filter(a => a.type === 'api_error').length
+  const weekSub = week
+    ? `配额耗尽 ${quota} · 请求失败 ${apiErr}`
+    : '暂无告警'
+
+  // 最近一条严重告警
+  const severe = [...list].reverse().find(isSevere)
+  const severeValue = severe ? '!' : '—'
+  const severeSub = severe ? (severe.title || '存在严重告警') : '系统运行正常'
+  const severeSubClass = severe ? 'text-red-400' : 'text-green-400'
+
+  return {
+    today,
+    todaySub: today ? `今日 ${today} 条` : '今日无告警',
+    week,
+    weekSub,
+    severeValue,
+    severeSub,
+    severeSubClass,
+  }
 })
 
 const levelClass = (level) => ({

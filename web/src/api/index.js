@@ -62,6 +62,7 @@ export const getLogDetail = (id) => api.get(`/logs/${id}`)
 
 // ── Stats ──
 export const getStats = (days = 30) => api.get('/stats', { params: { days } })
+export const getWindowStats = (seconds = 300) => api.get('/stats/window', { params: { seconds } })
 
 // ── Alerts ──
 export const getAlerts = (days = 7) => api.get('/alerts', { params: { days } })

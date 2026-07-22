@@ -8,67 +8,215 @@ html, body, #app {
   height: 100%;
 }
 
-* {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-}
-
-/* ── Design tokens ── */
+/* ── Design tokens — Cyberpunk Neon (Dark default) ──
+   精确对齐 demo/cyberpunk-dark.html 的 :root 变量。
+   Tailwind 的 ls-* 颜色在 tailwind.config.js 里通过 color-mix
+   引用这些变量，alpha 修饰符（border-ls-border/50 等）自动生效。 */
 :root {
-  --bg: #181825;
-  --surface: #1e1e2e;
-  --surface-2: #262637;
-  --border: #2a2a3d;
-  --text: #cdd6f4;
-  --text-dim: #a6adc8;
-  --text-muted: #6b7280;
-  --accent: #89b4fa;
-  --accent-dim: #74c7ec;
-  --ring: #89b4fa33;
-  --ls-bg: #0e0e10;
-  --ls-card: #1a1a1e;
-  --ls-elevated: #232329;
-  --ls-accent: #5e6ad2;
-  --ls-accentHover: #6b7bf2;
-  --ls-border: #1f1f23;
+  /* 背景层级：demo body #0a0a0f，sidebar/顶栏 #080810（--ls-shell） */
+  --ls-bg: #0a0a0f;
+  --ls-shell: #080810;
+  --ls-card: #13131a;
+  --ls-elevated: #0d0d1a;
+  /* 边框：--ls-borderLight 对应 demo 的 --border-light */
+  --ls-border: #1f1f2e;
+  --ls-borderLight: #2a2a3e;
+  /* 霓虹强调 */
+  --ls-accent: #00ffff;
+  --ls-accentHover: #00b4d8;
+  --ls-fuchsia: #ff00ff;
+  /* 文字层级 */
+  --text: #e0e0e0;
+  --text-dim: #8888aa;
+  --text-muted: #555577;
+  /* 旧 token 名（main.css 旧代码引用） */
+  --bg: #0a0a0f;
+  --surface: #13131a;
+  --surface-2: #0d0d1a;
+  --border: #1f1f2e;
+  --accent: #00ffff;
+  --accent-dim: #00b4d8;
+  --ring: rgba(0, 255, 255, 0.2);
 }
 
-/* ── Light theme (Catppuccin Latte) ── */
+/* ── 浅色：精确对齐 demo/cyberpunk-light.html ── */
 [data-theme="light"] {
-  --ls-bg: #eff1f5;
-  --ls-card: #e6e9ef;
-  --ls-elevated: #dce0e8;
-  --ls-accent: #89b4fa;
-  --ls-accentHover: #74c7ec;
-  --ls-border: #bcc0cc;
-  --bg: #eff1f5;
-  --surface: #e6e9ef;
-  --surface-2: #dce0e8;
-  --border: #bcc0cc;
-  --text: #4c4f69;
-  --text-dim: #6c7086;
-  --text-muted: #8c8fa1;
-  --accent: #89b4fa;
-  --accent-dim: #74c7ec;
-  --ring: #89b4fa33;
+  --ls-bg: #f0f0f5;
+  --ls-shell: #ffffff;
+  --ls-card: #ffffff;
+  --ls-elevated: #e6e6f0;
+  --ls-border: #e0e0ea;
+  --ls-borderLight: #e0e0ea;
+  --ls-accent: #00b4d8;
+  --ls-accentHover: #0090a8;
+  --ls-fuchsia: #d600d6;
+  --text: #1a1a2e;
+  --text-dim: #5a5a7a;
+  --text-muted: #8888aa;
+  --bg: #f0f0f5;
+  --surface: #ffffff;
+  --surface-2: #e6e6f0;
+  --border: #e0e0ea;
+  --accent: #00b4d8;
+  --accent-dim: #0090a8;
+  --ring: rgba(0, 180, 216, 0.25);
 }
 
-/* ── Light theme: override Tailwind text color utilities ── */
-[data-theme="light"] .text-white { color: #4c4f69; }
-[data-theme="light"] .text-gray-400 { color: #6c7086; }
-[data-theme="light"] .text-gray-500 { color: #8c8fa1; }
+* {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
 
-/* ── Light theme: override hardcoded dark hex backgrounds ── */
-[data-theme="light"] .bg-\\[\\#0c0c0c\\] { background: #e6e9ef; }
-[data-theme="light"] .bg-\\[\\#242424\\] { background: #dce0e8; }
+/* ── 文本类映射：让散布在 39 个文件里的 Tailwind 文本类跟随主题 ──
+   深色下 text-white → 赛博朋克浅灰，text-gray-500 → 中灰，无需 !important。
+   浅色下统一翻转为深色文字。
+   注意：状态色（green-400/red-400/yellow-400/blue-400/purple-400）在 demo
+   的深浅两套里完全一致，不做 light 覆盖，保持与 demo 严格一致。 */
+.text-white { color: var(--text); }
+.text-gray-300 { color: var(--text-dim); }
+.text-gray-400 { color: var(--text-dim); }
+.text-gray-500 { color: var(--text-muted); }
+.text-gray-600 { color: var(--text-dim); }
+.hover\:text-white:hover { color: var(--text); }
+.hover\:text-gray-400:hover { color: var(--text-dim); }
 
-/* ── Light theme: override hardcoded dark hex borders ── */
-[data-theme="light"] .border-gray-800 { border-color: #bcc0cc; }
+/* 浅色：硬编码暗 hex 背景 → 浅底（仅覆盖页面级容器色） */
+[data-theme="light"] .bg-\[\#0c0c0c\] { background: var(--ls-card); }
+[data-theme="light"] .bg-\[\#181818\] { background: var(--ls-elevated); }
+[data-theme="light"] .bg-\[\#242424\] { background: var(--ls-elevated); }
+[data-theme="light"] .hover\:bg-\[\#242424\]:hover { background: var(--ls-elevated); }
 
-/* ── Light theme: override dark hover backgrounds ── */
-[data-theme="light"] .hover\\:bg-\\[\\#242424\\]:hover { background: #dce0e8; }
-[data-theme="light"] .hover\\:bg-\\[\\#242424\\]:hover { background: #dce0e8; }
+/* 浅色：硬编码暗边框 → 浅边框 */
+[data-theme="light"] .border-gray-500 { border-color: var(--border); }
+[data-theme="light"] .border-gray-600 { border-color: var(--border); }
+[data-theme="light"] .border-gray-700 { border-color: var(--border); }
+[data-theme="light"] .border-gray-800 { border-color: var(--border); }
 
-/* ── Shared Drawer (form/edit — no close on backdrop click) ── */
+/* ── Design system — demo 公共类（精确对齐 demo/cyberpunk-dark.html）── */
+
+/* 扫描线覆盖层（仅深色；light demo 明示 "No scanline in light mode — too heavy"） */
+html:not([data-theme="light"]) body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 255, 255, 0.015) 2px,
+    rgba(0, 255, 255, 0.015) 4px
+  );
+}
+
+/* 状态点（7px 方点，active 带霓虹辉光 + 呼吸） */
+.status-dot {
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  border-radius: 1px;
+}
+.status-dot.active {
+  background: var(--ls-accent);
+  box-shadow: 0 0 6px var(--ls-accent);
+  animation: pulse-dot 2s infinite;
+}
+.status-dot.inactive { background: var(--ls-borderLight); }
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+[data-theme="light"] .status-dot.active { box-shadow: 0 0 4px rgba(0, 180, 216, 0.5); }
+[data-theme="light"] .status-dot.inactive { background: var(--text-muted); }
+
+/* 实时指示点：box-shadow 环形脉冲（dark demo 引用此类但未定义，按 light demo 补全） */
+.pulse-live { animation: pulse-ring 2s infinite; }
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(0, 255, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0); }
+}
+[data-theme="light"] .pulse-live { animation-name: pulse-ring-light; }
+@keyframes pulse-ring-light {
+  0%   { box-shadow: 0 0 0 0 rgba(0, 180, 216, 0.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(0, 180, 216, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 180, 216, 0); }
+}
+
+/* 悬停霓虹辉光（全局唯一定义，组件不再各自 scoped） */
+.neon-glow { transition: box-shadow 0.3s; }
+.neon-glow:hover {
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.1), 0 0 30px rgba(255, 0, 255, 0.05);
+}
+[data-theme="light"] .neon-glow:hover {
+  box-shadow: 0 0 12px rgba(0, 180, 216, 0.12);
+  border-color: rgba(0, 180, 216, 0.4);
+}
+
+/* 霓虹渐变文字（logo） */
+.gradient-neon {
+  background: linear-gradient(to right, var(--ls-accent), var(--ls-fuchsia));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* SVG 图表公共样式 */
+.chart-label text, .chart-label {
+  font-family: 'JetBrains Mono', monospace;
+  fill: var(--text-muted);
+  font-size: 9px;
+}
+.chart-grid line {
+  stroke: var(--ls-border);
+  stroke-width: 0.5;
+}
+.sparkline { transition: stroke 0.3s; }
+
+/* 输入容器聚焦辉光 */
+.glow-border:focus-within {
+  border-color: var(--ls-accent);
+  box-shadow: 0 0 0 2px rgba(0, 255, 255, 0.2);
+}
+[data-theme="light"] .glow-border:focus-within {
+  box-shadow: 0 0 0 2px rgba(0, 180, 216, 0.2);
+}
+
+/* neon 变体分段控件（Dashboard 头部时间窗；深浅两套精确对齐 demo） */
+.seg-neon {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--ls-elevated);
+  border: 1px solid var(--ls-borderLight);
+  border-radius: 8px;
+  padding: 4px;
+}
+.seg-neon button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+  transition: all 0.15s;
+}
+.seg-neon button:hover { color: var(--ls-accent); }
+.seg-neon button.active {
+  background: var(--ls-border);
+  color: var(--text);
+}
+[data-theme="light"] .seg-neon {
+  background: var(--ls-card);
+  border-color: var(--ls-border);
+}
+[data-theme="light"] .seg-neon button.active {
+  background: color-mix(in srgb, var(--ls-accent) 10%, transparent);
+  color: var(--ls-accent);
+}
+
+/* ── Shared Drawer ── */
 .drawer-overlay {
   position: fixed;
   inset: 0;
@@ -89,13 +237,12 @@ html, body, #app {
 
 .drawer-panel {
   width: 100%;
-  background: #1a1a1e;
-  border-left: 1px solid var(--border);
+  background: var(--ls-card);
+  border-left: 1px solid var(--ls-border);
   display: flex;
   flex-direction: column;
   animation: slideInRight .25s cubic-bezier(.4, 0, .2, 1);
 }
-/* 退出过渡：覆盖为 slideOutRight */
 .drawer-panel.exiting {
   animation: slideOutRight .25s cubic-bezier(.4, 0, .2, 1) forwards;
 }
@@ -105,14 +252,14 @@ html, body, #app {
   align-items: center;
   justify-content: space-between;
   padding: 20px 28px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--ls-border);
   flex-shrink: 0;
 }
 
 .drawer-title {
   font-size: 16px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text);
   margin: 0;
 }
 
@@ -128,15 +275,14 @@ html, body, #app {
   align-items: center;
   justify-content: center;
 }
-.drawer-close:hover { color: #fff; background: var(--surface-2); }
+.drawer-close:hover { color: var(--text); background: var(--ls-elevated); }
 
 .drawer-body {
   flex: 1;
   overflow-y: auto;
   padding: 28px;
-  background: #0e0e10;
+  background: var(--ls-bg);
 }
-/* 无 header/无 padding 模式（如请求日志左右分栏），自定义布局占满面板 */
 .drawer-body.is-full {
   padding: 0;
   overflow: hidden;
@@ -150,11 +296,11 @@ html, body, #app {
   justify-content: flex-end;
   gap: 10px;
   padding: 16px 28px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--ls-border);
   flex-shrink: 0;
 }
 
-/* ── Shared Modal (confirmation only) ── */
+/* ── Shared Modal ── */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -168,15 +314,18 @@ html, body, #app {
 }
 
 .modal {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--ls-card);
+  border: 1px solid var(--ls-border);
   border-radius: 14px;
   padding: 32px;
   width: 420px;
   max-width: 90vw;
   text-align: center;
   animation: modalPop .2s ease-out;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  box-shadow: 0 0 25px rgba(0, 255, 255, 0.15), 0 8px 32px rgba(0,0,0,0.3);
+}
+[data-theme="light"] .modal {
+  box-shadow: 0 0 12px rgba(0, 180, 216, 0.12), 0 8px 32px rgba(0,0,0,0.15);
 }
 
 .modal-icon {
@@ -200,7 +349,7 @@ html, body, #app {
 .modal-title {
   font-size: 16px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text);
   margin: 0 0 8px;
 }
 
@@ -218,7 +367,7 @@ html, body, #app {
 }
 
 /* ═══════════════════════════════════════════
-   STYLED FORM ELEMENTS (replaces native look)
+   STYLED FORM ELEMENTS
    ═══════════════════════════════════════════ */
 
 /* ── Labels ── */
@@ -235,8 +384,8 @@ html, body, #app {
 /* ── Inputs ── */
 .form-input {
   width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--ls-bg);
+  border: 1px solid var(--ls-border);
   border-radius: 10px;
   padding: 10px 14px;
   font-size: 14px;
@@ -248,23 +397,25 @@ html, body, #app {
   -webkit-appearance: none;
 }
 .form-input:focus {
-  border-color: var(--accent);
+  border-color: var(--ls-accent);
   box-shadow: 0 0 0 3px var(--ring);
 }
 .form-input::placeholder { color: var(--text-muted); }
 .form-input:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* ── Select (custom dropdown) ── */
+/* ── Select ── */
 .form-input.select {
   padding-right: 36px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23555577' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
 }
+[data-theme="light"] .form-input.select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238888aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
 
-/* Select options in dark theme */
 select.form-input option {
-  background: var(--surface);
+  background: var(--ls-card);
   color: var(--text);
   padding: 8px;
 }
@@ -287,11 +438,11 @@ select.form-input option {
 }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn:active:not(:disabled) { transform: scale(0.97); }
-.btn-primary { background: var(--accent); color: var(--bg); }
-.btn-primary:hover:not(:disabled) { background: var(--accent-dim); }
-.btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
-.btn-secondary:hover:not(:disabled) { background: #323248; border-color: #3a3a52; }
-.btn-danger { background: #f38ba8; color: var(--bg); }
+.btn-primary { background: var(--ls-accent); color: var(--ls-bg); }
+.btn-primary:hover:not(:disabled) { background: var(--ls-accentHover); }
+.btn-secondary { background: var(--ls-elevated); color: var(--text); border: 1px solid var(--ls-border); }
+.btn-secondary:hover:not(:disabled) { background: var(--ls-card); border-color: var(--text-muted); }
+.btn-danger { background: #f38ba8; color: var(--ls-bg); }
 .btn-danger:hover:not(:disabled) { background: #eba0b9; }
 
 /* ── Pill / Tag ── */
@@ -303,36 +454,78 @@ select.form-input option {
   border-radius: 6px;
   font-size: 11px;
   font-weight: 500;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: var(--ls-elevated);
+  border: 1px solid var(--ls-border);
   color: var(--text);
 }
-.tag-accent { background: #89b4fa18; color: var(--accent); border-color: #89b4fa33; }
-.tag-success { background: #a6e3a118; color: #a6e3a1; border-color: #a6e3a133; }
-.tag-warning { background: #f9e2af18; color: #f9e2af; border-color: #f9e2af33; }
-.tag-danger  { background: #f38ba818; color: #f38ba8; border-color: #f38ba833; }
+.tag-accent { background: rgba(0,255,255,0.1); color: var(--ls-accent); border-color: rgba(0,255,255,0.3); }
+[data-theme="light"] .tag-accent { background: rgba(0,180,216,0.1); border-color: rgba(0,180,216,0.3); }
+.tag-success { background: rgba(34,197,94,0.1); color: #22c55e; border-color: rgba(34,197,94,0.3); }
+.tag-warning { background: rgba(234,179,8,0.1); color: #eab308; border-color: rgba(234,179,8,0.3); }
+.tag-danger  { background: rgba(239,68,68,0.1); color: #ef4444; border-color: rgba(239,68,68,0.3); }
 
 /* ── Card ── */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--ls-card);
+  border: 1px solid var(--ls-border);
   border-radius: 12px;
   overflow: hidden;
   transition: border-color .15s, box-shadow .15s;
 }
 .card:hover {
-  border-color: #3a3a52;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  border-color: var(--text-muted);
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.08);
 }
+[data-theme="light"] .card:hover {
+  box-shadow: 0 0 12px rgba(0, 180, 216, 0.12);
+}
+
+/* ── Shared table ──
+   对齐 demo/cyberpunk-dark.html 的模型状态表：
+   表头 uppercase tracking-[0.15em] text-[10px]，行分隔线 border-[#1f1f2e] */
+.c-table {
+  width: 100%;
+  font-size: 14px;
+  line-height: 20px;
+}
+.c-table.size-sm { font-size: 12px; line-height: 16px; }
+.c-table thead tr {
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--ls-border);
+  font-size: 12px;
+  line-height: 16px;
+}
+.c-table thead th {
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: 500;
+}
+.c-table.head-bg thead tr { background: var(--ls-bg); }
+.c-table th { font-weight: 500; padding: 12px 20px; }
+.c-table td { padding: 12px 20px; }
+.c-table.pad-sm th,
+.c-table.pad-sm td { padding-left: 16px; padding-right: 16px; }
+.c-table.dense th,
+.c-table.dense td { padding-top: 10px; padding-bottom: 10px; }
+.c-table.head-dense th { padding-top: 10px; padding-bottom: 10px; }
+.c-table tbody tr {
+  border-bottom: 1px solid color-mix(in srgb, var(--ls-border) 50%, transparent);
+  transition: color .15s cubic-bezier(.4,0,.2,1),
+              background-color .15s cubic-bezier(.4,0,.2,1),
+              border-color .15s cubic-bezier(.4,0,.2,1);
+}
+.c-table.hover-dim tbody tr:hover { background: var(--ls-elevated); }
+.c-table.hover-full tbody tr:hover { background: var(--ls-elevated); }
+.c-table td.py-8 { padding-top: 32px; padding-bottom: 32px; }
 
 /* ── Section divider ── */
 .section-divider {
   height: 1px;
-  background: var(--border);
+  background: var(--ls-border);
   margin: 4px 0;
 }
 
-/* ── Inline actions (e.g. delete row button) ── */
+/* ── Inline actions ── */
 .action-icon {
   display: inline-flex;
   align-items: center;
@@ -348,11 +541,14 @@ select.form-input option {
 }
 .action-icon:hover {
   color: #f38ba8;
-  background: #f38ba818;
+  background: rgba(239,68,68,0.1);
 }
 .action-icon.edit:hover {
-  color: var(--accent);
-  background: #89b4fa18;
+  color: var(--ls-accent);
+  background: rgba(0,255,255,0.1);
+}
+[data-theme="light"] .action-icon.edit:hover {
+  background: rgba(0,180,216,0.1);
 }
 
 /* ── Number input spinner removal ── */
@@ -381,10 +577,6 @@ input[type="number"] {
   to { transform: translateX(100%); }
 }
 
-.drawer-panel.exiting {
-  animation: slideOutRight .25s cubic-bezier(.4, 0, .2, 1) forwards;
-}
-
 @keyframes modalPop {
   from { opacity: 0; transform: scale(0.95); }
   to { opacity: 1; transform: scale(1); }
@@ -395,25 +587,71 @@ input[type="number"] {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Custom scrollbar for dark theme */
+/* ── Scrollbar（demo 规格：4px，track=border，thumb=border-light）── */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--ls-border);
 }
 ::-webkit-scrollbar-thumb {
-  background: #3a3a4a;
-  border-radius: 3px;
+  background: var(--ls-borderLight);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4a4a5a;
+  background: #3a3a52;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #6a6a8a;
 }
 
-/* ── ESC key hint on cancel/close buttons ── */
+/* ── ESC key hint ── */
+.btn-esc::after {
+  content: "Esc";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 4px;
+  margin-left: 6px;
+  border-radius: 4px;
+  border: 1px solid var(--ls-border);
+  background: var(--ls-bg);
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1;
+}
+.drawer-close.btn-esc::after {
+  display: inline-flex;
+}
 
-/* ── 使用统计 / 模型用量 入口按钮（Mappings & Accounts 共用） ── */
+/* ── Enter key hint ── */
+.btn-enter::after {
+  content: "Enter";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 18px;
+  padding: 0 4px;
+  margin-left: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--ls-border);
+  background: var(--ls-bg);
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+/* ── Model info button ── */
 .model-info-btn {
   display: inline-flex;
   align-items: center;
@@ -428,57 +666,17 @@ input[type="number"] {
   transition: color .15s, background .15s;
 }
 .model-info-btn:hover {
-  color: var(--accent);
-  background: #89b4fa18;
+  color: var(--ls-accent);
+  background: rgba(0,255,255,0.1);
+}
+[data-theme="light"] .model-info-btn:hover {
+  background: rgba(0,180,216,0.1);
 }
 .model-info-btn svg {
   flex-shrink: 0;
 }
 
-/* ── ESC key hint on cancel/close buttons ── */
-.btn-esc::after {
-  content: "Esc";
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 18px;
-  padding: 0 4px;
-  margin-left: 6px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--text-muted);
-  line-height: 1;
-}
-.drawer-close.btn-esc::after {
-  display: inline-flex;
-}
-
-/* ── Enter key hint on confirm buttons ── */
-.btn-enter::after {
-  content: "Enter";
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 18px;
-  padding: 0 4px;
-  margin-left: 8px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--text-muted);
-  line-height: 1;
-}
-
-/* === Responsive: drawer full-screen on Pad/mobile === */
+/* ── Responsive drawer ── */
 .drawer-full {
   width: 100% !important;
   max-width: 100%;

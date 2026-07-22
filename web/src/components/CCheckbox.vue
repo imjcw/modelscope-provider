@@ -66,7 +66,7 @@ const focusCheckbox = () => {
   width: 36px;
   height: 20px;
   border-radius: 10px;
-  background: #2a2a2a;
+  background: var(--ls-elevated);
   cursor: pointer;
   transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
@@ -82,7 +82,7 @@ const focusCheckbox = () => {
 }
 
 .c-toggle-checked {
-  background: #6366f1;
+  background: var(--ls-accent);
 }
 
 /* Thumb (circle) */
@@ -93,7 +93,7 @@ const focusCheckbox = () => {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #888;
+  background: var(--text-muted);
   transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -104,11 +104,11 @@ const focusCheckbox = () => {
 
 /* Hover effect */
 .c-toggle:not(.c-toggle-disabled):hover {
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 2px var(--ring);
 }
 
 .c-toggle:not(.c-toggle-disabled):hover .c-toggle-thumb {
-  background: #aaa;
+  background: var(--text-dim);
 }
 
 .c-toggle-checked:not(.c-toggle-disabled):hover .c-toggle-thumb {
@@ -117,7 +117,7 @@ const focusCheckbox = () => {
 
 /* Focus state */
 .c-toggle:focus-visible {
-  outline: 2px solid #6366f1;
+  outline: 2px solid var(--ls-accent);
   outline-offset: 2px;
 }
 
@@ -128,6 +128,6 @@ const focusCheckbox = () => {
 }
 
 .c-toggle-disabled .c-toggle-thumb {
-  background: #555;
+  background: var(--text-muted);
 }
 </style>
