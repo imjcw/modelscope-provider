@@ -483,6 +483,12 @@ def get_stats(days: int = 30, service=Depends(get_admin_service)):
     return service.get_stats(days=days)
 
 
+@router.get("/stats/window")
+def get_window_stats(seconds: int = 300, service=Depends(get_admin_service)):
+    """Windowed stats for the dashboard live panel. seconds ∈ [60, 86400] (clamped)."""
+    return service.get_window_stats(seconds)
+
+
 # ── Model Quotas ──────────────────────────────────────────────────────────────
 
 @router.get("/model-quota")
@@ -499,7 +505,7 @@ def list_alerts(days: int = 7, service=Depends(get_admin_service)):
     from datetime import datetime, timedelta
 
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    records, _ = service.get_logs(start_time=cutoff)
+    records, _ = service.get_logs(start_time=cutoff, page_size=500)
 
     alerts = []
     for r in records:

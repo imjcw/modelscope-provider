@@ -912,3 +912,139 @@ class AdminService:
             "top_models": top_models,
             "supplier_daily": {k: dict(v) for k, v in supplier_daily.items()},
         }
+
+    # Window (seconds) → bucket granularity for the dashboard presets;
+    # other windows get ~30 buckets.
+    _WINDOW_BUCKET_MAP = {300: 10, 3600: 120, 86400: 3600}
+
+    def get_window_stats(self, seconds: int = 300) -> dict:
+        """Windowed statistics for the dashboard live panel.
+
+        Aggregates [now - seconds, now] in SQL: KPIs (total / success rate /
+        QPS / avg latency) with previous-window deltas, a bucketed series for
+        the trend chart, status-code breakdown and per-model call counts.
+
+        Series buckets are epoch-aligned (bucket_start divisible by
+        bucket_seconds) and span the bucket containing `start` through the one
+        containing `end` inclusive, so len(series) is seconds // bucket or
+        seconds // bucket + 1. The trailing bucket is usually still in
+        progress; its qps is computed over its elapsed portion only.
+        """
+        import calendar
+        import time
+        from datetime import datetime, timedelta, timezone
+
+        seconds = max(60, min(int(seconds or 300), 86400))
+        bucket = self._WINDOW_BUCKET_MAP.get(seconds, max(1, seconds // 30))
+
+        fmt = "%Y-%m-%d %H:%M:%S"
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        start_dt = now - timedelta(seconds=seconds)
+        start, end = start_dt.strftime(fmt), now.strftime(fmt)
+
+        # Current window vs previous window (exclusive right bound: no overlap)
+        cur = self.log_repo.summarize_window(start, end)
+        prev = self.log_repo.summarize_window(
+            (start_dt - timedelta(seconds=seconds)).strftime(fmt), start, end_exclusive=True
+        )
+
+        total = cur["total"] or 0
+        success = cur["success"] or 0
+        avg_latency = cur["avg_latency_ms"]
+        success_rate = round(success / total * 100, 1) if total else None
+
+        prev_total = prev["total"] or 0
+        prev_rate = round((prev["success"] or 0) / prev_total * 100, 1) if prev_total else None
+        prev_avg = prev["avg_latency_ms"]
+
+        def pct_delta(cur_v, prev_v):
+            if cur_v is None or not prev_v:
+                return None
+            return round((cur_v - prev_v) / prev_v * 100, 1)
+
+        delta = {
+            "total_pct": pct_delta(total, prev_total),
+            "success_rate_pp": (
+                round(success_rate - prev_rate, 1)
+                if success_rate is not None and prev_rate is not None else None
+            ),
+            "avg_latency_pct": pct_delta(avg_latency, prev_avg),
+        }
+
+        # Bucketed series: SQL returns only non-empty epoch-aligned buckets;
+        # fill the full grid so the chart always renders a continuous axis.
+        start_epoch = calendar.timegm(start_dt.timetuple())
+        end_epoch = calendar.timegm(now.timetuple())
+        first_epoch = (start_epoch // bucket) * bucket
+        n_buckets = (end_epoch // bucket - start_epoch // bucket) + 1
+
+        series = []
+        for i in range(n_buckets):
+            b_epoch = first_epoch + i * bucket
+            series.append({
+                "t": datetime.fromtimestamp(b_epoch, tz=timezone.utc).strftime(fmt),
+                "_epoch": b_epoch,
+                "total": 0,
+                "success": 0,
+                "avg_latency_ms": None,
+            })
+        by_epoch = {cell["_epoch"]: cell for cell in series}
+        for row in self.log_repo.aggregate_window(start, end, bucket):
+            cell = by_epoch.get(calendar.timegm(time.strptime(row["bucket_start"], fmt)))
+            if cell is not None:
+                cell["total"] = row["total"] or 0
+                cell["success"] = row["success"] or 0
+                cell["avg_latency_ms"] = row["avg_latency_ms"]
+
+        for cell in series:
+            b_total, b_success = cell.pop("total"), cell.pop("success")
+            b_epoch = cell.pop("_epoch")
+            # Trailing bucket may be partial: rate over the elapsed portion.
+            elapsed = max(1, min(bucket, end_epoch - b_epoch))
+            cell["total"] = b_total
+            cell["success"] = b_success
+            cell["qps"] = round(b_total / elapsed, 1)
+            cell["success_rate"] = round(b_success / b_total * 100, 1) if b_total else None
+
+        # Status-code breakdown: NULL codes already count as failed, skip them here.
+        status_codes = {}
+        for row in self.log_repo.status_code_breakdown(start, end):
+            if row["status_code"] is not None:
+                status_codes[str(row["status_code"])] = row["count"]
+
+        # Per-model call counts (keyed by actual model id to match /model-quota).
+        models = []
+        for row in self.log_repo.per_model_stats(start, end):
+            m_total = row["total"] or 0
+            m_success = row["success"] or 0
+            models.append({
+                "model": row["model"],
+                "total": m_total,
+                "success": m_success,
+                "success_rate": round(m_success / m_total * 100, 1) if m_total else None,
+            })
+
+        return {
+            "window_seconds": seconds,
+            "bucket_seconds": bucket,
+            "start": start,
+            "end": end,
+            "kpi": {
+                "total": total,
+                "success": success,
+                "failed": total - success,
+                "success_rate": success_rate,
+                "qps": round(total / seconds, 1),
+                "avg_latency_ms": round(avg_latency) if avg_latency is not None else None,
+                "delta": delta,
+            },
+            "prev": {
+                "total": prev_total,
+                "success_rate": prev_rate,
+                "qps": round(prev_total / seconds, 1),
+                "avg_latency_ms": round(prev_avg) if prev_avg is not None else None,
+            },
+            "series": series,
+            "status_codes": status_codes,
+            "models": models,
+        }

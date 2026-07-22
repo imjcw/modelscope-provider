@@ -114,3 +114,78 @@ class LogRepository:
                 "SELECT COUNT(*) FROM request_logs WHERE date(timestamp) = date('now')"
             )
             return cursor.fetchone()[0]
+
+    # ── 窗口聚合（仪表盘实时面板）──
+    # 时间边界统一为 UTC "YYYY-MM-DD HH:MM:SS" 字符串（与 timestamp 列的
+    # DEFAULT CURRENT_TIMESTAMP 格式一致，可走 idx_logs_time 索引）。
+    # 成功定义：status_code IS NOT NULL AND status_code < 400。
+
+    def aggregate_window(self, start: str, end: str, bucket_seconds: int) -> List[dict]:
+        """按桶聚合 [start, end] 内的请求。
+
+        返回 [{bucket_start, total, success, avg_latency_ms}]，仅包含有数据的桶，
+        空桶由 service 层补齐。
+        """
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                """SELECT strftime('%Y-%m-%d %H:%M:%S',
+                                   (strftime('%s', timestamp) / ?) * ?, 'unixepoch') AS bucket_start,
+                          COUNT(*) AS total,
+                          COALESCE(SUM(CASE WHEN status_code IS NOT NULL AND status_code < 400
+                                            THEN 1 ELSE 0 END), 0) AS success,
+                          AVG(latency_ms) AS avg_latency_ms
+                   FROM request_logs
+                   WHERE timestamp >= ? AND timestamp <= ?
+                   GROUP BY bucket_start ORDER BY bucket_start""",
+                (bucket_seconds, bucket_seconds, start, end),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def summarize_window(self, start: str, end: str, end_exclusive: bool = False) -> dict:
+        """窗口汇总。返回 {total, success, avg_latency_ms}；无数据时 avg 为 None。
+
+        end_exclusive=True 时右边界用 timestamp < end（用于相邻窗口不重叠）。
+        """
+        end_op = "<" if end_exclusive else "<="
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                f"""SELECT COUNT(*) AS total,
+                           COALESCE(SUM(CASE WHEN status_code IS NOT NULL AND status_code < 400
+                                             THEN 1 ELSE 0 END), 0) AS success,
+                           AVG(latency_ms) AS avg_latency_ms
+                    FROM request_logs
+                    WHERE timestamp >= ? AND timestamp {end_op} ?""",
+                (start, end),
+            )
+            return dict(cursor.fetchone())
+
+    def status_code_breakdown(self, start: str, end: str) -> List[dict]:
+        """状态码分布。返回 [{status_code: int|None, count}]，按 count 降序。"""
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                """SELECT status_code, COUNT(*) AS count
+                   FROM request_logs
+                   WHERE timestamp >= ? AND timestamp <= ?
+                   GROUP BY status_code ORDER BY count DESC""",
+                (start, end),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def per_model_stats(self, start: str, end: str) -> List[dict]:
+        """按实际模型聚合调用量与成功数。
+
+        用 COALESCE(actual_model_id, model) 归组，以便与 /model-quota 返回的
+        model_name（供应商侧模型名）对齐。返回 [{model, total, success}]，按 total 降序。
+        """
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                """SELECT COALESCE(actual_model_id, model) AS model,
+                          COUNT(*) AS total,
+                          SUM(CASE WHEN status_code IS NOT NULL AND status_code < 400
+                                   THEN 1 ELSE 0 END) AS success
+                   FROM request_logs
+                   WHERE timestamp >= ? AND timestamp <= ?
+                   GROUP BY model ORDER BY total DESC""",
+                (start, end),
+            )
+            return [dict(row) for row in cursor.fetchall()]
