@@ -50,3 +50,4 @@ htmlcov/
 web/node_modules/
 web/dist/
 .worktrees/
+.zcode/
