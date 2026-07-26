@@ -466,7 +466,7 @@ async def _try_candidate(
     )
     first_response = datetime.now(timezone.utc).isoformat()
 
-    # Check for rate limit errors
+    # Check for rate limit errors — allow fallback to next candidate
     if response.status_code == 429:
         if strategy:
             strategy.record_request(
@@ -483,6 +483,22 @@ async def _try_candidate(
                     "type": "rate_limit_exceeded",
                     "param": None,
                     "code": "rate_limit_exceeded"
+                }
+            }
+        )
+
+    # Check for other HTTP errors — also allow fallback
+    # 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 500+ (Server Error)
+    # are all candidates for fallback to next supplier
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail={
+                "error": {
+                    "message": f"供应商 {selected_account.name or selected_account.account_id} 返回错误：{response.status_code}",
+                    "type": "upstream_error",
+                    "param": None,
+                    "code": f"upstream_{response.status_code}"
                 }
             }
         )
