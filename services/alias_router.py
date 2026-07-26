@@ -24,34 +24,54 @@ class AliasRouter:
     3. 无绑定时返回 None（调用方 fallback 到旧逻辑）
     """
 
-    def __init__(self, mapping_model_repo, account_repo, config_repo):
+    def __init__(self, mapping_model_repo, account_repo, config_repo=None, config_cache=None):
         self.mapping_model_repo = mapping_model_repo
         self.account_repo = account_repo
         self.config_repo = config_repo
+        self.config_cache = config_cache
         # round_robin 计数器按 alias 隔离
         self._rr_counters = {}
         # least_conn 策略的每条目请求计数
         self._conn_counts = {}
 
     def _get_strategy(self) -> str:
-        """从 system_config 实时读取策略，默认 round_robin。"""
-        val = self.config_repo.get("load_balancer_strategy")
-        if val in ("round_robin", "least_conn", "random"):
-            return val
+        """从缓存（优先）或 DB 读取策略，默认 round_robin。"""
+        # 优先使用内存缓存（避免每次请求查 DB）
+        if self.config_cache is not None:
+            val = self.config_cache.get("load_balancer_strategy")
+            if val in ("round_robin", "least_conn", "random"):
+                return val
+            return "round_robin"
+        # 保底：从 DB 读取
+        if self.config_repo is not None:
+            val = self.config_repo.get("load_balancer_strategy")
+            if val in ("round_robin", "least_conn", "random"):
+                return val
         return "round_robin"
 
     def _build_candidates(self, alias: str) -> List[tuple]:
-        """解析 alias 的所有绑定条目，返回 (account_dict, model_name) 候选列表。"""
+        """解析 alias 的所有绑定条目，返回 (account_dict, model_name) 候选列表。
+
+        自动过滤失效绑定（is_valid=0），即该供应商的 supplier_models 中
+        已不存在对应模型名的行。
+        """
         entries = self.mapping_model_repo.find_by_alias(alias)
         if not entries:
             return []
 
+        # 过滤失效绑定
+        valid_entries = [e for e in entries if e.get("is_valid", 1) == 1]
+        if not valid_entries:
+            logger.warning("Alias '%s' has %d bindings but none are valid",
+                           alias, len(entries))
+            return []
+
         # 批量查询账户：收集所有唯一的 supplier_id，一次查询获取所有账户
-        supplier_ids = list({entry["supplier_id"] for entry in entries})
+        supplier_ids = list({entry["supplier_id"] for entry in valid_entries})
         accounts_by_id = self.account_repo.find_by_ids(supplier_ids)
 
         candidates = []
-        for entry in entries:
+        for entry in valid_entries:
             account_dict = accounts_by_id.get(entry["supplier_id"])
             if account_dict:
                 candidates.append((account_dict, entry["model_name"]))

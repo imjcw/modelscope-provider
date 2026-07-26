@@ -179,39 +179,18 @@ def refresh_load_balancer(request: Request):
 
 
 async def stream_response(
-    account,
-    http_client,
-    model_name: str,
-    request_body: dict,
+    response,
     _capture_headers: bool = False,
 ) -> AsyncGenerator[str, None]:
-    """Generate streaming response from ModelScope API.
+    """Generate streaming response from a pre-made upstream response.
+
+    Caller is responsible for making the HTTP request, checking the
+    status code, and only passing a successful (2xx) response here.
 
     If _capture_headers is True, the first yielded chunk carries the
     HTTP response headers as a JSON blob prefixed with "__hdrs__:" so
     the caller can extract them without breaking the SSE protocol.
     """
-    url = f"{account.base_url}/chat/completions"
-    response = await http_client.request(
-        account,
-        "POST",
-        url,
-        json=request_body
-    )
-
-    if response.status_code != 200:
-        error_body = {
-            "error": {
-                "message": f"API error: {response.status_code}",
-                "type": "server_error",
-                "code": str(response.status_code),
-            }
-        }
-        yield f"data: {json.dumps(error_body)}\n\n"
-        # 传递真实状态码供日志使用
-        yield f"data: {json.dumps({'__status_code__': response.status_code})}\n\n"
-        return
-
     # Inject headers as first chunk (consumer strips them out)
     if _capture_headers:
         hdrs = {}
@@ -252,27 +231,32 @@ async def stream_response(
 
 
 async def stream_response_with_logging(
+    response,
     account,
-    http_client,
     model_name: str,
     request_body: dict,
     actual_model_id: str,
     admin_service,
+    request_start: str,
     quota_updater=None,
     client_key_name: str = None,
     strategy=None,
 ):
-    """Streaming response wrapper that logs and updates quota after completion."""
+    """Streaming response wrapper that logs and updates quota after completion.
+
+    Caller is responsible for making the HTTP request and checking the
+    status code before calling this function. Only successful (2xx)
+    responses should be passed here.
+    """
     output_tokens = 0
     input_tokens = 0
     response_headers = {}
     raw_chunks = []
     first_response = None
-    request_start = datetime.now(timezone.utc).isoformat()
-    stream_status_code = 200  # 默认 200，由 stream_response 的 __status_code__ 标记覆盖
+    stream_status_code = 200
 
     async for chunk_data in stream_response(
-        account, http_client, model_name, request_body, _capture_headers=True
+        response, _capture_headers=True
     ):
         data_str = chunk_data.replace("data: ", "").strip()
         is_special_chunk = False
@@ -282,10 +266,7 @@ async def stream_response_with_logging(
             try:
                 dec = json.JSONDecoder()
                 obj, _ = dec.raw_decode(data_str)
-                if "__status_code__" in obj:
-                    stream_status_code = obj["__status_code__"]
-                    is_special_chunk = True
-                elif "__hdrs__" in obj:
+                if "__hdrs__" in obj:
                     response_headers = obj["__hdrs__"]
                     is_special_chunk = True
             except Exception:
@@ -355,12 +336,12 @@ async def stream_response_with_logging(
         try:
             if input_tokens > 0 or output_tokens > 0:
                 quota_updater.update_quota_from_usage(
-                    account, input_tokens, output_tokens, model_name
+                    account, input_tokens, output_tokens, actual_model_id
                 )
             # Also update quota remaining/limit from captured response headers
             if response_headers:
                 quota_updater.update_quota_after_request(
-                    account, response_headers, model_name
+                    account, response_headers, actual_model_id
                 )
         except Exception as e:
             logger.warning(f"Failed to update streaming quota: {e}")
@@ -381,6 +362,7 @@ async def _try_candidate(
     # Resolve per-provider rate-limit strategy
     strategies = services.get("rate_limit_strategies", {})
     strategy = strategies.get(selected_account.provider_type)
+    circuit_breaker = services.get("circuit_breaker")
 
     # Pre-request rate-limit check (SenseTime: atomic check-and-increment)
     if strategy and not strategy.check_rate_limit(selected_account.account_id, request.model):
@@ -441,9 +423,89 @@ async def _try_candidate(
     # Handle streaming request
     if request.stream:
         request_body["stream"] = True
+        # ModelScope/DashScope (and other OpenAI-compatible upstreams) only
+        # include `usage` in the final SSE chunk when `include_usage` is set.
+        # Without it the streaming token counts are always 0, which breaks
+        # token accounting for virtual (alias) models backed by ModelScope.
+        existing = request_body.get("stream_options")
+        if isinstance(existing, dict):
+            existing = dict(existing)
+            existing["include_usage"] = True
+            request_body["stream_options"] = existing
+        else:
+            request_body["stream_options"] = {"include_usage": True}
+        request_start = datetime.now(timezone.utc).isoformat()
+        url = f"{selected_account.base_url}/chat/completions"
+        response = await http_client.request(
+            selected_account,
+            "POST",
+            url,
+            json=request_body
+        )
+        first_response = datetime.now(timezone.utc).isoformat()
+
+        # Check for rate limit errors — allow fallback to next candidate
+        if response.status_code == 429:
+            if strategy:
+                strategy.record_request(
+                    selected_account.account_id,
+                    actual_model_id,
+                    dict(response.headers),
+                    response.status_code,
+                )
+            if circuit_breaker:
+                circuit_breaker.record_failure(
+                    selected_account.account_id,
+                    actual_model_id or request.model,
+                    response.status_code,
+                    strategy,
+                )
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": {
+                        "message": f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
+                        "type": "rate_limit_exceeded",
+                        "param": None,
+                        "code": "rate_limit_exceeded"
+                    }
+                }
+            )
+
+        # Check for other HTTP errors — also allow fallback
+        # 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 500+ (Server Error)
+        # are all candidates for fallback to next supplier
+        if response.status_code >= 400:
+            if circuit_breaker:
+                circuit_breaker.record_failure(
+                    selected_account.account_id,
+                    actual_model_id or request.model,
+                    response.status_code,
+                    strategy,
+                )
+            raise HTTPException(
+                status_code=response.status_code,
+                detail={
+                    "error": {
+                        "message": f"供应商 {selected_account.name or selected_account.account_id} 返回错误：{response.status_code}",
+                        "type": "upstream_error",
+                        "param": None,
+                        "code": f"upstream_{response.status_code}"
+                    }
+                }
+            )
+
+        # Request successful — record success and return streaming response
+        if circuit_breaker:
+            circuit_breaker.record_success(
+                selected_account.account_id,
+                actual_model_id or request.model,
+            )
         return StreamingResponse(
             stream_response_with_logging(
-                selected_account, http_client, request.model, request_body, actual_model_id, admin_service,
+                response,
+                selected_account, request.model, request_body, actual_model_id, admin_service,
+                request_start,
                 quota_updater=quota_updater,
                 client_key_name=client_key_name,
                 strategy=strategy,
@@ -475,6 +537,13 @@ async def _try_candidate(
                 dict(response.headers),
                 response.status_code,
             )
+        if circuit_breaker:
+            circuit_breaker.record_failure(
+                selected_account.account_id,
+                actual_model_id or request.model,
+                response.status_code,
+                strategy,
+            )
         raise HTTPException(
             status_code=429,
             detail={
@@ -491,6 +560,13 @@ async def _try_candidate(
     # 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 500+ (Server Error)
     # are all candidates for fallback to next supplier
     if response.status_code >= 400:
+        if circuit_breaker:
+            circuit_breaker.record_failure(
+                selected_account.account_id,
+                actual_model_id or request.model,
+                response.status_code,
+                strategy,
+            )
         raise HTTPException(
             status_code=response.status_code,
             detail={
@@ -548,7 +624,14 @@ async def _try_candidate(
             }
         )
 
-    # Update quota via provider strategy
+    # Record success in circuit breaker
+    if circuit_breaker:
+        circuit_breaker.record_success(
+            selected_account.account_id,
+            actual_model_id or request.model,
+        )
+
+# Update quota via provider strategy
     try:
         if strategy:
             strategy.record_request(
@@ -557,6 +640,16 @@ async def _try_candidate(
                 dict(response.headers),
                 response.status_code,
             )
+            # Record token usage for non-streaming responses
+            ms_usage = ms_response.get("usage", {}) or {}
+            inp = ms_usage.get("prompt_tokens", 0) or 0
+            out = ms_usage.get("completion_tokens", 0) or 0
+            if inp > 0 or out > 0:
+                strategy.record_usage(
+                    selected_account.account_id,
+                    actual_model_id,
+                    inp, out,
+                )
     except Exception as qe:
         logger.warning(f"Failed to update quota: {qe}")
 
@@ -638,9 +731,33 @@ async def chat_completions(
 
         if candidates:
             last_error = None
+            circuit_breaker = services.get("circuit_breaker")
             for candidate_idx, candidate in enumerate(candidates):
                 selected_account = candidate.account
                 actual_model_id = candidate.model_name
+
+                # Check circuit breaker before trying — skip frozen candidates
+                if circuit_breaker and not circuit_breaker.check(
+                    selected_account.account_id,
+                    actual_model_id,
+                ):
+                    logger.info(
+                        f"Skipping frozen candidate {candidate_idx + 1}/{len(candidates)}: "
+                        f"account {selected_account.account_id} model {actual_model_id}"
+                    )
+                    last_error = last_error or HTTPException(
+                        status_code=503,
+                        detail={
+                            "error": {
+                                "message": f"供应商 {selected_account.name or selected_account.account_id} 的 {actual_model_id} 模型已被冻结",
+                                "type": "circuit_open",
+                                "param": None,
+                                "code": "circuit_open"
+                            }
+                        }
+                    )
+                    continue
+
                 logger.info(
                     f"AliasRouter candidate {candidate_idx + 1}/{len(candidates)}: "
                     f"account {selected_account.account_id} model {actual_model_id}"

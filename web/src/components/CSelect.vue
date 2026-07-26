@@ -125,18 +125,13 @@ function positionPopover() {
             :key="i"
             type="button"
             @click="select(option)"
-            class="w-full text-left px-3 py-2 text-sm transition-colors duration-100 flex items-center gap-2"
+            class="w-full text-left px-3 py-2 text-sm transition-colors duration-100"
             :class="
               option.value === modelValue
                 ? 'bg-ls-accent/10 text-ls-accent'
                 : 'text-ls-text hover:bg-ls-elevated'
             "
           >
-            <span v-if="option.value === modelValue" class="w-4 h-4 flex items-center justify-center flex-shrink-0">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12"></polyline>
-              </svg>
-            </span>
             <span class="truncate">{{ option.label }}</span>
           </button>
         </div>

@@ -1,3 +1,11 @@
+"""Test streaming error handling.
+
+Before the fix, streaming requests that got a non-200 from the upstream
+would yield an SSE error chunk to the client. Now the HTTP request is
+made BEFORE returning StreamingResponse, so errors are detected early
+and returned as HTTP error responses — enabling fallback to the next
+candidate in the alias router path.
+"""
 import json
 import os
 import uuid
@@ -41,14 +49,18 @@ def client():
         os.environ.pop("MODELSCOPE_ACCOUNTS_JSON", None)
 
 
-def test_streaming_error_response_format(client):
-    """When upstream returns non-200, the streaming error chunk should be
-    OpenAI-compatible with error as an object (not a string)."""
+def test_streaming_error_returns_http_error(client):
+    """When upstream returns non-200 in streaming mode, the request should
+    return an HTTP error response (not SSE chunks) because the HTTP request
+    is now made before StreamingResponse is returned, enabling fallback to
+    the next candidate in the alias router path.
+    """
 
     mock_response = AsyncMock()
     mock_response.status_code = 403
     mock_response.text = ""
     mock_response.aiter_lines = AsyncMock(return_value=iter([]))
+    mock_response.headers = {}
 
     app = client.app
     http_client = app.state.services["http_client"]
@@ -69,34 +81,32 @@ def test_streaming_error_response_format(client):
             },
         )
 
-    # Collect SSE chunks from the response
-    chunks = []
-    for line in resp.iter_lines():
-        if line.startswith("data:"):
-            data_str = line[5:].strip()
-            if data_str and data_str != "[DONE]":
-                chunks.append(json.loads(data_str))
-
-    # The error chunk should have error as an object, not a string
-    error_chunks = [c for c in chunks if "error" in c]
-    assert len(error_chunks) >= 1, "Expected at least one error chunk"
-    error_chunk = error_chunks[0]
-    error_obj = error_chunk["error"]
+    # Should return HTTP error (not SSE streaming)
+    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    # FastAPI wraps HTTPException detail in a "detail" key
+    detail = body.get("detail", body)
+    assert "error" in detail, f"Expected 'error' in response, got: {body}"
+    error_obj = detail["error"]
     assert isinstance(error_obj, dict), f"Expected error to be a dict, got {type(error_obj)}"
     assert "message" in error_obj
     assert "code" in error_obj
-    assert error_obj["code"] == "403"
-    assert error_obj["type"] == "server_error"
+    assert error_obj["code"] == "upstream_403"
+    assert error_obj["type"] == "upstream_error"
 
 
-def test_streaming_error_logs_real_status_code(client):
-    """When upstream returns 403 in streaming mode, the log entry should
-    record status_code=403 (not 200) and input/output tokens as 0."""
+def test_streaming_error_with_single_candidate_no_log(client):
+    """When upstream returns 403 in streaming mode with a single candidate
+    (no alias binding), the error is raised before streaming starts, so no
+    streaming log entry should be created. The error is returned as an HTTP
+    error response.
+    """
 
     mock_response = AsyncMock()
     mock_response.status_code = 403
     mock_response.text = ""
     mock_response.aiter_lines = AsyncMock(return_value=iter([]))
+    mock_response.headers = {}
 
     app = client.app
     http_client = app.state.services["http_client"]
@@ -110,7 +120,7 @@ def test_streaming_error_logs_real_status_code(client):
         patch.object(alias_resolver, "resolve_alias", new_callable=AsyncMock) as mock_resolve,
     ):
         mock_req.return_value = mock_response
-        mock_resolve.return_value = "ap-hy3"  # identity resolution, no network call
+        mock_resolve.return_value = "ap-hy3"
         resp = client.post(
             "/api/v1/chat/completions",
             json={
@@ -119,21 +129,18 @@ def test_streaming_error_logs_real_status_code(client):
                 "stream": True,
             },
         )
-        # Consume response to trigger logging
-        for _ in resp.iter_lines():
-            pass
+
+    # Should return HTTP error
+    assert resp.status_code == 403
 
     logs_after, _ = log_repo.find_all()
-    assert len(logs_after) > len(logs_before), "Expected a new log entry"
-
-    # Find the new streaming log
     new_streaming = [
         r for r in logs_after
         if r["id"] not in before_ids and r.get("is_stream")
     ]
-    assert len(new_streaming) >= 1, "Expected a streaming log entry"
-    latest = new_streaming[0]
-
-    assert latest["status_code"] == 403, f"Expected status_code=403, got {latest['status_code']}"
-    assert latest["input_tokens"] == 0, f"Expected 0 input tokens on error, got {latest['input_tokens']}"
-    assert latest["output_tokens"] == 0, f"Expected 0 output tokens on error, got {latest['output_tokens']}"
+    # No streaming log entry should be created because the error was detected
+    # before streaming started (the HTTP request is now made before
+    # StreamingResponse is returned)
+    assert len(new_streaming) == 0, (
+        f"Expected no streaming log entries, got {len(new_streaming)}"
+    )

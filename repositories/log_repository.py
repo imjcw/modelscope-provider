@@ -1,8 +1,10 @@
 import json
 import logging
+from datetime import datetime
 from typing import List, Optional
 
 from core.database import DatabaseManager
+from core.timezone import TZ
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +14,43 @@ class LogRepository:
 
     def __init__(self, db: DatabaseManager):
         self.db = db
+
+    @staticmethod
+    def _floor_minute(ts: str) -> str:
+        """Floor a timestamp string to minute precision (bucket alignment).
+
+        ``bucket`` in request_stats_minute is always ``YYYY-MM-DD HH:MM:00``.
+        Flooring start/end ensures ``bucket >= start`` comparisons include the
+        correct minute bucket even when callers pass sub-minute timestamps.
+        """
+        return ts[:16] + ":00" if len(ts) >= 16 else ts
+
+    @staticmethod
+    def _normalize_bucket(ts: str) -> str:
+        """Normalise an arbitrary timestamp into the stats bucket key.
+
+        Rows in ``request_stats_minute`` are keyed by minute buckets formatted
+        as ``YYYY-MM-DD HH:MM:00`` in the project timezone (Asia/Shanghai).
+        Incoming timestamps may be space- or ``T``-separated, naive or
+        timezone-aware (UTC ``Z`` / ``+00:00`` or ``+08:00``). Always convert
+        to Shanghai-local time, floor to the minute and use a space separator
+        so the bucket matches what the query side (``get_window_stats``) builds.
+        """
+        raw = (ts or "").strip()
+        dt = None
+        try:
+            dt = datetime.fromisoformat(raw)
+        except ValueError:
+            try:
+                dt = datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                dt = None
+        if dt is None:
+            dt = datetime.now(TZ)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=TZ)
+        dt = dt.astimezone(TZ).replace(second=0, microsecond=0)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
 
     def create(self, request_id: str, model: str, actual_model_id: str = None,
                account_id: str = None, account_name: str = None,
@@ -115,77 +154,427 @@ class LogRepository:
             )
             return cursor.fetchone()[0]
 
-    # ── 窗口聚合（仪表盘实时面板）──
-    # 时间边界统一为 UTC "YYYY-MM-DD HH:MM:SS" 字符串（与 timestamp 列的
-    # DEFAULT CURRENT_TIMESTAMP 格式一致，可走 idx_logs_time 索引）。
-    # 成功定义：status_code IS NOT NULL AND status_code < 400。
+    def delete_older_than(self, cutoff: str) -> int:
+        """Delete log entries with timestamp older than the cutoff.
 
-    def aggregate_window(self, start: str, end: str, bucket_seconds: int) -> List[dict]:
-        """按桶聚合 [start, end] 内的请求。
+        Args:
+            cutoff: ISO-formatted timestamp string ("YYYY-MM-DD HH:MM:SS").
 
-        返回 [{bucket_start, total, success, avg_latency_ms}]，仅包含有数据的桶，
-        空桶由 service 层补齐。
+        Returns:
+            Number of deleted rows.
         """
         with self.db.get_connection() as conn:
-            cursor = conn.execute(
-                """SELECT strftime('%Y-%m-%d %H:%M:%S',
-                                   (strftime('%s', timestamp) / ?) * ?, 'unixepoch') AS bucket_start,
-                          COUNT(*) AS total,
-                          COALESCE(SUM(CASE WHEN status_code IS NOT NULL AND status_code < 400
-                                            THEN 1 ELSE 0 END), 0) AS success,
-                          AVG(latency_ms) AS avg_latency_ms
-                   FROM request_logs
-                   WHERE timestamp >= ? AND timestamp <= ?
-                   GROUP BY bucket_start ORDER BY bucket_start""",
-                (bucket_seconds, bucket_seconds, start, end),
+            conn.execute(
+                "DELETE FROM request_logs WHERE timestamp < ?",
+                (cutoff,),
             )
-            return [dict(row) for row in cursor.fetchall()]
+            result = conn.execute("SELECT changes()").fetchone()
+            return result[0] if result else 0
 
-    def summarize_window(self, start: str, end: str, end_exclusive: bool = False) -> dict:
-        """窗口汇总。返回 {total, success, avg_latency_ms}；无数据时 avg 为 None。
+    # ── 分钟级统计聚合 ──────────────────────────────────────────────────
 
-        end_exclusive=True 时右边界用 timestamp < end（用于相邻窗口不重叠）。
+    def upsert_stats(
+        self,
+        timestamp: str,
+        model: str,
+        account_id: str,
+        virtual_model: str = "",
+        client_key_name: str = "",
+        status_code: int = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        latency_ms: int = None,
+        cached_tokens: int = 0,
+    ) -> None:
+        """Upsert a minute-level stats row for the given timestamp.
+
+        Called once per request alongside ``create()`` to keep aggregated
+        statistics independent from the raw log table.
         """
-        end_op = "<" if end_exclusive else "<="
-        with self.db.get_connection() as conn:
-            cursor = conn.execute(
-                f"""SELECT COUNT(*) AS total,
-                           COALESCE(SUM(CASE WHEN status_code IS NOT NULL AND status_code < 400
-                                             THEN 1 ELSE 0 END), 0) AS success,
-                           AVG(latency_ms) AS avg_latency_ms
-                    FROM request_logs
-                    WHERE timestamp >= ? AND timestamp {end_op} ?""",
-                (start, end),
-            )
-            return dict(cursor.fetchone())
+        # Normalise to Shanghai-local, minute-floored, space-separated bucket so
+        # it matches the query side (get_window_stats).
+        bucket = LogRepository._normalize_bucket(timestamp)
+        success = 1 if status_code is not None and status_code < 400 else 0
+        lat_val = latency_ms if latency_ms is not None else 0
+        lat_count = 1 if latency_ms is not None else 0
 
-    def status_code_breakdown(self, start: str, end: str) -> List[dict]:
-        """状态码分布。返回 [{status_code: int|None, count}]，按 count 降序。"""
         with self.db.get_connection() as conn:
-            cursor = conn.execute(
+            conn.execute(
+                """INSERT INTO request_stats_minute
+                   (bucket, model, virtual_model, account_id, client_key_name,
+                    requests, success, input_tokens, output_tokens,
+                    latency_sum, latency_count, cached_tokens)
+                   VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(bucket, model, account_id, client_key_name)
+                   DO UPDATE SET
+                       requests = requests + 1,
+                       success = success + excluded.success,
+                       input_tokens = input_tokens + excluded.input_tokens,
+                       output_tokens = output_tokens + excluded.output_tokens,
+                       latency_sum = latency_sum + excluded.latency_sum,
+                       latency_count = latency_count + excluded.latency_count,
+                       cached_tokens = cached_tokens + excluded.cached_tokens,
+                       virtual_model = excluded.virtual_model""",
+                (bucket, model, virtual_model, account_id, client_key_name,
+                 success, input_tokens, output_tokens,
+                 lat_val, lat_count, cached_tokens),
+            )
+
+    def query_stats_summarize(self, start: str, end: str) -> dict:
+        """Aggregated stats over a time range (replaces ``summarize_window``).
+
+        Returns ``{total, success, total_tokens, avg_latency_ms}``.
+        """
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(requests), 0) AS total,
+                          COALESCE(SUM(success), 0) AS success,
+                          COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,
+                          CASE WHEN SUM(latency_count) > 0
+                               THEN CAST(SUM(latency_sum) AS REAL) / SUM(latency_count)
+                               ELSE NULL END AS avg_latency_ms
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?""",
+                (s, e),
+            ).fetchone()
+            return dict(row)
+
+    def query_stats_aggregate(
+        self, start: str, end: str, bucket_seconds: int,
+    ) -> List[dict]:
+        """Bucketed stats over a time range (replaces ``aggregate_window``).
+
+        Returns ``[{bucket_start, total, success, total_tokens, avg_latency_ms}]``.
+        """
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT strftime('%Y-%m-%d %H:%M:%S',"
+                "              (strftime('%s', bucket) / ?) * ?, 'unixepoch') AS bucket_start,"
+                "              COALESCE(SUM(requests), 0) AS total,"
+                "              COALESCE(SUM(success), 0) AS success,"
+                "              COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,"
+                "              CASE WHEN SUM(latency_count) > 0"
+                "                   THEN CAST(SUM(latency_sum) AS REAL) / SUM(latency_count)"
+                "                   ELSE NULL END AS avg_latency_ms"
+                " FROM request_stats_minute"
+                " WHERE bucket >= ? AND bucket <= ?"
+                " GROUP BY bucket_start ORDER BY bucket_start",
+                (bucket_seconds, bucket_seconds, s, e),
+            )
+            return [dict(r) for r in rows.fetchall()]
+
+    def query_stats_per_model(self, start: str, end: str) -> List[dict]:
+        """Per-model stats over a time range (replaces ``per_model_stats``).
+
+        Grouped by ``(model, account_id)`` so that the same model name bound to
+        different suppliers is reported separately, ordered by total desc.
+
+        Returns ``[{model, account_id, total, success}]``.
+        """
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT model,
+                          account_id,
+                          COALESCE(SUM(requests), 0) AS total,
+                          COALESCE(SUM(success), 0) AS success
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?
+                   GROUP BY model, account_id ORDER BY total DESC""",
+                (s, e),
+            )
+            return [dict(r) for r in rows.fetchall()]
+
+    def query_stats_status_breakdown(self, start: str, end: str) -> List[dict]:
+        """Status code breakdown over a time range (replaces ``status_code_breakdown``).
+
+        Returns ``[{status_code, count}]`` ordered by count desc.
+
+        NOTE: This still reads from ``request_logs`` because the stats table
+        doesn't track per-status-code counts. Only logs within the retention
+        window are available.
+        """
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
                 """SELECT status_code, COUNT(*) AS count
                    FROM request_logs
                    WHERE timestamp >= ? AND timestamp <= ?
                    GROUP BY status_code ORDER BY count DESC""",
                 (start, end),
             )
-            return [dict(row) for row in cursor.fetchall()]
+            return [dict(r) for r in rows.fetchall()]
 
-    def per_model_stats(self, start: str, end: str) -> List[dict]:
-        """按实际模型聚合调用量与成功数。
+    def query_stats_by_models(
+        self, start: str, models: List[str],
+    ) -> List[dict]:
+        """Aggregated stats for one or more models over a time range.
 
-        用 COALESCE(actual_model_id, model) 归组，以便与 /model-quota 返回的
-        model_name（供应商侧模型名）对齐。返回 [{model, total, success}]，按 total 降序。
+        Returns ``[{model, requests, success, input_tokens, output_tokens,
+                     cached_tokens}]`` ordered by requests desc.
         """
+        if not models:
+            return []
+        placeholders = ",".join("?" for _ in models)
+        s = self._floor_minute(start)
         with self.db.get_connection() as conn:
-            cursor = conn.execute(
-                """SELECT COALESCE(actual_model_id, model) AS model,
-                          COUNT(*) AS total,
-                          SUM(CASE WHEN status_code IS NOT NULL AND status_code < 400
-                                   THEN 1 ELSE 0 END) AS success
-                   FROM request_logs
-                   WHERE timestamp >= ? AND timestamp <= ?
-                   GROUP BY model ORDER BY total DESC""",
-                (start, end),
+            rows = conn.execute(
+                f"""SELECT model,
+                          COALESCE(SUM(requests), 0) AS requests,
+                          COALESCE(SUM(success), 0) AS success,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND model IN ({placeholders})
+                   GROUP BY model ORDER BY requests DESC""",
+                (s, *models),
             )
-            return [dict(row) for row in cursor.fetchall()]
+            return [dict(r) for r in rows.fetchall()]
+
+    def query_stats_by_virtual_model(
+        self, start: str, virtual_model: str,
+    ) -> List[dict]:
+        """Aggregated stats for a virtual model over a time range.
+
+        Grouped by actual model name AND account (supplier), so that different
+        suppliers sharing the same model name are reported separately instead
+        of being merged into one row.
+
+        Returns ``[{model, account_id, requests, success, input_tokens,
+                     output_tokens, cached_tokens}]`` ordered by requests desc.
+        """
+        s = self._floor_minute(start)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT model,
+                          account_id,
+                          COALESCE(SUM(requests), 0) AS requests,
+                          COALESCE(SUM(success), 0) AS success,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND virtual_model = ?
+                   GROUP BY model, account_id ORDER BY requests DESC""",
+                (s, virtual_model),
+            )
+            return [dict(r) for r in rows.fetchall()]
+
+    # ── 基于 request_stats_minute 的只读查询 ──────────────────────────
+    # 这些方法从分钟级聚合表读取，不受 request_logs 留存期限影响。
+
+    def query_stats_client_key(self, today_start: str, key: str) -> dict:
+        """汇总一个客户端 key 今日的用量。
+
+        Returns ``{requests, input_tokens, output_tokens, cached_tokens}``.
+        """
+        s = self._floor_minute(today_start)
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(requests), 0) AS requests,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND client_key_name = ?""",
+                (s, key),
+            ).fetchone()
+            return dict(row)
+
+    def query_stats_key_summary(
+        self, start: str, key: str,
+    ) -> dict:
+        """单 key 多日总体聚合。
+
+        Returns ``{total, success, input_tokens, output_tokens, cached_tokens,
+                   latency_sum, latency_count}``.
+        """
+        s = self._floor_minute(start)
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(requests), 0) AS total,
+                          COALESCE(SUM(success), 0) AS success,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                          COALESCE(SUM(latency_sum), 0) AS latency_sum,
+                          COALESCE(SUM(latency_count), 0) AS latency_count
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND client_key_name = ?""",
+                (s, key),
+            ).fetchone()
+            return dict(row)
+
+    def query_stats_key_per_model(
+        self, start: str, key: str,
+    ) -> List[dict]:
+        """单 key 分模型聚合。
+
+        Returns ``[{model, requests, success, input_tokens, output_tokens,
+                     cached_tokens}]`` ordered by requests desc.
+        """
+        s = self._floor_minute(start)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT model,
+                          COALESCE(SUM(requests), 0) AS requests,
+                          COALESCE(SUM(success), 0) AS success,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND client_key_name = ?
+                   GROUP BY model ORDER BY requests DESC""",
+                (s, key),
+            )
+            return [dict(r) for r in rows.fetchall()]
+
+    def query_stats_global(self, start: str, end: str) -> dict:
+        """全局 totals 聚合。
+
+        Returns ``{total, input_tokens, output_tokens, cached_tokens}``.
+        """
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(requests), 0) AS total,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?""",
+                (s, e),
+            ).fetchone()
+            return dict(row)
+
+    def query_stats_heatmap(self, start: str, end: str) -> List[dict]:
+        """热力图数据：按 (weekday, hour) 计数。
+
+        weekday 为 Python 风格 0=Monday, 6=Sunday（与 get_stats 的
+        dict 键 ``"weekday,hour"`` 保持一致）。
+
+        Returns ``[{weekday, hour, count}]``.
+        """
+        # SQLite strftime('%w', ...) 返回 0=Sun..6=Sat。转换为 0=Mon..6=Sun：
+        # ((%w + 6) % 7)
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT ((CAST(strftime('%w', bucket) AS INTEGER) + 6) % 7) AS weekday,
+                          CAST(strftime('%H', bucket) AS INTEGER) AS hour,
+                          SUM(requests) AS count
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?
+                   GROUP BY weekday, hour
+                   ORDER BY weekday, hour""",
+                (s, e),
+            )
+            return [dict(r) for r in rows.fetchall()]
+
+    def query_stats_daily_trend(self, start: str, end: str) -> List[dict]:
+        """每日趋势。
+
+        Returns ``[{date, input_tokens, output_tokens, cached_tokens}]``
+        ordered by date asc. ``total = input + output`` computed in service.
+        """
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT date(bucket) AS date,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?
+                   GROUP BY date(bucket) ORDER BY date(bucket)""",
+                (s, e),
+            )
+            return [dict(r) for r in rows.fetchall()]
+
+    def query_stats_model_usage(self, start: str, end: str) -> List[dict]:
+        """分模型 token 用量。
+
+        Returns ``[{model, tokens}]`` ordered by tokens desc.
+        ``tokens = input_tokens + output_tokens``.
+        """
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT model,
+                          COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ? AND model IS NOT NULL
+                   GROUP BY model ORDER BY tokens DESC""",
+                (s, e),
+            )
+            return [dict(r) for r in rows.fetchall()]
+
+    def query_stats_daily_model_usage(
+        self, start: str, end: str,
+    ) -> List[dict]:
+        """每日每个模型的 token 用量。
+
+        Returns ``[{date, model, tokens}]`` ordered by date asc, tokens desc.
+        ``tokens = input_tokens + output_tokens``.
+        """
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT date(bucket) AS date,
+                          model,
+                          COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ? AND model IS NOT NULL
+                   GROUP BY date(bucket), model
+                   ORDER BY date(bucket), tokens DESC""",
+                (s, e),
+            )
+            return [dict(r) for r in rows.fetchall()]
+
+    def query_stats_supplier_daily(
+        self, start: str, end: str,
+    ) -> List[dict]:
+        """供应商每日用量。
+
+        Returns ``[{account_id, date, tokens}]`` ordered by account_id, date.
+        ``tokens = input_tokens + output_tokens``.
+        """
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT account_id,
+                          date(bucket) AS date,
+                          COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?
+                   GROUP BY account_id, date(bucket)
+                   ORDER BY account_id, date(bucket)""",
+                (s, e),
+            )
+            return [dict(r) for r in rows.fetchall()]
+
+    def query_stats_today_token_usage(
+        self, account_id: str, model: str, start_of_day: str, end_of_day: str,
+    ) -> tuple:
+        """按 account_id + model 聚合今日的 input/output tokens（stats 表）。
+
+        Returns ``(input_tokens, output_tokens)``.
+        """
+        s, e = self._floor_minute(start_of_day), self._floor_minute(end_of_day)
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?
+                     AND account_id = ? AND model = ?""",
+                (s, e, account_id, model),
+            ).fetchone()
+            return (row["input_tokens"], row["output_tokens"])
+
+    # ── (removed dead legacy methods) ──────────────────────────────────
+    # aggregate_window, summarize_window, status_code_breakdown, and
+    # per_model_stats have been removed. They were all replaced by the
+    # request_stats_minute-based query_* methods above.

@@ -30,7 +30,9 @@ class AdminService:
                  provider_type_repo: ProviderTypeRepository = None,
                  rate_limit_strategies: dict = None,
                  db=None,
-                 quota_updater=None):
+                 quota_updater=None,
+                 config_cache=None,
+                 rate_limit_cache=None):
         self.account_repo = account_repo
         self.mapping_repo = mapping_repo
         self.config_repo = config_repo
@@ -43,6 +45,8 @@ class AdminService:
         self.provider_type_repo = provider_type_repo
         self.db = db
         self.quota_updater = quota_updater
+        self.config_cache = config_cache
+        self.rate_limit_cache = rate_limit_cache
 
     # ── Accounts ──
 
@@ -196,6 +200,11 @@ class AdminService:
 
     def bulk_set_supplier_models(self, supplier_id: int,
                                  models: list) -> list:
+        """Replace a supplier's model catalog.
+
+        FK CASCADE on mapping_models.supplier_model_id ensures that
+        bindings pointing to removed models are automatically cleaned up.
+        """
         if self.supplier_model_repo is None:
             return []
         self.supplier_model_repo.bulk_upsert(supplier_id, models)
@@ -352,12 +361,26 @@ class AdminService:
             return []
         return self.mapping_model_repo.find_by_alias(alias_name)
 
-    def add_mapping_model(self, alias_name: str, supplier_id: int,
-                          model_name: str, sort_order: int = 0):
-        """Add a model to a mapping alias."""
+    def add_mapping_model(
+        self, alias_name: str, supplier_model_id: int, sort_order: int = 0
+    ) -> dict:
+        """Add a model to a mapping alias.
+
+        Validates that the supplier_model_id points to an existing row.
+        The FK on mapping_models.supplier_model_id guarantees consistency,
+        but we validate early for a clear error message.
+        """
         if self.mapping_model_repo is None:
             raise NotImplementedError("Mapping model repo not configured")
-        return self.mapping_model_repo.add_model(alias_name, supplier_id, model_name, sort_order)
+        # Validate: the supplier_model_id must exist
+        if self.supplier_model_repo is not None:
+            if self.supplier_model_repo.find_by_id(supplier_model_id) is None:
+                raise ValueError(
+                    f"supplier_model_id {supplier_model_id} 不存在，无法绑定"
+                )
+        return self.mapping_model_repo.add_model(
+            alias_name, supplier_model_id=supplier_model_id, sort_order=sort_order
+        )
 
     def reorder_mapping_models(self, alias_name: str, ordered_ids: list):
         """Reorder binding list for an alias.
@@ -386,16 +409,47 @@ class AdminService:
 
     def bulk_set_config(self, config: dict):
         self.config_repo.bulk_set(config)
+        # Sync memory cache so hot path reads are fresh
+        if self.config_cache is not None:
+            for key, value in config.items():
+                self.config_cache.set(key, str(value))
+
+    def cleanup_old_logs(self):
+        """Delete log entries older than the configured retention period.
+
+        Reads ``log_retention_hours`` from system_config (default 1 hour).
+        Runs inline — designed to be called periodically from a background task.
+        """
+        import datetime
+
+        raw = self.config_repo.get("log_retention_hours") or "1"
+        try:
+            hours = float(raw)
+        except (ValueError, TypeError):
+            hours = 1.0
+        # Guard against non-positive values that would wipe all logs
+        if hours <= 0:
+            hours = 1.0
+
+        cutoff = (
+            datetime.datetime.now(datetime.timezone.utc)
+            - datetime.timedelta(hours=hours)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
+        deleted = self.log_repo.delete_older_than(cutoff)
+        if deleted > 0:
+            logger.info(
+                "Cleaned up %d log entries older than %s (retention=%sh)",
+                deleted, cutoff, raw,
+            )
 
     # ── Mapping usage ────────────────────────────────────────────────────
 
     def get_mapping_usage(self, alias_name: str, days: int = 7):
         """Aggregated usage stats for one virtual model over the last ``days``.
 
-        A request is logged under either the alias name or the
-        ``actual_model_id`` (which is the bound supplier model). We union the
-        two via the candidate model-id list and de-duplicate by
-        ``request_id`` so each request is counted once.
+        Reads from the pre-aggregated ``request_stats_minute`` table, so it
+        is not affected by ``request_logs`` retention.
 
         Returns:
           { alias, period_days,
@@ -404,10 +458,6 @@ class AdminService:
                      per_model: [{ supplier, model, display,
                                    requests, input_tokens, output_tokens,
                                    cache_tokens, error_count }, ...] } }
-          ``per_model`` lists *every* bound model, stats zero-filled when the
-          model saw no requests in the window. The virtual-alias row (no
-          supplier) is excluded — its hits are rolled up into each supplier
-          row that actually carried them.
         """
         from datetime import timedelta
 
@@ -415,82 +465,77 @@ class AdminService:
 
         bound = self.mapping_model_repo.find_by_alias(alias_name) if self.mapping_model_repo else []
 
-        # (supplier_name, supplier_model_name) keyed by supplier model name.
-        sup_name_by_model = {}
+        # (supplier_id → supplier_name) lookup — keyed by supplier_id (unique per binding),
+        # not model_name (which can be identical across different suppliers).
+        # A supplier account has two identifiers: the integer row ``id`` (== supplier_id
+        # in the binding) and the UUID ``account_id``. Depending on the request path the
+        # stats table may store either, so we match on both when attributing usage.
+        sup_name_by_id = {}
+        sid_to_keys = {}  # supplier_id -> set of identifier strings to match stats rows
         for b in bound:
             sid = b.get("supplier_id")
-            sname = ""
-            if sid is not None:
-                acc = self.account_repo.find_by_id(sid)
-                sname = acc.get("name", "") if acc else ""
-            sup_name_by_model[b["model_name"]] = sname
+            if sid is None:
+                continue
+            acc = self.account_repo.find_by_id(sid)
+            sup_name_by_id[sid] = acc.get("name", "") if acc else ""
+            keys = {str(sid)}
+            if acc and acc.get("account_id") is not None:
+                keys.add(str(acc["account_id"]))
+            sid_to_keys[sid] = keys
 
-        candidate_ids = [alias_name] + [b["model_name"] for b in bound]
-
-        # De-duplicated request records, queried per candidate id. Alias-routed
-        # requests carry model=<alias> and match the alias id; direct calls to a
-        # bound model match that model's id. De-dup by request_id keeps the union
-        # safe regardless of which id surfaced a record.
-        kept: dict[str, dict] = {}      # request_id -> log record
-        for mid in candidate_ids:
-            records, _ = self.log_repo.find_all(
-                page=0, page_size=5000,
-                model=mid, start_time=cutoff,
-            )
-            for r in records:
-                rid = r.get("request_id")
-                if not rid or rid in kept:
-                    continue
-                kept[rid] = r
-
-        # One row per bound model, plus a roll-up fallback for alias-level.
-        per_model_rows: list[dict] = []
-        for b in bound:
-            mn = b["model_name"]
-            per_model_rows.append(
-                dict(supplier=sup_name_by_model.get(mn, ""),
-                     model=mn, requests=0, input_tokens=0,
-                     output_tokens=0, cache_tokens=0, error_count=0))
+        # Query stats by virtual_model — each row is grouped by (model, account_id).
+        stats_rows = self.log_repo.query_stats_by_virtual_model(cutoff, alias_name)
+        # Group stats rows by model name; the account_id of each row may be either the
+        # integer id or the UUID account_id, so we test membership against sid_to_keys.
+        stats_by_model = {}
+        for r in stats_rows:
+            stats_by_model.setdefault(r["model"], []).append(r)
 
         totals = dict(requests=0, input_tokens=0, output_tokens=0,
-                      cache_tokens=0, partial=0, error_count=0)
+                      cache_tokens=0, error_count=0)
 
-        for rid, r in kept.items():
-            # 关联模型归因以日志的 actual_model_id（实际承载请求的供应商模型）为准。
-            # 经由虚拟模型路由的请求其 model 列为别名，只有 actual_model_id 指向真正
-            # 执行该请求的底层模型；用它匹配 per_model 行才能正确统计关联模型用量。
-            carrier = r.get("actual_model_id") or ""
-            row = None
-            if carrier:
-                for pm in per_model_rows:
-                    if pm["model"] == carrier:
-                        row = pm
-                        break
-
-            inp = r.get("input_tokens", 0) or 0
-            out = r.get("output_tokens", 0) or 0
-            cache = r.get("cached_tokens", 0) or 0
-            partial = r.get("prompt_partial_cached", 0) or 0
-            is_err = (r.get("status_code") or 0) >= 400
-
-            totals["requests"] += 1
+        per_model_rows: list[dict] = []
+        seen_keys = set()  # deduplicate by (model name, supplier id)
+        for b in bound:
+            mn = b["model_name"]
+            sid = b.get("supplier_id")
+            key = (mn, str(sid))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            # Attribute to the supplier's own stats row only (same model name bound to a
+            # different supplier must not be merged into this row).
+            s = {}
+            match_keys = sid_to_keys.get(sid, {str(sid)})
+            for row in stats_by_model.get(mn, []):
+                if str(row["account_id"]) in match_keys:
+                    s = row
+                    break
+            req = s.get("requests", 0) or 0
+            inp = s.get("input_tokens", 0) or 0
+            out = s.get("output_tokens", 0) or 0
+            cache = s.get("cached_tokens", 0) or 0
+            err = req - (s.get("success", 0) or 0)
+            totals["requests"] += req
             totals["input_tokens"] += inp
             totals["output_tokens"] += out
             totals["cache_tokens"] += cache
-            totals["partial"] += partial
-            if is_err:
-                totals["error_count"] += 1
+            totals["error_count"] += err
+            per_model_rows.append(dict(
+                supplier=sup_name_by_id.get(sid, ""),
+                supplier_id=sid,
+                model=mn,
+                display=b.get("display_name", mn),
+                requests=req,
+                input_tokens=inp,
+                output_tokens=out,
+                cache_tokens=cache,
+                error_count=err,
+            ))
 
-            if row is not None:
-                row["requests"] += 1
-                row["input_tokens"] += inp
-                row["output_tokens"] += out
-                row["cache_tokens"] += cache
-                if is_err:
-                    row["error_count"] += 1
-
-        denom = totals["cache_tokens"] + totals["partial"]
-        cache_hit_rate = round(totals["cache_tokens"] / denom * 100, 1) if denom > 0 else 0.0
+        cache_hit_rate = round(
+            totals["cache_tokens"] / (totals["cache_tokens"] + totals["input_tokens"]) * 100, 1
+        ) if (totals["cache_tokens"] + totals["input_tokens"]) > 0 else 0.0
 
         return {
             "alias": alias_name,
@@ -555,19 +600,44 @@ class AdminService:
             raw_response=raw_response,
             request_start=request_start, first_response=first_response, end_time=end_time,
             cached_tokens=cached_tokens, prompt_partial_cached=prompt_partial_cached,
-            client_key_name=client_key_name,
-            response_headers=response_headers,
-        )
+client_key_name=client_key_name,
+                response_headers=response_headers,
+            )
+
+        # Update minute-level aggregated stats (independent of raw log retention)
+        try:
+            # Use request_start if available, otherwise fall back to end_time
+            ts = request_start or end_time or _tz_now().isoformat()
+            # Normalise space→T separator; strip trailing Z
+            ts = ts.replace(" ", "T").rstrip("Z")
+            self.log_repo.upsert_stats(
+                timestamp=ts,
+                model=actual_model_id or model,
+                virtual_model=model if actual_model_id else "",
+                account_id=account_id or "",
+                client_key_name=client_key_name or "",
+                status_code=status_code,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                cached_tokens=cached_tokens + prompt_partial_cached,
+            )
+        except Exception:
+            logger.warning("Failed to update request stats", exc_info=True)
+
         return request_id
 
     # ── Client API Keys ──
 
     def get_client_keys(self):
-        """List all client API keys enriched with today's usage stats."""
+        """List all client API keys enriched with today's usage stats.
+
+        Reads from the pre-aggregated ``request_stats_minute`` table, so it
+        survives ``request_logs`` retention cleanup.
+        """
         if self.client_key_repo is None:
             return []
         keys = self.client_key_repo.find_all()
-        # Enrich with today's log stats
         today_start = today()
         for k in keys:
             k["today_requests"] = 0
@@ -575,18 +645,11 @@ class AdminService:
             k["today_output_tokens"] = 0
             k["today_cache_tokens"] = 0
             try:
-                records, _ = self.log_repo.find_all(
-                    page=0, page_size=10000,
-                    client_key_name=k["name"],
-                    start_time=today_start,
-                )
-                for r in records:
-                    k["today_requests"] += 1
-                    k["today_input_tokens"] += r.get("input_tokens", 0) or 0
-                    k["today_output_tokens"] += r.get("output_tokens", 0) or 0
-                    k["today_cache_tokens"] += (r.get("cached_tokens", 0) or 0) + (
-                        r.get("prompt_partial_cached", 0) or 0
-                    )
+                s = self.log_repo.query_stats_client_key(today_start, k["name"])
+                k["today_requests"] = s.get("requests", 0) or 0
+                k["today_input_tokens"] = s.get("input_tokens", 0) or 0
+                k["today_output_tokens"] = s.get("output_tokens", 0) or 0
+                k["today_cache_tokens"] = s.get("cached_tokens", 0) or 0
             except Exception:
                 pass
         return keys
@@ -637,7 +700,16 @@ class AdminService:
         return records, total
 
     def get_key_stats(self, key_id: int, days: int = 30):
-        """Get aggregate statistics for a specific client API key."""
+        """Get aggregate statistics for a specific client API key.
+
+        Reads from the pre-aggregated ``request_stats_minute`` table, so it
+        survives ``request_logs`` retention cleanup.
+
+        Note on avg_latency_ms: the stats table only stores ``latency_sum`` and
+        ``latency_count`` (non-None latencies only).  So the average is computed
+        over requests that actually reported a latency, which differs from the
+        legacy behaviour that treated missing latency values as 0.
+        """
         if self.client_key_repo is None:
             return {}
         key = self.client_key_repo.find_by_id(key_id)
@@ -645,45 +717,36 @@ class AdminService:
             return {}
         from datetime import timedelta
 
-        cutoff = (_tz_now() - timedelta(days=days)).isoformat()
-        records, _ = self.log_repo.find_all(
-            page=0,
-            page_size=5000,
-            client_key_name=key["name"],
-            start_time=cutoff,
-        )
-        total_requests = len(records)
-        total_input = sum(r.get("input_tokens", 0) or 0 for r in records)
-        total_output = sum(r.get("output_tokens", 0) or 0 for r in records)
-        total_cache = sum((r.get("cached_tokens", 0) or 0) + (r.get("prompt_partial_cached", 0) or 0) for r in records)
-        success_count = sum(1 for r in records if (r.get("status_code") or 0) < 400)
+        cutoff = (_tz_now() - timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
+
+        total = self.log_repo.query_stats_key_summary(cutoff, key["name"])
+        total_requests = total.get("total", 0) or 0
+        success_count = total.get("success", 0) or 0
+        total_input = total.get("input_tokens", 0) or 0
+        total_output = total.get("output_tokens", 0) or 0
+        total_cache = total.get("cached_tokens", 0) or 0
         error_count = total_requests - success_count
+        latency_sum = total.get("latency_sum", 0) or 0
+        latency_count = total.get("latency_count", 0) or 0
         avg_latency = (
-            round(
-                sum(r.get("latency_ms", 0) or 0 for r in records) / total_requests
-            )
-            if total_requests > 0
+            round(latency_sum / latency_count)
+            if latency_count > 0
             else 0
         )
 
         # Per-model breakdown
-        per_model = {}
-        for r in records:
-            model = r.get("model", "unknown")
-            if model not in per_model:
-                per_model[model] = dict(requests=0, input_tokens=0,
-                                        output_tokens=0, cache_tokens=0, error_count=0)
-            pm = per_model[model]
-            pm["requests"] += 1
-            pm["input_tokens"] += r.get("input_tokens", 0) or 0
-            pm["output_tokens"] += r.get("output_tokens", 0) or 0
-            pm["cache_tokens"] += (r.get("cached_tokens", 0) or 0) + (r.get("prompt_partial_cached", 0) or 0)
-            if (r.get("status_code") or 0) >= 400:
-                pm["error_count"] += 1
-
-        per_model_list = [
-            dict(model=m, **stats) for m, stats in sorted(per_model.items())
-        ]
+        per_model_list = []
+        for row in self.log_repo.query_stats_key_per_model(cutoff, key["name"]):
+            m_req = row.get("requests", 0) or 0
+            m_success = row.get("success", 0) or 0
+            per_model_list.append(dict(
+                model=row.get("model", "unknown"),
+                requests=m_req,
+                input_tokens=row.get("input_tokens", 0) or 0,
+                output_tokens=row.get("output_tokens", 0) or 0,
+                cache_tokens=row.get("cached_tokens", 0) or 0,
+                error_count=m_req - m_success,
+            ))
 
         return {
             "key_name": key["name"],
@@ -802,124 +865,102 @@ class AdminService:
         return result
 
     def _get_today_token_usage(self, account_id: str, model_name: str) -> tuple:
-        """Get today's input and output token totals for an account+model from logs."""
+        """Get today's input and output token totals for an account+model from
+        the pre-aggregated ``request_stats_minute`` table.
+        """
         start_of_day, end_of_day = today_range()
-
-        records, _ = self.log_repo.find_all(
-            page=0, page_size=10000,
-            account_id=account_id,
-            model=model_name,
-            start_time=start_of_day,
-            end_time=end_of_day,
+        return self.log_repo.query_stats_today_token_usage(
+            account_id, model_name, start_of_day, end_of_day,
         )
-
-        total_input = 0
-        total_output = 0
-        for r in records:
-            total_input += r.get("input_tokens", 0) or 0
-            total_output += r.get("output_tokens", 0) or 0
-
-        return total_input, total_output
 
     # ── Stats ──
 
     def get_stats(self, days: int = 30):
-        """Aggregate statistics for the given period."""
-        from collections import defaultdict
-        from datetime import datetime, timedelta
+        """Aggregate statistics for the given period.
 
-        with self.log_repo.db.get_connection() as conn:
-            conn.row_factory = conn.row_factory or self.log_repo.db.get_connection().__enter__().row_factory
+        Reads from the pre-aggregated ``request_stats_minute`` table, so it
+        survives ``request_logs`` retention cleanup.
+        """
+        from datetime import timedelta
 
-        records = []
-        page = 0
-        while True:
-            batch, total = self.get_logs(page=page, page_size=500)
-            records.extend(batch)
-            if len(records) >= total:
-                break
-            page += 1
+        cutoff = (_tz_now() - timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
+        now = _tz_now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Heatmap: count by (weekday, hour)
-        heatmap = defaultdict(int)
-        # Daily token trend: {date: {model: input_tokens + output_tokens}}
-        daily_tokens = defaultdict(lambda: defaultdict(int))
-        # Model usage: {model: tokens}
-        model_usage = defaultdict(int)
-
-        # New aggregated fields for dashboard
-        total_input = 0
-        total_output = 0
-        total_cached = 0
-        total_partial_cached = 0
-        daily_trend = defaultdict(lambda: {"input": 0, "output": 0, "cached": 0, "total": 0})
-        supplier_daily = defaultdict(lambda: defaultdict(int))
-
-        for r in records:
-            ts = r.get("timestamp", "")
-            if ts:
-                try:
-                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    heatmap[(dt.weekday(), dt.hour)] += 1
-                    date_str = dt.strftime("%Y-%m-%d")
-                except (ValueError, TypeError):
-                    continue
-
-            input_tok = r.get("input_tokens", 0) or 0
-            output_tok = r.get("output_tokens", 0) or 0
-            cached_tok = r.get("cached_tokens", 0) or 0
-            partial_tok = r.get("prompt_partial_cached", 0) or 0
-            tokens = input_tok + output_tok
-
-            total_input += input_tok
-            total_output += output_tok
-            total_cached += cached_tok
-            total_partial_cached += partial_tok
-
-            if r.get("model"):
-                model_usage[r["model"]] += tokens
-            if ts:
-                daily_tokens[date_str][r.get("model", "unknown")] += tokens
-                daily_trend[date_str]["input"] += input_tok
-                daily_trend[date_str]["output"] += output_tok
-                daily_trend[date_str]["cached"] += cached_tok
-                daily_trend[date_str]["total"] += tokens
-
-            # Per-supplier daily tracking
-            acc_id = r.get("account_id", "unknown")
-            if ts and acc_id:
-                supplier_daily[acc_id][date_str] += tokens
-
-        # Cache hit rate
-        denom = total_cached + total_partial_cached
-        cache_hit_rate = round(total_cached / denom * 100, 1) if denom > 0 else 0.0
+        global_totals = self.log_repo.query_stats_global(cutoff, now)
+        total_requests = global_totals.get("total", 0) or 0
+        total_input = global_totals.get("input_tokens", 0) or 0
+        total_output = global_totals.get("output_tokens", 0) or 0
+        total_cached = global_totals.get("cached_tokens", 0) or 0
 
         # Top models by token usage
-        sorted_models = sorted(model_usage.items(), key=lambda x: x[1], reverse=True)
-        grand_total = sum(model_usage.values())
+        model_rows = self.log_repo.query_stats_model_usage(cutoff, now)
+        grand_total = sum(r["tokens"] or 0 for r in model_rows)
         top_models = []
-        for model_name, tok_count in sorted_models[:5]:
+        for r in model_rows[:5]:
+            tok = r["tokens"] or 0
             top_models.append({
-                "model": model_name,
-                "tokens": tok_count,
-                "pct": round(tok_count / grand_total * 100, 1) if grand_total > 0 else 0,
+                "model": r["model"],
+                "tokens": tok,
+                "pct": round(tok / grand_total * 100, 1) if grand_total > 0 else 0,
             })
 
+        # Daily trend: {date: {input, output, cached, total}}
+        daily_trend = {}
+        for r in self.log_repo.query_stats_daily_trend(cutoff, now):
+            date_str = r["date"]
+            inp = r["input_tokens"] or 0
+            out = r["output_tokens"] or 0
+            cached = r["cached_tokens"] or 0
+            daily_trend[date_str] = {
+                "input": inp,
+                "output": out,
+                "cached": cached,
+                "total": inp + out,
+            }
+
+        # Model usage dict (full, not just top 5)
+        model_usage = {r["model"]: r["tokens"] or 0 for r in model_rows}
+
+        # Heatmap: { "weekday,hour": count }
+        heatmap = {}
+        for r in self.log_repo.query_stats_heatmap(cutoff, now):
+            heatmap[f'{r["weekday"]},{r["hour"]}'] = r["count"] or 0
+
+        # Supplier daily: {account_id: {date: tokens}}
+        supplier_daily: dict = {}
+        for r in self.log_repo.query_stats_supplier_daily(cutoff, now):
+            supplier_daily.setdefault(r["account_id"], {}).setdefault(r["date"], 0)
+            supplier_daily[r["account_id"]][r["date"]] += r["tokens"] or 0
+
+        # Daily model breakdown: {date: {model: tokens}} — same shape as
+        # the legacy request_logs path, read from the stats table.
+        daily_tokens = {}
+        for r in self.log_repo.query_stats_daily_model_usage(cutoff, now):
+            date_str = r["date"]
+            daily_tokens.setdefault(date_str, {})[r["model"]] = r["tokens"] or 0
+
+        # Cache hit rate: cached / (cached + input)
+        denom = total_cached + total_input
+        cache_hit_rate = round(total_cached / denom * 100, 1) if denom > 0 else 0.0
+
         return {
-            "heatmap": {f"{w},{h}": c for (w, h), c in heatmap.items()},
-            "daily_tokens": {d: dict(m) for d, m in daily_tokens.items()},
-            "model_usage": dict(model_usage),
-            "total_requests": len(records),
-            # New dashboard fields
+            "heatmap": heatmap,
+            "daily_tokens": daily_tokens,
+            "model_usage": model_usage,
+            "total_requests": total_requests,
+            # Dashboard fields
             "total_tokens": total_input + total_output,
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,
             "cached_tokens_total": total_cached,
-            "partial_cached_total": total_partial_cached,
+            # prompt_partial_cached is folded into cached_tokens in the stats
+            # table (upsert_stats adds cached_tokens + prompt_partial_cached
+            # together), so this field is 0 by design.
+            "partial_cached_total": 0,
             "cache_hit_rate": cache_hit_rate,
-            "daily_trend": {d: dict(v) for d, v in daily_trend.items()},
+            "daily_trend": daily_trend,
             "top_models": top_models,
-            "supplier_daily": {k: dict(v) for k, v in supplier_daily.items()},
+            "supplier_daily": supplier_daily,
         }
 
     # Window (seconds) → bucket granularity for the dashboard presets;
@@ -947,22 +988,24 @@ class AdminService:
         bucket = self._WINDOW_BUCKET_MAP.get(seconds, max(1, seconds // 30))
 
         fmt = "%Y-%m-%d %H:%M:%S"
-        now = datetime.now(timezone.utc).replace(microsecond=0)
+        now = datetime.now(TZ)
         start_dt = now - timedelta(seconds=seconds)
         start, end = start_dt.strftime(fmt), now.strftime(fmt)
 
         # Current window vs previous window (exclusive right bound: no overlap)
-        cur = self.log_repo.summarize_window(start, end)
-        prev = self.log_repo.summarize_window(
-            (start_dt - timedelta(seconds=seconds)).strftime(fmt), start, end_exclusive=True
+        cur = self.log_repo.query_stats_summarize(start, end)
+        prev = self.log_repo.query_stats_summarize(
+            (start_dt - timedelta(seconds=seconds)).strftime(fmt), start
         )
 
         total = cur["total"] or 0
         success = cur["success"] or 0
+        total_tokens = cur["total_tokens"] or 0
         avg_latency = cur["avg_latency_ms"]
         success_rate = round(success / total * 100, 1) if total else None
 
         prev_total = prev["total"] or 0
+        prev_tokens = prev["total_tokens"] or 0
         prev_rate = round((prev["success"] or 0) / prev_total * 100, 1) if prev_total else None
         prev_avg = prev["avg_latency_ms"]
 
@@ -973,6 +1016,7 @@ class AdminService:
 
         delta = {
             "total_pct": pct_delta(total, prev_total),
+            "total_tokens_pct": pct_delta(total_tokens, prev_tokens),
             "success_rate_pp": (
                 round(success_rate - prev_rate, 1)
                 if success_rate is not None and prev_rate is not None else None
@@ -982,8 +1026,8 @@ class AdminService:
 
         # Bucketed series: SQL returns only non-empty epoch-aligned buckets;
         # fill the full grid so the chart always renders a continuous axis.
-        start_epoch = calendar.timegm(start_dt.utctimetuple())
-        end_epoch = calendar.timegm(now.utctimetuple())
+        start_epoch = int(start_dt.timestamp())
+        end_epoch = int(now.timestamp())
         first_epoch = (start_epoch // bucket) * bucket
         n_buckets = (end_epoch // bucket - start_epoch // bucket) + 1
 
@@ -991,18 +1035,22 @@ class AdminService:
         for i in range(n_buckets):
             b_epoch = first_epoch + i * bucket
             series.append({
-                "t": datetime.fromtimestamp(b_epoch, tz=timezone.utc).strftime(fmt),
+                "t": datetime.fromtimestamp(b_epoch, tz=TZ).strftime(fmt),
                 "_epoch": b_epoch,
                 "total": 0,
                 "success": 0,
+                "total_tokens": 0,
                 "avg_latency_ms": None,
             })
         by_epoch = {cell["_epoch"]: cell for cell in series}
-        for row in self.log_repo.aggregate_window(start, end, bucket):
-            cell = by_epoch.get(calendar.timegm(time.strptime(row["bucket_start"], fmt)))
+        for row in self.log_repo.query_stats_aggregate(start, end, bucket):
+            cell = by_epoch.get(
+                int(datetime.strptime(row["bucket_start"], fmt).replace(tzinfo=TZ).timestamp())
+            )
             if cell is not None:
                 cell["total"] = row["total"] or 0
                 cell["success"] = row["success"] or 0
+                cell["total_tokens"] = row["total_tokens"] or 0
                 cell["avg_latency_ms"] = row["avg_latency_ms"]
 
         for cell in series:
@@ -1015,19 +1063,23 @@ class AdminService:
             cell["qps"] = round(b_total / elapsed, 1)
             cell["success_rate"] = round(b_success / b_total * 100, 1) if b_total else None
 
-        # Status-code breakdown: NULL codes already count as failed, skip them here.
+        # Status-code breakdown: still reads from request_logs (only recent data).
+        # For older periods, status codes are not available in the stats table.
         status_codes = {}
-        for row in self.log_repo.status_code_breakdown(start, end):
+        for row in self.log_repo.query_stats_status_breakdown(start, end):
             if row["status_code"] is not None:
                 status_codes[str(row["status_code"])] = row["count"]
 
-        # Per-model call counts (keyed by actual model id to match /model-quota).
+        # Per-model call counts from aggregated stats table. Grouped by
+        # (model, account_id) so the same model name on different suppliers is
+        # kept separate and aligns with the quota rows by account_id.
         models = []
-        for row in self.log_repo.per_model_stats(start, end):
+        for row in self.log_repo.query_stats_per_model(start, end):
             m_total = row["total"] or 0
             m_success = row["success"] or 0
             models.append({
                 "model": row["model"],
+                "account_id": row.get("account_id"),
                 "total": m_total,
                 "success": m_success,
                 "success_rate": round(m_success / m_total * 100, 1) if m_total else None,
@@ -1042,6 +1094,7 @@ class AdminService:
                 "total": total,
                 "success": success,
                 "failed": total - success,
+                "total_tokens": total_tokens,
                 "success_rate": success_rate,
                 "qps": round(total / seconds, 1),
                 "avg_latency_ms": round(avg_latency) if avg_latency is not None else None,
@@ -1049,6 +1102,7 @@ class AdminService:
             },
             "prev": {
                 "total": prev_total,
+                "total_tokens": prev_tokens,
                 "success_rate": prev_rate,
                 "qps": round(prev_total / seconds, 1),
                 "avg_latency_ms": round(prev_avg) if prev_avg is not None else None,

@@ -42,16 +42,16 @@
             </template>
           </StatCard>
 
-          <!-- 失败请求 -->
-          <StatCard label="失败请求" :value="fmtInt(kpi.failed)" unit=""
-            icon-bg-class="bg-red-500/10">
+          <!-- Token 总数 -->
+          <StatCard label="Token 总数" :value="fmtInt(kpi.total_tokens)"
+            :delta="tokenDelta.text" :delta-class="tokenDelta.cls" icon-bg-class="bg-yellow-500/10">
             <template #icon>
-              <svg class="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+              <svg class="w-3.5 h-3.5 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
               </svg>
             </template>
             <template #footer>
-              <KpiSparkline :values="series.map(s => (s.total || 0) - (s.success || 0))" stroke="#ef4444" />
+              <KpiSparkline :values="series.map(s => s.total_tokens || 0)" stroke="#eab308" />
             </template>
           </StatCard>
 
@@ -169,6 +169,7 @@ function deltaChip(pct, { invert = false, neutralBelow = 0 } = {}) {
 
 const totalDelta = computed(() => deltaChip(kpi.value.delta?.total_pct))
 const rateDelta = computed(() => deltaChip(kpi.value.delta?.success_rate_pp))
+const tokenDelta = computed(() => deltaChip(kpi.value.delta?.total_tokens_pct))
 // QPS 与总请求等窗长，delta 数学等价，复用 total_pct
 const qpsDelta = computed(() => deltaChip(kpi.value.delta?.total_pct, { neutralBelow: 3 }))
 const latencyDelta = computed(() => deltaChip(kpi.value.delta?.avg_latency_pct, { invert: true }))

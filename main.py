@@ -98,8 +98,12 @@ async def initialize_services():
         rate_limit_strategies=_services.get("rate_limit_strategies"),
         db=db,
         quota_updater=_services.get("quota_updater"),
+        config_cache=_services.get("config_cache"),
+        rate_limit_cache=_services.get("rate_limit_cache"),
     )
     _admin_service = admin_service
+    # Expose admin_service so the periodic cleanup task can find it via services["admin_service"]
+    _services["admin_service"] = admin_service
     logger.info(f"Loaded {len(_services['accounts'])} accounts, admin service initialized")
 
     return _services
@@ -117,9 +121,68 @@ async def lifespan(app: FastAPI):
     app.state.services = services
     app.state.admin_service = _admin_service
     app.state.alias_router = _services["alias_router"]
+
+    # Start periodic log cleanup (every 5 minutes)
+    async def _periodic_log_cleanup(svc, interval: int = 300):
+        """Periodically delete old request logs based on retention config."""
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                admin = svc.get("admin_service")
+                if admin:
+                    admin.cleanup_old_logs()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.warning("Log cleanup task failed", exc_info=True)
+
+    # Start periodic rate-limit flush (every 60 seconds)
+    async def _periodic_rate_limit_flush(svc, interval: int = 60):
+        """Flush dirty rate-limit counters from memory to database."""
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                cache = svc.get("rate_limit_cache")
+                if cache:
+                    cache.flush()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.warning("Rate-limit flush task failed", exc_info=True)
+
+    # Start periodic config sync (every 5 minutes)
+    async def _periodic_config_sync(svc, interval: int = 300):
+        """Reload config from database to catch external changes."""
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                cache = svc.get("config_cache")
+                if cache:
+                    cache.reload()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.warning("Config sync task failed", exc_info=True)
+
+    cleanup_task = asyncio.create_task(_periodic_log_cleanup(services))
+    rl_flush_task = asyncio.create_task(_periodic_rate_limit_flush(services))
+    config_sync_task = asyncio.create_task(_periodic_config_sync(services))
+    logger.info("Periodic tasks started: log cleanup (300s), rate-limit flush (60s), config sync (300s)")
+
     logger.info("ModelScope Proxy started")
     yield
     logger.info("ModelScope Proxy shutting down")
+
+    # Cancel background tasks
+    cleanup_task.cancel()
+    rl_flush_task.cancel()
+    config_sync_task.cancel()
+    for t in (cleanup_task, rl_flush_task, config_sync_task):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
+
     # Close HTTP client
     http_client = services.get("http_client")
     if http_client:

@@ -26,16 +26,30 @@ def _tid(suffix: str) -> str:
     return f"ws{datetime.datetime.now().strftime('%H%M%S%f')}-{suffix}"
 
 
-def _insert_log(ts, status_code=200, model="m1", actual=None):
+def _insert_log(ts, status_code=200, model="m1", actual=None, input_tokens=0, output_tokens=0):
     """Insert directly into the shared test DB (same URL the app lifespan used)."""
     db = DatabaseManager(os.environ["DATABASE_URL"])
     repo = LogRepository(db)
     rid = f"apws-{uuid.uuid4().hex[:12]}"
+    ts_str = ts.strftime(FMT)
     repo.create(request_id=rid, model=model, actual_model_id=actual,
-                status_code=status_code, latency_ms=120)
+                status_code=status_code, latency_ms=120,
+                input_tokens=input_tokens, output_tokens=output_tokens)
     with db.get_connection() as conn:
         conn.execute("UPDATE request_logs SET timestamp = ? WHERE request_id = ?",
-                     (ts.strftime(FMT), rid))
+                     (ts_str, rid))
+    # Also populate the minute-level stats table.
+    repo.upsert_stats(
+        timestamp=ts_str,
+        model=actual or model,
+        account_id="test-account",
+        client_key_name="",
+        status_code=status_code,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        latency_ms=120,
+        cached_tokens=0,
+    )
 
 
 def test_window_stats_shape(client):
@@ -52,12 +66,12 @@ def test_window_stats_shape(client):
     assert 30 <= len(data["series"]) <= 31
 
     kpi = data["kpi"]
-    assert set(kpi.keys()) == {"total", "success", "failed", "success_rate",
+    assert set(kpi.keys()) == {"total", "success", "failed", "total_tokens", "success_rate",
                                "qps", "avg_latency_ms", "delta"}
-    assert set(kpi["delta"].keys()) == {"total_pct", "success_rate_pp", "avg_latency_pct"}
+    assert set(kpi["delta"].keys()) == {"total_pct", "total_tokens_pct", "success_rate_pp", "avg_latency_pct"}
 
     cell = data["series"][0]
-    assert set(cell.keys()) == {"t", "total", "success", "qps",
+    assert set(cell.keys()) == {"t", "total", "success", "total_tokens", "qps",
                                 "success_rate", "avg_latency_ms"}
 
 

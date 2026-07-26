@@ -263,12 +263,19 @@ def test_mapping_usage_attributes_per_actual_model(client):
     sup = _create(client, name=_tid("vm-sup"))
     alias = _tid("virtual")
     bound_model = f"real-model-{_tid('m')}"
+    # Populate supplier's model catalog so the binding passes validation
+    r = client.put(
+        f"/api/admin/suppliers/{sup['id']}/models/bulk",
+        json={"models": [{"model_name": bound_model, "model_type": "text"}]},
+    )
+    assert r.status_code == 200
+    supplier_model_id = r.json()[0]["id"]
     # 先建立虚拟模型映射（mapping_models.alias_name 外键指向 model_mappings）
     r = client.put("/api/admin/mappings/bulk", json={"mappings": {alias: bound_model}})
     assert r.status_code == 200
     r = client.post(
         f"/api/admin/mappings/{alias}/models",
-        json={"supplier_id": sup["id"], "model_name": bound_model},
+        json={"supplier_model_id": supplier_model_id},
     )
     assert r.status_code == 200
 
@@ -294,6 +301,68 @@ def test_mapping_usage_attributes_per_actual_model(client):
     assert pm[bound_model]["input_tokens"] == 100
     assert pm[bound_model]["output_tokens"] == 50
     assert pm[bound_model]["supplier"] == sup["name"]
+
+
+def test_mapping_usage_separates_same_model_name_across_suppliers(client):
+    """同名模型绑定到不同供应商时，必须分别归因，不能合并成一行。
+
+    回归：此前按模型名聚合/去重，导致不同供应商的同一模型名被合并，
+    per_model 只保留第一条绑定，统计失真。
+    """
+    svc = client.app.state.admin_service
+    sup_a = _create(client, name=_tid("vm-supA"))
+    sup_b = _create(client, name=_tid("vm-supB"))
+    alias = _tid("virtual-shared")
+    shared = f"shared-model-{_tid('m')}"
+
+    smid_a = client.put(
+        f"/api/admin/suppliers/{sup_a['id']}/models/bulk",
+        json={"models": [{"model_name": shared, "model_type": "text"}]},
+    ).json()[0]["id"]
+    smid_b = client.put(
+        f"/api/admin/suppliers/{sup_b['id']}/models/bulk",
+        json={"models": [{"model_name": shared, "model_type": "text"}]},
+    ).json()[0]["id"]
+
+    r = client.put("/api/admin/mappings/bulk", json={"mappings": {alias: shared}})
+    assert r.status_code == 200
+    # 同名模型、不同供应商，分别绑定到同一虚拟模型
+    assert client.post(
+        f"/api/admin/mappings/{alias}/models",
+        json={"supplier_model_id": smid_a},
+    ).status_code == 200
+    assert client.post(
+        f"/api/admin/mappings/{alias}/models",
+        json={"supplier_model_id": smid_b},
+    ).status_code == 200
+
+    # 分别记录一条经由两个供应商的请求（不同 token 用量）
+    svc.log_request(
+        model=alias, actual_model_id=shared,
+        account_id=sup_a["account_id"], account_name=sup_a["name"],
+        status_code=200, input_tokens=100, output_tokens=50, is_stream=False,
+    )
+    svc.log_request(
+        model=alias, actual_model_id=shared,
+        account_id=sup_b["account_id"], account_name=sup_b["name"],
+        status_code=200, input_tokens=200, output_tokens=80, is_stream=False,
+    )
+
+    usage = client.get(f"/api/admin/mappings/{alias}/logs").json()["usage"]
+    # 总数应为两供应商之和
+    assert usage["requests"] == 2
+    assert usage["input_tokens"] == 300
+    assert usage["output_tokens"] == 130
+
+    # per_model 必须有两行（每个供应商一行），各自独立归因
+    assert len(usage["per_model"]) == 2
+    by_supplier = {m["supplier"]: m for m in usage["per_model"]}
+    assert sup_a["name"] in by_supplier
+    assert sup_b["name"] in by_supplier
+    assert by_supplier[sup_a["name"]]["input_tokens"] == 100
+    assert by_supplier[sup_a["name"]]["output_tokens"] == 50
+    assert by_supplier[sup_b["name"]]["input_tokens"] == 200
+    assert by_supplier[sup_b["name"]]["output_tokens"] == 80
 
 
 # ── Provider Types ─────────────────────────────────────────────────────────

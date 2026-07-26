@@ -15,9 +15,6 @@
       <PageState :loading="loading && logs.length === 0">
       <!-- Filters (1 row) -->
       <div class="flex flex-wrap gap-3 mb-5 items-center">
-        <FilterField label="时间" width="lg:w-56">
-          <DateRangePicker :utc8="true" @update="onTimeChange" />
-        </FilterField>
         <FilterField label="供应商" width="lg:w-36">
           <CSelect v-model="filters.accountId" :options="ACCOUNT_OPTIONS" size="sm" placeholder="选择供应商" />
         </FilterField>
@@ -115,7 +112,6 @@ import { formatTime } from '@/utils/format'
 import { getLogs, getSuppliers, getSupplierModels } from '@/api'
 import CSelect from '@/components/CSelect.vue'
 import LogDetailPanel from './LogDetailPanel.vue'
-import DateRangePicker from '@/components/DateRangePicker.vue'
 
 const ACCOUNT_OPTIONS = ref([
   { label: '选择供应商', value: '' },
@@ -149,7 +145,7 @@ const total = ref(0)
 const loading = ref(true)
 
 const logs = ref([])
-const filters = ref({ model: '', accountId: '', statusCode: '', isStream: '', startTime: '', endTime: '' })
+const filters = ref({ model: '', accountId: '', statusCode: '', isStream: '' })
 
 // ── 定时刷新 ──
 const refreshInterval = ref(0)
@@ -168,12 +164,6 @@ function resetAndLoad() {
   else loadLogs()
 }
 
-function onTimeChange({ start, end }) {
-  filters.value.startTime = start
-  filters.value.endTime = end
-  resetAndLoad()
-}
-
 // 筛选已由后端完成，这里直接透出当前页数据
 const filteredLogs = computed(() => logs.value)
 
@@ -190,8 +180,6 @@ const loadLogs = async () => {
     if (filters.value.accountId) params.account_id = filters.value.accountId
     if (filters.value.statusCode) params.status_code = filters.value.statusCode
     if (filters.value.isStream !== '' && filters.value.isStream !== undefined) params.is_stream = filters.value.isStream
-    if (filters.value.startTime) params.start_time = filters.value.startTime
-    if (filters.value.endTime) params.end_time = filters.value.endTime
     const res = await getLogs(params)
     logs.value = res.data.records || []
     total.value = res.data.total || 0
@@ -240,7 +228,6 @@ const loadFilterOptions = async () => {
 
 onMounted(async () => {
   await loadFilterOptions()
-  // 显式加载日志数据（DateRangePicker 的 mount emit 可能因时序问题未能触发首次加载）
   loadLogs()
 })
 </script>

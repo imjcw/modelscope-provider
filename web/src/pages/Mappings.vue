@@ -276,7 +276,7 @@ const modelOptions = computed(() => {
   const sup = suppliers.value.find(s => s.id === selectedSupplier.value)
   return (sup?.models || []).map(m => ({
     label: m.model_name,
-    value: m.model_name,
+    value: m.id,
     extra: m.model_type,
   }))
 })
@@ -376,8 +376,7 @@ const submitForm = async () => {
     if (!isEditing.value && bindingList.value.length > 0) {
       for (const b of bindingList.value) {
         await addMappingModel(form.value.alias, {
-          supplier_id: b.supplier_id,
-          model_name: b.model_name,
+          supplier_model_id: b.supplier_model_id,
         })
       }
     }
@@ -400,32 +399,33 @@ const addSelectedModels = async () => {
   const sup = suppliers.value.find(s => s.id === selectedSupplier.value)
   try {
     const alias = form.value.alias
-    for (const modelName of selectedModels.value) {
+    for (const supplierModelId of selectedModels.value) {
       // 去重
-      if (bindingList.value.some(b => b.supplier_id === selectedSupplier.value && b.model_name === modelName)) {
+      if (bindingList.value.some(b => b.supplier_model_id === supplierModelId)) {
         continue
       }
       if (isEditing.value) {
         // 编辑模式：别名已存在，立即调用 API 持久化
         const res = await addMappingModel(alias, {
-          supplier_id: selectedSupplier.value,
-          model_name: modelName,
+          supplier_model_id: supplierModelId,
         })
         bindingList.value.push({
           id: res.data.id,
-          supplier_id: selectedSupplier.value,
-          model_name: modelName,
+          supplier_model_id: supplierModelId,
+          supplier_id: res.data.supplier_id,
+          model_name: res.data.model_name,
           supplier_name: sup?.name || '',
           model_type: res.data.model_type || '',
           context_length: res.data.context_length || null,
         })
       } else {
         // 创建模式：别名尚未创建（外键约束），先暂存本地，提交时再持久化
-        const modelInfo = (sup?.models || []).find(m => m.model_name === modelName)
+        const modelInfo = (sup?.models || []).find(m => m.id === supplierModelId)
         bindingList.value.push({
-          id: `pending-${Date.now()}-${modelName}`,
+          id: `pending-${Date.now()}-${supplierModelId}`,
+          supplier_model_id: supplierModelId,
           supplier_id: selectedSupplier.value,
-          model_name: modelName,
+          model_name: modelInfo?.model_name || '',
           supplier_name: sup?.name || '',
           model_type: modelInfo?.model_type || '',
           context_length: modelInfo?.context_length || null,

@@ -16,14 +16,13 @@ def test_mapping_models_table_exists():
     result = cursor.fetchone()
     assert result is not None, "mapping_models table should exist"
 
-    # Check columns
+    # Check columns (supplier_model_id FK, no more model_name)
     cursor.execute("PRAGMA table_info(mapping_models)")
     columns = {row[1]: row[2] for row in cursor.fetchall()}
     expected_columns = {
         'id': 'INTEGER',
         'alias_name': 'TEXT',
-        'supplier_id': 'INTEGER',
-        'model_name': 'TEXT',
+        'supplier_model_id': 'INTEGER',
         'sort_order': 'INTEGER',
         'created_at': 'TIMESTAMP',
         'updated_at': 'TIMESTAMP',
@@ -35,9 +34,9 @@ def test_mapping_models_table_exists():
     alias_idx = cursor.fetchone()
     assert alias_idx is not None, "idx_mapping_models_alias index should exist"
 
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_mapping_models_supplier'")
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_mapping_models_supplier_model_id'")
     supplier_idx = cursor.fetchone()
-    assert supplier_idx is not None, "idx_mapping_models_supplier index should exist"
+    assert supplier_idx is not None, "idx_mapping_models_supplier_model_id index should exist"
 
     conn.close()
     print("✓ All database structure checks passed!")

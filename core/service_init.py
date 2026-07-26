@@ -11,6 +11,8 @@ from repositories.mapping_repository import MappingRepository
 from repositories.quota_repository import QuotaRepository
 from repositories.supplier_model_repository import SupplierModelRepository
 from services.alias_router import AliasRouter
+from services.cache import ConfigCache, RateLimitCache
+from services.circuit_breaker import CircuitBreaker
 from services.load_balancer import LoadBalancer
 from services.response_converter import ResponseConverter
 from services.quota_updater import QuotaUpdater
@@ -61,6 +63,10 @@ class ServiceInitializer:
         account_repo = AccountRepository(database)
         config_repo = ConfigRepository(database)
 
+        # Initialize in-memory caches
+        config_cache = ConfigCache(config_repo)
+        rate_limit_cache = RateLimitCache(database)
+
         # Initialize services
         load_balancer = LoadBalancer(accounts, supplier_model_repo=supplier_model_repo)
         response_converter = ResponseConverter()
@@ -72,6 +78,7 @@ class ServiceInitializer:
             mapping_model_repo=mapping_model_repo,
             account_repo=account_repo,
             config_repo=config_repo,
+            config_cache=config_cache,
         )
 
         # Per-provider rate-limit strategies — driven by provider_types table so
@@ -84,7 +91,7 @@ class ServiceInitializer:
                 quota_repository=quota_repository,
             ),
             "sensetime": create_strategy(
-                "fixed_window", db=database,
+                "fixed_window", db=database, rate_limit_cache=rate_limit_cache,
             ),
         }
         # 从 DB 加载自定义类型，覆盖或补充硬编码策略
@@ -93,7 +100,8 @@ class ServiceInitializer:
             db_types = provider_type_repo.find_all()
             if db_types:
                 db_strategies = build_rate_limit_strategies(
-                    db_types, database, quota_updater, quota_repository
+                    db_types, database, quota_updater, quota_repository,
+                    rate_limit_cache=rate_limit_cache,
                 )
                 rate_limit_strategies.update(db_strategies)
         except Exception:
@@ -113,6 +121,9 @@ class ServiceInitializer:
             "alias_router": alias_router,
             "accounts": accounts,
             "rate_limit_strategies": rate_limit_strategies,
+            "circuit_breaker": CircuitBreaker(),
+            "config_cache": config_cache,
+            "rate_limit_cache": rate_limit_cache,
         }
 
         return services

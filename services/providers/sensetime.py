@@ -26,7 +26,8 @@ class SenseTimeStrategy(RateLimitStrategy):
     and expires after ``window_seconds``. All requests (including upstream
     errors) count toward ``max_requests``.
 
-    The check-and-increment is atomic via SQLite ``BEGIN IMMEDIATE``.
+    Uses ``RateLimitCache`` for in-memory counting when available, falling
+    back to the database for atomic counting.
     """
 
     def __init__(
@@ -34,17 +35,26 @@ class SenseTimeStrategy(RateLimitStrategy):
         db: DatabaseManager,
         window_seconds: int = DEFAULT_WINDOW_SECONDS,
         max_requests: int = DEFAULT_MAX_REQUESTS,
+        rate_limit_cache=None,
     ):
         self.db = db
         self.window_seconds = window_seconds
         self.max_requests = max_requests
+        self._cache = rate_limit_cache  # Optional RateLimitCache
 
     def check_rate_limit(self, account_id: str, model_name: str) -> bool:
-        """Atomically check and increment the request counter.
+        """Check and increment the request counter.
 
-        Returns True if the request is allowed (counter incremented),
-        False if the window quota is exhausted.
+        Uses in-memory ``RateLimitCache`` when available (fast path),
+        otherwise falls back to the database.
         """
+        if self._cache is not None:
+            return self._cache.check(
+                account_id, _GLOBAL_MODEL,
+                self.window_seconds, self.max_requests,
+            )
+
+        # Fallback: database atomic counting
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
 
@@ -115,7 +125,14 @@ class SenseTimeStrategy(RateLimitStrategy):
         """No-op — counting is done in check_rate_limit before dispatch."""
 
     def get_quota_info(self, account_id: str) -> dict:
-        """Return current window quota info for display."""
+        """Return current window quota info for display.
+
+        Uses in-memory cache when available for fast reads.
+        """
+        if self._cache is not None:
+            return self._cache.get_quota_info(account_id, _GLOBAL_MODEL)
+
+        # Fallback: database query
         now = datetime.now(timezone.utc)
 
         with self.db.get_connection() as conn:

@@ -1,7 +1,7 @@
 <template>
-  <nav class="flex-1 px-2 mt-2 space-y-0.5">
+  <nav class="flex-1 px-2 mt-2">
     <!-- Overview：监控与使用（cyan hover） -->
-    <p class="px-3 mb-2 text-[10px] font-medium text-ls-muted uppercase tracking-[0.15em]">Overview</p>
+    <p class="px-3 mt-4 mb-2 text-[10px] font-medium text-ls-muted uppercase tracking-[0.15em]">Overview</p>
     <router-link to="/" class="nav-item" @click="$emit('select')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="2" y="3" width="20" height="14" rx="2"/>
@@ -32,7 +32,7 @@
     </router-link>
 
     <!-- System：管理类（供应商/配置用 fuchsia hover，对应 demo 的 Members/Settings） -->
-    <p class="px-3 mt-6 mb-2 text-[10px] font-medium text-ls-muted uppercase tracking-[0.15em]">System</p>
+    <p class="px-3 mt-4 mb-2 text-[10px] font-medium text-ls-muted uppercase tracking-[0.15em]">System</p>
     <router-link to="/suppliers" class="nav-item nav-item-fuchsia" @click="$emit('select')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
@@ -47,14 +47,14 @@
       </svg>
       供应商类型
     </router-link>
-    <router-link to="/mappings" class="nav-item" @click="$emit('select')">
+    <router-link to="/mappings" class="nav-item nav-item-fuchsia" @click="$emit('select')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M10 13a5 5 0 0 0 7.54 .54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
       </svg>
       虚拟模型
     </router-link>
-    <router-link to="/keys" class="nav-item" @click="$emit('select')">
+    <router-link to="/keys" class="nav-item nav-item-fuchsia" @click="$emit('select')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="8" cy="15" r="5"/><path d="M11.5 11.5L21 2"/><path d="M16 7l3 3"/>
       </svg>
@@ -76,7 +76,7 @@ defineEmits(['select'])
 
 <style scoped>
 .nav-item {
-  @apply flex items-center gap-3 px-3 py-2 rounded-lg text-ls-dim text-sm font-medium transition-colors;
+  @apply flex items-center gap-3 px-3 py-2 rounded-lg text-ls-dim text-sm font-medium transition-colors mb-1;
 }
 .nav-item:hover {
   @apply text-ls-accent bg-ls-accent/5;

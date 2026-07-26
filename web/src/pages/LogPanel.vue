@@ -5,7 +5,7 @@
  * 纯展示型：GET /mappings/{alias}/logs，按时间范围聚合。
  * 赛博朋克霓虹主题。
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import Drawer from '@/components/Drawer.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import CTable from '@/components/CTable.vue'
@@ -48,16 +48,25 @@ const load = async () => {
   }
 }
 
+watch([days], () => { if (props.modelValue) load() })
+
+const close = () => emit('update:modelValue', false)
+
+// ── Auto-refresh every 30s while drawer is open ──
+let refreshTimer = null
 watch(() => props.modelValue, (v) => {
   if (v) {
     data.value = null
     load()
+    refreshTimer = setInterval(load, 30000)
+  } else {
+    if (refreshTimer) clearInterval(refreshTimer)
+    refreshTimer = null
   }
 })
-
-watch([days], () => { if (props.modelValue) load() })
-
-const close = () => emit('update:modelValue', false)
+onBeforeUnmount(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+})
 </script>
 
 <template>

@@ -43,7 +43,8 @@ __all__ = [
 ]
 
 
-def build_rate_limit_strategies(provider_types, db, quota_updater, quota_repository) -> dict:
+def build_rate_limit_strategies(provider_types, db, quota_updater, quota_repository,
+                                rate_limit_cache=None) -> dict:
     """按供应商类型列表构建 {type_key: RateLimitStrategy} 字典。
 
     每个供应商类型由其 strategy_type 决定限流行为，config 提供策略参数：
@@ -64,6 +65,7 @@ def build_rate_limit_strategies(provider_types, db, quota_updater, quota_reposit
                 db=db,
                 window_seconds=int(cfg.get("window_seconds", 18000)),
                 max_requests=int(cfg.get("max_requests", 1500)),
+                rate_limit_cache=rate_limit_cache,
             )
         elif stype == "fixed_window_per_model":
             model_configs = cfg.get("models", {})
@@ -73,6 +75,7 @@ def build_rate_limit_strategies(provider_types, db, quota_updater, quota_reposit
                 window_seconds=int(cfg.get("window_seconds", 18000)),
                 max_requests=int(cfg.get("max_requests", 1500)),
                 model_configs=model_configs,
+                rate_limit_cache=rate_limit_cache,
             )
         else:
             strategies[type_key] = create_strategy(

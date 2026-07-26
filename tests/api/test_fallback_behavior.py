@@ -213,3 +213,199 @@ def test_all_candidates_fail_returns_error(client):
     # All candidates failed — should return 400 (last error)
     assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text}"
     assert mock_req.call_count == 2, "Expected both candidates to be tried"
+
+
+# ── Streaming fallback tests ────────────────────────────────────────────────
+
+
+def test_streaming_400_error_triggers_fallback_to_next_candidate(client):
+    """When the first candidate returns 400 in streaming mode, the request
+    should fall back to the next candidate instead of returning 400 to the
+    client. The HTTP request is now made before StreamingResponse is returned,
+    so pre-stream errors can trigger fallback.
+    """
+    app = client.app
+    http_client = app.state.services["http_client"]
+    alias_router = app.state.alias_router
+    alias_resolver = app.state.services["alias_resolver"]
+
+    account1 = Mock()
+    account1.account_id = "acc-1"
+    account1.name = "Supplier 1"
+    account1.api_key = "key1"
+    account1.base_url = "https://api1.test.com"
+    account1.provider_type = "modelscope"
+
+    account2 = Mock()
+    account2.account_id = "acc-2"
+    account2.name = "Supplier 2"
+    account2.api_key = "key2"
+    account2.base_url = "https://api2.test.com"
+    account2.provider_type = "modelscope"
+
+    from provider.services.alias_router import RoutingResult
+    candidates = [
+        RoutingResult(account=account1, model_name="test-model"),
+        RoutingResult(account=account2, model_name="test-model"),
+    ]
+
+    # First response: 400 error
+    response_400 = Mock()
+    response_400.status_code = 400
+    response_400.text = '{"error": "Bad Request"}'
+    response_400.headers = {}
+    # aiter_lines should not be called for the error case (error detected before streaming)
+
+    # Second response: 200 success
+    async def _success_lines():
+        yield 'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant","content":"Hello!"},"index":0}]}'
+        yield "data: [DONE]"
+
+    response_200 = Mock()
+    response_200.status_code = 200
+    response_200.text = ""
+    response_200.headers = {}
+    response_200.aiter_lines = _success_lines
+
+    with (
+        patch.object(alias_router, "get_candidates", return_value=candidates),
+        patch.object(http_client, "request", new_callable=AsyncMock) as mock_req,
+        patch.object(alias_resolver, "resolve_alias", new_callable=AsyncMock) as mock_resolve,
+    ):
+        # First call returns 400, second returns 200
+        mock_req.side_effect = [response_400, response_200]
+        mock_resolve.return_value = "test-model"
+
+        resp = client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+        )
+
+    # Should succeed via fallback to second candidate
+    assert resp.status_code == 200, f"Expected 200 after fallback, got {resp.status_code}: {resp.text}"
+    assert mock_req.call_count == 2, "Expected 2 HTTP calls (first failed, second succeeded)"
+
+
+def test_streaming_500_error_triggers_fallback_to_next_candidate(client):
+    """When the first candidate returns 500 in streaming mode, the request
+    should fall back to the next candidate.
+    """
+    app = client.app
+    http_client = app.state.services["http_client"]
+    alias_router = app.state.alias_router
+    alias_resolver = app.state.services["alias_resolver"]
+
+    account1 = Mock()
+    account1.account_id = "acc-1"
+    account1.name = "Supplier 1"
+    account1.api_key = "key1"
+    account1.base_url = "https://api1.test.com"
+    account1.provider_type = "modelscope"
+
+    account2 = Mock()
+    account2.account_id = "acc-2"
+    account2.name = "Supplier 2"
+    account2.api_key = "key2"
+    account2.base_url = "https://api2.test.com"
+    account2.provider_type = "modelscope"
+
+    from provider.services.alias_router import RoutingResult
+    candidates = [
+        RoutingResult(account=account1, model_name="test-model"),
+        RoutingResult(account=account2, model_name="test-model"),
+    ]
+
+    response_500 = Mock()
+    response_500.status_code = 500
+    response_500.text = '{"error": "Internal Server Error"}'
+    response_500.headers = {}
+
+    async def _success_lines():
+        yield 'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant","content":"Hello!"},"index":0}]}'
+        yield "data: [DONE]"
+
+    response_200 = Mock()
+    response_200.status_code = 200
+    response_200.text = ""
+    response_200.headers = {}
+    response_200.aiter_lines = _success_lines
+
+    with (
+        patch.object(alias_router, "get_candidates", return_value=candidates),
+        patch.object(http_client, "request", new_callable=AsyncMock) as mock_req,
+        patch.object(alias_resolver, "resolve_alias", new_callable=AsyncMock) as mock_resolve,
+    ):
+        mock_req.side_effect = [response_500, response_200]
+        mock_resolve.return_value = "test-model"
+
+        resp = client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+        )
+
+    assert resp.status_code == 200, f"Expected 200 after fallback, got {resp.status_code}: {resp.text}"
+    assert mock_req.call_count == 2
+
+
+def test_streaming_all_candidates_fail_returns_error(client):
+    """When all streaming candidates fail, should return an error response."""
+    app = client.app
+    http_client = app.state.services["http_client"]
+    alias_router = app.state.alias_router
+    alias_resolver = app.state.services["alias_resolver"]
+
+    account1 = Mock()
+    account1.account_id = "acc-1"
+    account1.name = "Supplier 1"
+    account1.api_key = "key1"
+    account1.base_url = "https://api1.test.com"
+    account1.provider_type = "modelscope"
+
+    account2 = Mock()
+    account2.account_id = "acc-2"
+    account2.name = "Supplier 2"
+    account2.api_key = "key2"
+    account2.base_url = "https://api2.test.com"
+    account2.provider_type = "modelscope"
+
+    from provider.services.alias_router import RoutingResult
+    candidates = [
+        RoutingResult(account=account1, model_name="test-model"),
+        RoutingResult(account=account2, model_name="test-model"),
+    ]
+
+    response_400 = Mock()
+    response_400.status_code = 400
+    response_400.text = '{"error": "Bad Request"}'
+    response_400.headers = {}
+    response_400.aiter_lines = AsyncMock(return_value=iter([]))
+
+    with (
+        patch.object(alias_router, "get_candidates", return_value=candidates),
+        patch.object(http_client, "request", new_callable=AsyncMock) as mock_req,
+        patch.object(alias_resolver, "resolve_alias", new_callable=AsyncMock) as mock_resolve,
+    ):
+        # Both candidates return 400
+        mock_req.return_value = response_400
+        mock_resolve.return_value = "test-model"
+
+        resp = client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+        )
+
+    # All candidates failed — should return 400 (last error)
+    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text}"
+    assert mock_req.call_count == 2, "Expected both candidates to be tried"

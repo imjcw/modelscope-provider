@@ -273,3 +273,57 @@ class TestMigration010_MappingModelsSortOrder:
         with db.get_connection() as conn:
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(mapping_models)")]
             assert "sort_order" in cols
+
+
+class TestMigration014_MappingModelsSupplierFk:
+    def test_replaces_model_name_with_supplier_model_id(self, db):
+        """Migration 014 adds supplier_model_id, backfills from model_name, drops model_name."""
+        with db.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE model_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alias_name TEXT NOT NULL UNIQUE
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE supplier_models (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    supplier_id INTEGER NOT NULL,
+                    model_name TEXT NOT NULL,
+                    model_type TEXT NOT NULL,
+                    UNIQUE(supplier_id, model_name)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE mapping_models (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alias_name TEXT NOT NULL,
+                    supplier_id INTEGER NOT NULL,
+                    model_name TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(alias_name, supplier_id, model_name)
+                )
+            """)
+            # Insert supplier_models so backfill can resolve them
+            conn.execute(
+                "INSERT INTO supplier_models (id, supplier_id, model_name, model_type) VALUES (1, 1, 'qwen-max', 'text')"
+            )
+            conn.execute(
+                "INSERT INTO model_mappings (alias_name) VALUES ('my-alias')"
+            )
+            conn.execute(
+                "INSERT INTO mapping_models (id, alias_name, supplier_id, model_name, sort_order) VALUES (1, 'my-alias', 1, 'qwen-max', 0)"
+            )
+
+        with db.get_connection() as conn:
+            by_version[14]().up(conn)
+
+        with db.get_connection() as conn:
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(mapping_models)")]
+            assert "supplier_model_id" in cols
+            assert "model_name" not in cols
+            # Backfill worked
+            row = conn.execute(
+                "SELECT supplier_model_id FROM mapping_models WHERE alias_name = 'my-alias'"
+            ).fetchone()
+            assert row[0] == 1

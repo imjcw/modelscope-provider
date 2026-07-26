@@ -27,6 +27,9 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
 
     Model-specific configs can be provided via ``model_configs`` to override
     the default ``window_seconds`` / ``max_requests`` for specific models.
+
+    Uses ``RateLimitCache`` for in-memory counting when available, falling
+    back to the database for atomic counting.
     """
 
     def __init__(
@@ -35,12 +38,14 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
         window_seconds: int = _DEFAULT_WINDOW_SECONDS,
         max_requests: int = _DEFAULT_MAX_REQUESTS,
         model_configs: Optional[Dict[str, Dict[str, int]]] = None,
+        rate_limit_cache=None,
     ):
         self.db = db
         self.default_window_seconds = window_seconds
         self.default_max_requests = max_requests
         # model_configs: {model_name: {"window_seconds": ..., "max_requests": ...}}
         self.model_configs = model_configs or {}
+        self._cache = rate_limit_cache  # Optional RateLimitCache
 
     def _get_model_config(self, model_name: str) -> Tuple[int, int]:
         """Get (window_seconds, max_requests) for a specific model.
@@ -54,12 +59,20 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
         )
 
     def check_rate_limit(self, account_id: str, model_name: str) -> bool:
-        """Atomically check and increment the per-model request counter.
+        """Check and increment the per-model request counter.
 
-        Returns True if the request is allowed (counter incremented),
-        False if the window quota is exhausted.
+        Uses in-memory ``RateLimitCache`` when available (fast path),
+        otherwise falls back to the database.
         """
         window_seconds, max_requests = self._get_model_config(model_name)
+
+        if self._cache is not None:
+            return self._cache.check(
+                account_id, model_name,
+                window_seconds, max_requests,
+            )
+
+        # Fallback: database atomic counting
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
 
@@ -133,8 +146,7 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
     def get_quota_info(self, account_id: str) -> dict:
         """Return aggregated quota info across all known models.
 
-        Returns the minimum remaining quota across all configured models
-        as a conservative estimate of the account's overall capacity.
+        Uses in-memory cache when available for fast reads.
         """
         all_models = set(self.model_configs.keys())
         # Also query the DB to find any models that have been used
@@ -169,8 +181,16 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
         }
 
     def get_model_quota_info(self, account_id: str, model_name: str) -> dict:
-        """Return quota info for a specific (account_id, model_name) pair."""
+        """Return quota info for a specific (account_id, model_name) pair.
+
+        Uses in-memory cache when available for fast reads.
+        """
         window_seconds, max_requests = self._get_model_config(model_name)
+
+        if self._cache is not None:
+            return self._cache.get_quota_info(account_id, model_name)
+
+        # Fallback: database query
         now = datetime.now(timezone.utc)
 
         with self.db.get_connection() as conn:

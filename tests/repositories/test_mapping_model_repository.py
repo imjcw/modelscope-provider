@@ -7,7 +7,7 @@ from provider.repositories.mapping_model_repository import MappingModelRepositor
 
 @pytest.fixture
 def test_db():
-    """Create test database with accounts and parent mapping entries."""
+    """Create test database with accounts, parent mapping entries and supplier_models."""
     # Start from a clean DB file to ensure FK constraints are active
     try:
         import os
@@ -19,7 +19,13 @@ def test_db():
     db.initialize_tables()
     # Create test accounts for foreign key constraint
     from provider.repositories.account_repository import AccountRepository
+    from provider.repositories.supplier_model_repository import SupplierModelRepository
+    from provider.repositories.mapping_repository import MappingRepository
+
     acc_repo = AccountRepository(db)
+    sm_repo = SupplierModelRepository(db)
+    mapping_repo = MappingRepository(db)
+
     acc1 = acc_repo.create('Supplier1', 'key1', 'https://api1.test.com')
     acc2 = acc_repo.create('Supplier2', 'key2', 'https://api2.test.com')
     # Verify accounts exist
@@ -27,14 +33,28 @@ def test_db():
     assert acc2 is not None
     assert acc1['id'] == 1
     assert acc2['id'] == 2
+
     # Create parent model_mappings entries (FK prerequisite for mapping_models)
-    from provider.repositories.mapping_repository import MappingRepository
-    mapping_repo = MappingRepository(db)
     mapping_repo.create('test-alias', 'test-alias')
     mapping_repo.create('alias1', 'alias1')
     mapping_repo.create('alias2', 'alias2')
     mapping_repo.create('alias3', 'alias3')
-    yield db, acc1, acc2
+
+    # Create supplier_models (FK prerequisite for mapping_models.supplier_model_id)
+    sm_repo.create(acc1['id'], 'qwen-max', 'text')
+    sm_repo.create(acc1['id'], 'qwen-plus', 'text')
+    sm_repo.create(acc2['id'], 'deepseek-chat', 'text')
+    sm_repo.create(acc2['id'], 'ernie-bot', 'text')
+
+    # Helper to look up supplier_model id by (supplier_id, model_name)
+    def _sm_id(sid, name):
+        rows = sm_repo.find_by_supplier(sid)
+        for r in rows:
+            if r['model_name'] == name:
+                return r['id']
+        raise ValueError(f"supplier_model ({sid}, {name}) not found")
+
+    yield db, acc1, acc2, sm_repo, _sm_id
     # Cleanup
     conn = sqlite3.connect('modelscope_proxy_test.db')
     conn.execute("DROP TABLE IF EXISTS mapping_models")
@@ -46,7 +66,7 @@ def test_db():
 
 @pytest.fixture
 def repo(test_db):
-    db, acc1, acc2 = test_db
+    db, acc1, acc2, sm_repo, _sm_id = test_db
     return MappingModelRepository(db)
 
 
@@ -58,10 +78,11 @@ def test_find_by_alias_empty(repo):
 
 def test_add_model(repo, test_db):
     """Test adding a model to a mapping alias."""
-    db, acc1, acc2 = test_db
-    print(f"Adding model with supplier_id={acc1['id']}")
-    result = repo.add_model('test-alias', acc1['id'], 'qwen-max')
+    db, acc1, acc2, sm_repo, _sm_id = test_db
+    sid = _sm_id(acc1['id'], 'qwen-max')
+    result = repo.add_model('test-alias', sid)
     assert result['alias_name'] == 'test-alias'
+    assert result['supplier_model_id'] == sid
     assert result['supplier_id'] == acc1['id']
     assert result['model_name'] == 'qwen-max'
     assert 'id' in result
@@ -70,18 +91,21 @@ def test_add_model(repo, test_db):
 
 def test_add_model_duplicate(repo, test_db):
     """Test that adding duplicate model raises error."""
-    db, acc1, acc2 = test_db
-    repo.add_model('test-alias', acc1['id'], 'qwen-max')
+    db, acc1, acc2, sm_repo, _sm_id = test_db
+    sid = _sm_id(acc1['id'], 'qwen-max')
+    repo.add_model('test-alias', sid)
     # SQLite will raise UNIQUE constraint error
     with pytest.raises(Exception):
-        repo.add_model('test-alias', acc1['id'], 'qwen-max')
+        repo.add_model('test-alias', sid)
 
 
 def test_find_by_alias(repo, test_db):
     """Test finding multiple models for an alias."""
-    db, acc1, acc2 = test_db
-    repo.add_model('test-alias', acc1['id'], 'qwen-max')
-    repo.add_model('test-alias', acc2['id'], 'deepseek-chat')
+    db, acc1, acc2, sm_repo, _sm_id = test_db
+    sm1 = _sm_id(acc1['id'], 'qwen-max')
+    sm2 = _sm_id(acc2['id'], 'deepseek-chat')
+    repo.add_model('test-alias', sm1)
+    repo.add_model('test-alias', sm2)
     results = repo.find_by_alias('test-alias')
     assert len(results) == 2
     model_names = {r['model_name'] for r in results}
@@ -93,8 +117,9 @@ def test_find_by_alias(repo, test_db):
 
 def test_remove_model(repo, test_db):
     """Test removing a model from an alias."""
-    db, acc1, acc2 = test_db
-    added = repo.add_model('test-alias', acc1['id'], 'qwen-max')
+    db, acc1, acc2, sm_repo, _sm_id = test_db
+    sid = _sm_id(acc1['id'], 'qwen-max')
+    added = repo.add_model('test-alias', sid)
     model_id = added['id']
     result = repo.remove_model(model_id)
     assert result is True
@@ -109,10 +134,13 @@ def test_remove_model_not_found(repo):
 
 def test_get_by_supplier(repo, test_db):
     """Test getting all models for a specific supplier."""
-    db, acc1, acc2 = test_db
-    repo.add_model('alias1', acc1['id'], 'qwen-max')
-    repo.add_model('alias2', acc1['id'], 'deepseek-chat')
-    repo.add_model('alias3', acc2['id'], 'ernie-bot')
+    db, acc1, acc2, sm_repo, _sm_id = test_db
+    sm1 = _sm_id(acc1['id'], 'qwen-max')
+    sm2 = _sm_id(acc1['id'], 'qwen-plus')
+    sm3 = _sm_id(acc2['id'], 'ernie-bot')
+    repo.add_model('alias1', sm1)
+    repo.add_model('alias2', sm2)
+    repo.add_model('alias3', sm3)
     results = repo.get_by_supplier(acc1['id'])
     assert len(results) == 2
     assert results[0]['alias_name'] in ['alias1', 'alias2']
@@ -121,23 +149,27 @@ def test_get_by_supplier(repo, test_db):
 
 def test_multiple_aliases_same_model(repo, test_db):
     """Test that same model can exist under different aliases."""
-    db, acc1, acc2 = test_db
-    repo.add_model('alias1', acc1['id'], 'qwen-max')
-    repo.add_model('alias2', acc2['id'], 'qwen-max')
+    db, acc1, acc2, sm_repo, _sm_id = test_db
+    sm1 = _sm_id(acc1['id'], 'qwen-max')
+    sm2 = _sm_id(acc2['id'], 'ernie-bot')
+    repo.add_model('alias1', sm1)
+    repo.add_model('alias2', sm2)
     results1 = repo.find_by_alias('alias1')
     results2 = repo.find_by_alias('alias2')
     assert len(results1) == 1
     assert len(results2) == 1
     assert results1[0]['model_name'] == 'qwen-max'
-    assert results2[0]['model_name'] == 'qwen-max'
+    assert results2[0]['model_name'] == 'ernie-bot'
 
 
 def test_updated_at_timestamp(repo, test_db):
     """Test that updated_at is set when adding a model."""
-    db, acc1, acc2 = test_db
+    db, acc1, acc2, sm_repo, _sm_id = test_db
+    sm1 = _sm_id(acc1['id'], 'qwen-max')
+    sm2 = _sm_id(acc2['id'], 'deepseek-chat')
     import time
-    result1 = repo.add_model('test-alias', acc1['id'], 'qwen-max')
+    result1 = repo.add_model('test-alias', sm1)
     time.sleep(1.1)  # SQLite CURRENT_TIMESTAMP has second-level precision
-    result2 = repo.add_model('test-alias', acc2['id'], 'deepseek-chat')
+    result2 = repo.add_model('test-alias', sm2)
     # updated_at should be different for each
     assert result1['updated_at'] != result2['updated_at']

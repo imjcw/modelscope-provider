@@ -109,8 +109,7 @@ class SupplierModelBulkUpdate(BaseModel):
 
 
 class MappingModelCreate(BaseModel):
-    supplier_id: int = Field(..., description="Supplier ID")
-    model_name: str = Field(..., description="Model name on supplier")
+    supplier_model_id: int = Field(..., description="supplier_models row id")
 
 
 class ProviderTypeCreate(BaseModel):
@@ -428,13 +427,14 @@ def add_mapping_model(
         next_order = len(existing)
         return service.add_mapping_model(
             alias_name,
-            supplier_id=body.supplier_id,
-            model_name=body.model_name,
+            supplier_model_id=body.supplier_model_id,
             sort_order=next_order,
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         if "UNIQUE constraint" in str(e):
-            raise HTTPException(status_code=409, detail=f"Model {body.model_name} already bound to this alias")
+            raise HTTPException(status_code=409, detail=f"Model already bound to this alias")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -769,3 +769,28 @@ def get_performance_stats(request: Request, service=Depends(get_admin_service)):
         }
 
     return stats
+
+
+@router.get("/circuit-breaker")
+def get_circuit_breaker_state(request: Request, service=Depends(get_admin_service)):
+    """Get circuit breaker state for all tracked (account, model) pairs.
+
+    Shows which upstream suppliers are currently frozen due to consecutive
+    failures, their error type, and remaining freeze time.
+    """
+    try:
+        services = request.app.state.services
+    except AttributeError:
+        services = {}
+
+    circuit_breaker = services.get("circuit_breaker") if services else None
+    if circuit_breaker is None:
+        return {"circuits": [], "total": 0}
+
+    states = circuit_breaker.get_all_states()
+    return {
+        "circuits": states,
+        "total": len(states),
+        "frozen": sum(1 for s in states if s.get("frozen_remaining", 0) > 0),
+        "escalated": sum(1 for s in states if s.get("escalated")),
+    }

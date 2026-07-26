@@ -12,6 +12,16 @@ class SupplierModelRepository:
     def __init__(self, db: DatabaseManager):
         self.db = db
 
+    def find_by_id(self, model_id: int) -> Optional[dict]:
+        """Get a single supplier model by its row id, or None."""
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM supplier_models WHERE id = ?",
+                (model_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def find_by_supplier(self, supplier_id: int) -> List[dict]:
         """Get all models supported by a supplier."""
         with self.db.get_connection() as conn:

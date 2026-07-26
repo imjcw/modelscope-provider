@@ -7,24 +7,20 @@
       <!-- Server Settings -->
       <CCard title="服务设置" body-class="p-5 space-y-4">
         <FormField label="监听地址" plain hint="(读取配置文件)">
-          <input v-model="config.listenHost" type="text" disabled
-            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-dim font-mono cursor-not-allowed">
+          <input v-model="config.listenHost" type="text" disabled class="form-input font-mono cursor-not-allowed">
         </FormField>
         <FormField label="监听端口" plain hint="(读取配置文件)">
-          <input v-model.number="config.listenPort" type="number" disabled
-            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-dim font-mono cursor-not-allowed">
+          <input v-model.number="config.listenPort" type="number" disabled class="form-input font-mono cursor-not-allowed">
         </FormField>
         <FormField label="API 前缀" plain hint="(读取配置文件)">
-          <input v-model="config.apiPrefix" type="text" disabled
-            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-dim font-mono cursor-not-allowed">
+          <input v-model="config.apiPrefix" type="text" disabled class="form-input font-mono cursor-not-allowed">
         </FormField>
       </CCard>
 
       <!-- Database Settings -->
       <CCard title="数据库设置" body-class="p-5 space-y-4">
         <FormField label="数据库路径" plain hint="(读取配置文件)">
-          <input v-model="config.dbPath" type="text" disabled
-            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-dim font-mono cursor-not-allowed">
+          <input v-model="config.dbPath" type="text" disabled class="form-input font-mono cursor-not-allowed">
         </FormField>
         <FormField label="数据库大小" plain>
           <p class="text-sm text-ls-dim font-mono">{{ info.dbSize || '—' }}</p>
@@ -35,6 +31,9 @@
       <CCard title="日志设置" body-class="p-5 space-y-4">
         <FormField label="日志级别" plain>
           <CSelect v-model="config.logLevel" :options="LOG_LEVEL_OPTIONS" placeholder="日志级别" />
+        </FormField>
+        <FormField label="请求日志保留时长 (小时)" hint="超过此时长的请求日志将由定时任务自动清空，最小 1 小时">
+          <input v-model.number="config.logRetentionHours" type="number" min="1" class="form-input font-mono">
         </FormField>
         <div class="flex items-center justify-between">
           <div>
@@ -51,12 +50,10 @@
           <CSelect v-model="config.lbStrategy" :options="LB_STRATEGY_OPTIONS" placeholder="策略" />
         </FormField>
         <FormField label="超时 (ms)" plain>
-          <input v-model.number="config.timeoutMs" type="number"
-            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-text font-mono focus:outline-none focus:border-ls-accent">
+          <input v-model.number="config.timeoutMs" type="number" class="form-input font-mono">
         </FormField>
         <FormField label="重试次数" plain>
-          <input v-model.number="config.retryCount" type="number"
-            class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-text font-mono focus:outline-none focus:border-ls-accent">
+          <input v-model.number="config.retryCount" type="number" class="form-input font-mono">
         </FormField>
       </CCard>
 
@@ -104,9 +101,7 @@
             <div class="flex items-end justify-between gap-4">
               <FormField label="导入文件" plain hint="(.json / .yaml)" class="flex-1">
                 <div class="flex items-center gap-2">
-                  <button @click="triggerFileInput" class="btn-secondary px-3 py-2 text-sm rounded-lg border border-ls-border text-ls-dim hover:text-ls-text transition-colors">
-                    选择文件
-                  </button>
+                  <button @click="triggerFileInput" class="btn btn-secondary">选择文件</button>
                   <span class="text-sm text-ls-dim truncate">{{ selectedFileName || '未选择文件' }}</span>
                   <input ref="fileInput" type="file" accept=".json,.yaml,.yml" @change="handleFileSelect" class="hidden">
                 </div>
@@ -116,7 +111,7 @@
               </FormField>
             </div>
             <div class="flex items-center justify-between">
-              <p class="text-xs text-gray-600">导入将批量添加或更新供应商及其关联模型</p>
+              <p class="text-xs text-ls-dim">导入将批量添加或更新供应商及其关联模型</p>
               <button @click="handleImport" class="btn btn-primary whitespace-nowrap" :disabled="!selectedFile || importing">
                 <svg v-if="!importing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-1.5">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
@@ -130,32 +125,32 @@
           </div>
 
           <!-- Import Result -->
-          <div v-if="importResult" class="rounded-lg border border-green-800/50 bg-green-900/20 px-4 py-3">
-            <div class="flex items-center gap-2 text-sm text-green-300">
+          <div v-if="importResult" class="rounded-lg border border-ls-border bg-ls-card px-4 py-3">
+            <div class="flex items-center gap-2 text-sm text-ls-text">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
               </svg>
               <span>导入完成 — 新增 <strong>{{ importResult.created }}</strong> / 跳过 <strong>{{ importResult.skipped }}</strong> / 更新 <strong>{{ importResult.updated }}</strong> / 错误 <strong>{{ importResult.errors.length }}</strong></span>
             </div>
             <ul v-if="importResult.errors.length" class="mt-2 space-y-1">
-              <li v-for="(err, i) in importResult.errors" :key="i" class="text-xs text-red-400 font-mono">• {{ err }}</li>
+              <li v-for="(err, i) in importResult.errors" :key="i" class="text-xs text-ls-danger font-mono">• {{ err }}</li>
             </ul>
           </div>
       </CCard>
 
       <!-- About -->
       <CCard title="关于" body-class="p-5 space-y-2">
-        <div class="flex justify-between text-sm"><span class="text-gray-500">版本</span><span class="text-white font-mono">{{ info.version || '—' }}</span></div>
-        <div class="flex justify-between text-sm"><span class="text-gray-500">运行时长</span><span class="text-white font-mono">{{ info.uptime || '—' }}</span></div>
-        <div class="flex justify-between text-sm"><span class="text-gray-500">Python</span><span class="text-white font-mono">{{ info.python || '—' }}</span></div>
-        <div class="flex justify-between text-sm"><span class="text-gray-500">Uvicorn</span><span class="text-white font-mono">{{ info.uvicorn || '—' }}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-ls-dim">版本</span><span class="text-ls-text font-mono">{{ info.version || '—' }}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-ls-dim">运行时长</span><span class="text-ls-text font-mono">{{ info.uptime || '—' }}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-ls-dim">Python</span><span class="text-ls-text font-mono">{{ info.python || '—' }}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-ls-dim">Uvicorn</span><span class="text-ls-text font-mono">{{ info.uvicorn || '—' }}</span></div>
       </CCard>
     </div>
 
     <!-- Save bar -->
     <div class="flex-shrink-0 px-6 pb-6">
       <div class="bg-ls-card rounded-lg border border-ls-border px-5 py-3 flex items-center justify-between">
-        <p class="text-xs text-gray-500">修改后请点击保存以应用配置</p>
+        <p class="text-xs text-ls-dim">修改后请点击保存以应用配置</p>
         <div class="flex items-center gap-2.5">
           <button @click="resetConfig" class="btn btn-secondary">取消</button>
           <button @click="saveConfig" class="btn btn-primary">保存配置</button>
@@ -192,6 +187,7 @@ const LB_STRATEGY_OPTIONS = [
 const DEFAULTS = {
   listenHost: '0.0.0.0', listenPort: 8000, apiPrefix: '/api',
   dbPath: 'modelscope_proxy.db', logLevel: 'INFO', persistLogs: true,
+  logRetentionHours: 1,
   lbStrategy: 'round_robin', timeoutMs: 30000, retryCount: 0,
   autoDisable: true, autoReset: true,
 }
@@ -218,6 +214,7 @@ const applyBackendConfig = (data) => {
     retryCount: Number(m('retry_count')) || 0,
     autoDisable: (m('auto_disable_on_quota') || 'true').toLowerCase() === 'true',
     autoReset: (m('auto_reset_daily') || 'true').toLowerCase() === 'true',
+    logRetentionHours: Number(m('log_retention_hours')) || 1,
   })
   // Frontend-only fields keep their defaults if backend has nothing
 }
@@ -268,6 +265,7 @@ const saveConfig = async () => {
     retry_count: String(config.retryCount),
     auto_disable_on_quota: String(config.autoDisable),
     auto_reset_daily: String(config.autoReset),
+    log_retention_hours: String(config.logRetentionHours),
   }
   try {
     await apiUpdateConfig(payload)

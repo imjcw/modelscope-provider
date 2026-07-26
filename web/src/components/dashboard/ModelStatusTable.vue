@@ -20,20 +20,26 @@ const STATUS = {
 }
 
 const rows = computed(() => {
-  const statsByModel = new Map((props.modelStats || []).map(m => [m.model, m]))
+  // Align by (model name, account_id). Stats are grouped by (model, account_id)
+  // and quota rows carry account_id, so the same model name on different
+  // suppliers is matched correctly instead of being merged.
+  const statsByModel = new Map(
+    (props.modelStats || []).map(m => [`${m.model}::${m.account_id}`, m])
+  )
   const seen = new Set()
   const out = []
 
   for (const q of props.quotas || []) {
-    const key = q.model_name
-    if (!key || seen.has(key)) continue
+    const key = `${q.model_name}::${q.account_id}`
+    if (!q.model_name || seen.has(key)) continue
     seen.add(key)
     const st = statsByModel.get(key)
     const limit = q.quota_limit || 0
     const remaining = q.quota_remaining || 0
     const usedPct = limit > 0 ? Math.round(((limit - remaining) / limit) * 100) : null
     out.push({
-      model: key,
+      model: q.model_name,
+      account_id: q.account_id,
       group: q.model_type || '—',
       platform: q.supplier_name || '—',
       calls: st ? st.total : 0,
@@ -44,14 +50,16 @@ const rows = computed(() => {
   }
   // 窗口内有调用但没有配额记录的模型
   for (const m of props.modelStats || []) {
-    if (seen.has(m.model)) continue
-    seen.add(m.model)
+    const key = `${m.model}::${m.account_id}`
+    if (seen.has(key)) continue
+    seen.add(key)
     out.push({
-      model: m.model, group: '—', platform: '—',
+      model: m.model, account_id: m.account_id, group: '—', platform: '—',
       calls: m.total, successRate: m.success_rate, usedPct: null, status: 'ok',
     })
   }
-  return out.sort((a, b) => b.calls - a.calls)
+  // 仅展示有请求量的模型
+  return out.filter(r => r.calls > 0).sort((a, b) => b.calls - a.calls)
 })
 
 const rateClass = (r) => {
@@ -93,7 +101,7 @@ const pctLabelClass = (pct) =>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in rows" :key="row.model">
+          <tr v-for="row in rows" :key="row.model + '|' + (row.account_id || '')">
             <td>
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded" :class="STATUS[row.status].dot"></span>

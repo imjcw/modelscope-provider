@@ -187,14 +187,13 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS mapping_models (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     alias_name TEXT NOT NULL,
-                    supplier_id INTEGER NOT NULL,
-                    model_name TEXT NOT NULL,
+                    supplier_model_id INTEGER NOT NULL,
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (alias_name) REFERENCES model_mappings(alias_name) ON DELETE CASCADE,
-                    FOREIGN KEY (supplier_id) REFERENCES accounts(id) ON DELETE CASCADE,
-                    UNIQUE(alias_name, supplier_id, model_name)
+                    FOREIGN KEY (supplier_model_id) REFERENCES supplier_models(id) ON DELETE CASCADE,
+                    UNIQUE(alias_name, supplier_model_id)
                 )
             """)
 
@@ -243,6 +242,28 @@ class DatabaseManager:
                     client_key_name TEXT
                 )
             """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS request_stats_minute (
+                    bucket TEXT NOT NULL,
+                    model TEXT NOT NULL DEFAULT '',
+                    account_id TEXT NOT NULL DEFAULT '',
+                    client_key_name TEXT NOT NULL DEFAULT '',
+                    requests INTEGER NOT NULL DEFAULT 0,
+                    success INTEGER NOT NULL DEFAULT 0,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    latency_sum INTEGER NOT NULL DEFAULT 0,
+                    latency_count INTEGER NOT NULL DEFAULT 0,
+                    cached_tokens INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (bucket, model, account_id, client_key_name)
+                )
+            """)
+            # Migration: add virtual_model column to existing tables
+            try:
+                cursor.execute("ALTER TABLE request_stats_minute ADD COLUMN virtual_model TEXT NOT NULL DEFAULT ''")
+            except Exception:
+                pass  # Column already exists
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS client_api_keys (
@@ -294,8 +315,8 @@ class DatabaseManager:
             """)
 
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_mapping_models_supplier
-                ON mapping_models(supplier_id)
+                CREATE INDEX IF NOT EXISTS idx_mapping_models_supplier_model_id
+                ON mapping_models(supplier_model_id)
             """)
 
             cursor.execute("""
@@ -320,6 +341,7 @@ class DatabaseManager:
             ("retry_count", "0", "失败重试次数"),
             ("auto_disable_on_quota", "true", "配额耗尽时自动禁用供应商"),
             ("auto_reset_daily", "true", "每日自动重置配额"),
+            ("log_retention_hours", "1", "保留日志的小时数，超出则定时清理"),
         ]
         with self.get_connection() as conn:
             cursor = conn.cursor()
