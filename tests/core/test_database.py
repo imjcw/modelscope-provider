@@ -113,3 +113,19 @@ def test_foreign_keys_enabled(database):
     with database.get_connection() as conn:
         result = conn.execute("PRAGMA foreign_keys").fetchone()
         assert result[0] == 1
+
+
+def test_database_wal_mode_enabled(database):
+    """Verify WAL journal mode is enabled for better concurrent performance."""
+    with database.get_connection() as conn:
+        cursor = conn.execute("PRAGMA journal_mode")
+        journal_mode = cursor.fetchone()[0]
+        assert journal_mode.upper() == "WAL", f"Expected WAL, got {journal_mode}"
+
+
+def test_database_synchronous_normal(database):
+    """Verify synchronous is set to NORMAL for balanced performance."""
+    with database.get_connection() as conn:
+        cursor = conn.execute("PRAGMA synchronous")
+        sync_mode = cursor.fetchone()[0]
+        assert sync_mode == 1, f"Expected synchronous=NORMAL (1), got {sync_mode}"

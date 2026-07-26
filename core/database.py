@@ -46,6 +46,15 @@ class DatabaseManager:
         # short-lived child connection while the outer transaction is in flight
         # (e.g. SELECT inside a write block, or nested repository calls).
         conn.execute("PRAGMA busy_timeout = 3000")
+        # Enable WAL (Write-Ahead Logging) for better concurrent read/write
+        # performance. WAL allows readers to proceed concurrently with a single
+        # writer, which is critical for the proxy's read-heavy workload where
+        # every request reads config/quotas while writes update usage stats.
+        conn.execute("PRAGMA journal_mode = WAL")
+        # synchronous=NORMAL (1) is safe with WAL and ~2x faster than FULL (2).
+        conn.execute("PRAGMA synchronous = NORMAL")
+        # Larger cache reduces disk I/O for the hot path (accounts, mappings).
+        conn.execute("PRAGMA cache_size = -2000")  # 2MB page cache
         try:
             yield conn
             conn.commit()
