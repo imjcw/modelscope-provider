@@ -31,6 +31,27 @@ def get_admin_service(request: Request):
     return svc
 
 
+def _refresh_after_account_change(request: Request):
+    """Refresh LoadBalancer and clear caches after account mutations.
+
+    Called by admin endpoints that create, update, or delete suppliers.
+    Ensures the LoadBalancer picks up new/removed accounts and the
+    alias resolver cache is invalidated.
+    """
+    from api.routes import refresh_load_balancer
+    refresh_load_balancer(request)
+
+    # Clear alias resolver cache
+    try:
+        services = request.app.state.services
+        if services and "alias_resolver" in services:
+            resolver = services["alias_resolver"]
+            if hasattr(resolver, "clear_cache"):
+                resolver.clear_cache()
+    except Exception:
+        pass
+
+
 # ── Request / Response Models ───────────────────────────────────────────────
 
 class SupplierCreate(BaseModel):
@@ -168,6 +189,7 @@ def export_suppliers(format: str = "json", service=Depends(get_admin_service)):
 
 @router.post("/suppliers/import")
 async def import_suppliers(
+    request: Request,
     file: UploadFile = File(..., description="JSON or YAML file with supplier data"),
     strategy: str = Form("skip", description="How to handle duplicates: 'skip' or 'overwrite'"),
     service=Depends(get_admin_service),
@@ -205,6 +227,7 @@ async def import_suppliers(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
 
+    _refresh_after_account_change(request)
     return result
 
 
@@ -217,14 +240,16 @@ def get_supplier(supplier_id: int, service=Depends(get_admin_service)):
 
 
 @router.post("/suppliers")
-def create_supplier(body: SupplierCreate, service=Depends(get_admin_service)):
+def create_supplier(body: SupplierCreate, request: Request, service=Depends(get_admin_service)):
     try:
-        return service.create_supplier(
+        result = service.create_supplier(
             name=body.name,
             api_key=body.api_key,
             base_url=body.base_url,
             provider_type=body.provider_type,
         )
+        _refresh_after_account_change(request)
+        return result
     except Exception as e:
         if "UNIQUE constraint" in str(e):
             raise HTTPException(status_code=409, detail=f"供应商 {body.name} 已存在")
@@ -232,25 +257,28 @@ def create_supplier(body: SupplierCreate, service=Depends(get_admin_service)):
 
 
 @router.put("/suppliers/{supplier_id}")
-def update_supplier(supplier_id: int, body: SupplierUpdate, service=Depends(get_admin_service)):
+def update_supplier(supplier_id: int, request: Request, body: SupplierUpdate, service=Depends(get_admin_service)):
     updated = service.update_supplier(supplier_id, **body.model_dump(exclude_unset=True))
     if not updated:
         raise HTTPException(status_code=404, detail="Supplier not found")
+    _refresh_after_account_change(request)
     return updated
 
 
 @router.patch("/suppliers/{supplier_id}/status")
-def toggle_supplier(supplier_id: int, service=Depends(get_admin_service)):
+def toggle_supplier(supplier_id: int, request: Request, service=Depends(get_admin_service)):
     toggled = service.toggle_supplier(supplier_id)
     if not toggled:
         raise HTTPException(status_code=404, detail="Supplier not found")
+    _refresh_after_account_change(request)
     return toggled
 
 
 @router.delete("/suppliers/{supplier_id}")
-def delete_supplier(supplier_id: int, service=Depends(get_admin_service)):
+def delete_supplier(supplier_id: int, request: Request, service=Depends(get_admin_service)):
     if not service.delete_supplier(supplier_id):
         raise HTTPException(status_code=404, detail="Supplier not found")
+    _refresh_after_account_change(request)
     return {"ok": True}
 
 
@@ -301,15 +329,17 @@ def list_supplier_models(supplier_id: int, service=Depends(get_admin_service)):
 
 @router.post("/suppliers/{supplier_id}/models")
 def create_supplier_model(
-    supplier_id: int, body: SupplierModelCreate, service=Depends(get_admin_service)
+    supplier_id: int, request: Request, body: SupplierModelCreate, service=Depends(get_admin_service)
 ):
     try:
-        return service.create_supplier_model(
+        result = service.create_supplier_model(
             supplier_id,
             model_name=body.model_name,
             model_type=body.model_type,
             context_length=body.context_length,
         )
+        _refresh_after_account_change(request)
+        return result
     except Exception as e:
         if "UNIQUE constraint" in str(e):
             raise HTTPException(
@@ -321,10 +351,11 @@ def create_supplier_model(
 
 @router.delete("/suppliers/{supplier_id}/models/{model_id}")
 def delete_supplier_model(
-    supplier_id: int, model_id: int, service=Depends(get_admin_service)
+    supplier_id: int, model_id: int, request: Request, service=Depends(get_admin_service)
 ):
     if not service.delete_supplier_model(model_id):
         raise HTTPException(status_code=404, detail="Model association not found")
+    _refresh_after_account_change(request)
     return {"ok": True}
 
 
@@ -707,3 +738,34 @@ def get_client_key_docs(key_id: int, request: Request, service=Depends(get_admin
     if not docs:
         raise HTTPException(status_code=404, detail="Client key not found")
     return docs
+
+
+# ── Performance Monitoring ─────────────────────────────────────────────────
+
+@router.get("/performance")
+def get_performance_stats(request: Request, service=Depends(get_admin_service)):
+    """Get performance statistics for monitoring."""
+    try:
+        services = request.app.state.services
+    except AttributeError:
+        services = {}
+
+    stats = {
+        "timestamp": time.time(),
+        "cache_stats": {}
+    }
+
+    if services and "alias_resolver" in services:
+        resolver = services["alias_resolver"]
+        if hasattr(resolver, "success_cache"):
+            stats["cache_stats"]["alias_resolver_success"] = resolver.success_cache.size()
+        if hasattr(resolver, "failure_cache"):
+            stats["cache_stats"]["alias_resolver_failure"] = resolver.failure_cache.size()
+
+    if services and "load_balancer" in services:
+        lb = services["load_balancer"]
+        stats["load_balancer"] = {
+            "accounts_count": len(lb.accounts) if hasattr(lb, "accounts") else 0
+        }
+
+    return stats
