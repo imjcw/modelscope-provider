@@ -21,6 +21,10 @@ class MockAccountRepo:
     def find_by_id(self, account_id):
         return self._accounts.get(account_id)
 
+    def find_by_ids(self, ids):
+        """Batch query mock — returns dict mapping id -> account."""
+        return {id: self._accounts[id] for id in ids if id in self._accounts}
+
 
 class MockConfigRepo:
     def __init__(self, strategy="round_robin"):
@@ -41,6 +45,48 @@ def _make_account(id, name="Supplier", api_key="key", base_url="https://api.test
         "base_url": base_url,
         "status": "active",
     }
+
+
+def test_alias_router_uses_batch_queries():
+    """Test that AliasRouter uses batch queries instead of N+1."""
+    from unittest.mock import Mock
+    
+    # 创建模拟数据
+    mapping_entries = [
+        {"id": 1, "supplier_id": 1, "model_name": "model1"},
+        {"id": 2, "supplier_id": 2, "model_name": "model1"},
+        {"id": 3, "supplier_id": 3, "model_name": "model1"},
+    ]
+    
+    accounts = {
+        1: _make_account(1, name="Supplier 1"),
+        2: _make_account(2, name="Supplier 2"),
+        3: _make_account(3, name="Supplier 3"),
+    }
+    
+    # 模拟 repository
+    mapping_repo = MockMappingModelRepo({"test-alias": mapping_entries})
+    account_repo = MockAccountRepo(accounts)
+    
+    config_repo = MockConfigRepo()
+    
+    router = AliasRouter(mapping_repo, account_repo, config_repo)
+    
+    # 调用 _build_candidates
+    candidates = router._build_candidates("test-alias")
+    
+    # 验证结果
+    assert len(candidates) == 3
+    for (account_dict, model_name) in candidates:
+        assert account_dict["name"] in ["Supplier 1", "Supplier 2", "Supplier 3"]
+        assert model_name == "model1"
+    
+    # 验证 get_candidates 也正常工作
+    routing_results = router.get_candidates("test-alias")
+    assert len(routing_results) == 3
+    for result in routing_results:
+        assert isinstance(result.account, ModelScopeAccount)
+        assert result.model_name == "model1"
 
 
 class TestAliasRouterRoute:

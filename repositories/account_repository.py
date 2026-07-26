@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from core.database import DatabaseManager
 
@@ -34,6 +34,24 @@ class AccountRepository:
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+
+    def find_by_ids(self, ids: List[int]) -> Dict[int, dict]:
+        """Get accounts by multiple IDs, returns dict mapping id -> account."""
+        if not ids:
+            return {}
+        
+        with self.db.get_connection() as conn:
+            # Use parameterized IN clause with safe expansion
+            placeholders = ",".join("?" * len(ids))
+            cursor = conn.execute(
+                f"SELECT * FROM accounts WHERE id IN ({placeholders})",
+                ids
+            )
+            accounts = {}
+            for row in cursor.fetchall():
+                account = dict(row)
+                accounts[account["id"]] = account
+            return accounts
 
     def find_by_name(self, name: str) -> Optional[dict]:
         """Get account by name (name is UNIQUE)."""

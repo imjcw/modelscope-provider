@@ -46,9 +46,13 @@ class AliasRouter:
         if not entries:
             return []
 
+        # 批量查询账户：收集所有唯一的 supplier_id，一次查询获取所有账户
+        supplier_ids = list({entry["supplier_id"] for entry in entries})
+        accounts_by_id = self.account_repo.find_by_ids(supplier_ids)
+
         candidates = []
         for entry in entries:
-            account_dict = self.account_repo.find_by_id(entry["supplier_id"])
+            account_dict = accounts_by_id.get(entry["supplier_id"])
             if account_dict:
                 candidates.append((account_dict, entry["model_name"]))
 
