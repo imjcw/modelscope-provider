@@ -1,8 +1,8 @@
 <template>
-  <div>
-    <PageHeader title="系统配置" subtitle="全局参数和服务设置"></PageHeader>
+  <div class="h-full flex flex-col overflow-hidden">
+    <PageHeader title="系统配置 // Config" subtitle="// 全局参数和服务设置"></PageHeader>
 
-    <div class="px-6 md:px-8 py-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6 grid grid-cols-1 md:grid-cols-2 gap-6">
 
       <!-- Server Settings -->
       <CCard title="服务设置" body-class="p-5 space-y-4">
@@ -83,11 +83,7 @@
           <!-- Export -->
           <div class="flex items-end justify-between gap-4">
             <FormField label="导出格式" plain class="flex-1">
-              <select v-model="exportFormat"
-                class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-text font-mono focus:outline-none focus:border-ls-accent">
-                <option value="json">JSON</option>
-                <option value="yaml">YAML</option>
-              </select>
+              <CSelect v-model="exportFormat" :options="[{label:'JSON',value:'json'},{label:'YAML',value:'yaml'}]" placeholder="导出格式" />
             </FormField>
             <button @click="handleExport" class="btn btn-secondary whitespace-nowrap" :disabled="exporting">
               <svg v-if="!exporting" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-1.5">
@@ -116,11 +112,7 @@
                 </div>
               </FormField>
               <FormField label="重复处理" plain>
-                <select v-model="importStrategy"
-                  class="w-full bg-ls-bg rounded-lg border border-ls-border px-3 py-2 text-sm text-ls-text font-mono focus:outline-none focus:border-ls-accent">
-                  <option value="skip">跳过已有</option>
-                  <option value="overwrite">覆盖已有</option>
-                </select>
+                <CSelect v-model="importStrategy" :options="[{label:'跳过已有',value:'skip'},{label:'覆盖已有',value:'overwrite'}]" placeholder="重复处理" />
               </FormField>
             </div>
             <div class="flex items-center justify-between">
@@ -161,7 +153,7 @@
     </div>
 
     <!-- Save bar -->
-    <div class="px-6 pb-6">
+    <div class="flex-shrink-0 px-6 pb-6">
       <div class="bg-ls-card rounded-lg border border-ls-border px-5 py-3 flex items-center justify-between">
         <p class="text-xs text-gray-500">修改后请点击保存以应用配置</p>
         <div class="flex items-center gap-2.5">

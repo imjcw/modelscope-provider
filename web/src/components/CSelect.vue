@@ -90,11 +90,11 @@ function positionPopover() {
         'c-select-trigger',
         sizeClasses[size] || sizeClasses.md,
         'w-full text-left inline-flex items-center justify-between',
-        'bg-ls-bg rounded-lg border border-ls-border',
-        'text-ls-text placeholder:text-ls-muted',
-        'focus:outline-none focus:border-ls-accent focus:ring-1 focus:ring-ls-accent/20',
-        'transition-all duration-200',
-        open ? 'border-ls-accent ring-1 ring-ls-accent/20' : '',
+    'bg-ls-bg rounded-lg border border-ls-border',
+    'text-ls-text placeholder:text-ls-muted',
+    'focus:outline-none focus:border-ls-accent',
+    'transition-all duration-200',
+    open ? 'border-ls-accent' : '',
       ]"
     >
       <span class="truncate" :class="selectedOption ? 'text-ls-text' : 'text-ls-muted'">
@@ -119,7 +119,7 @@ function positionPopover() {
         :style="popoverStyle"
         @click.stop
       >
-        <div class="bg-ls-card border border-ls-border rounded-lg shadow-lg shadow-black/30 py-1.5 animate-in">
+        <div class="bg-ls-card border border-ls-border rounded-lg py-1.5 animate-in">
           <button
             v-for="(option, i) in options"
             :key="i"

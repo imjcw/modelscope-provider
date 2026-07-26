@@ -1,8 +1,7 @@
 <template>
   <Teleport to="body">
-    <div v-if="modelValue" class="drawer-overlay" @click.self="close">
-      <div class="drawer-panel-fixed flex flex-col"
-           style="background: var(--ls-card); border-left: 1px solid var(--border); animation: slideInRight .25s cubic-bezier(.4,0,.2,1);">
+    <div v-if="visible" class="drawer-overlay" :class="{ exiting }" @click.self="close">
+      <div class="drawer-panel-fixed flex flex-col" :class="{ exiting }">
         <!-- Header -->
         <div class="flex items-center justify-between gap-3 px-4 py-3 lg:px-5 border-b border-ls-border flex-shrink-0 bg-ls-card">
           <div class="min-w-0">
@@ -12,9 +11,7 @@
             </div>
             <p class="text-xs text-ls-muted mt-0.5 truncate">{{ modelValue.request_id }} · {{ fmtMsTime(modelValue.timestamp) }}</p>
           </div>
-          <button @click="close"
-            class="p-1 rounded-md text-ls-dim hover:text-ls-text hover:bg-ls-elevated transition-colors flex-shrink-0"
-            aria-label="关闭">
+          <button @click="close" class="drawer-close btn-esc flex-shrink-0" aria-label="关闭">
             <CIcon name="x" :size="18" />
           </button>
         </div>
@@ -77,9 +74,9 @@
                   </button>
                   <span class="ml-auto text-ls-muted text-xs transition-transform" :class="responseExpanded ? 'rotate-90' : ''">▶</span>
                 </button>
-                <div v-if="responseExpanded" class="px-4 pb-3 text-xs text-ls-dim">
+                <div v-if="responseExpanded" class="px-4 pt-3 pb-3 text-xs text-ls-dim">
                   <MarkdownRender v-if="responseRenderMode !== 'raw'" :source="responseContentText" />
-                  <pre v-if="responseRenderMode === 'raw'" class="bg-ls-bg rounded-lg border border-ls-border p-3 font-mono whitespace-pre-wrap overflow-x-auto">{{ responseContentText }}</pre>
+                  <div v-else class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{{ responseContentText }}</div>
                 </div>
               </div>
 
@@ -202,6 +199,11 @@ const showHistory = ref(false)
 
 const statsExpanded = ref(false)
 
+// ── 退出动画：先播 250ms 滑出/淡出，再销毁 DOM（与共享 Drawer 同构）──
+const visible = ref(false)
+const exiting = ref(false)
+let exitingTimer = null
+
 // ── Close on ESC (mirrors Drawer behavior) ──
 const handleEsc = (e) => {
   if (e.key === 'Escape' && props.modelValue) {
@@ -210,7 +212,10 @@ const handleEsc = (e) => {
   }
 }
 onMounted(() => document.addEventListener('keydown', handleEsc))
-onBeforeUnmount(() => document.removeEventListener('keydown', handleEsc))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleEsc)
+  if (exitingTimer) clearTimeout(exitingTimer)
+})
 
 // ── Find the index of the last user message (the one that triggered this request) ──
 const lastUserIndex = computed(() => {
@@ -245,7 +250,13 @@ const responseRenderMode = ref('md')
 const renderModes = ref({})
 
 const close = () => {
-  emit('update:modelValue', null)
+  if (exiting.value) return
+  exiting.value = true
+  exitingTimer = setTimeout(() => {
+    visible.value = false
+    exiting.value = false
+    emit('update:modelValue', null)
+  }, 250)
 }
 
 watch(() => props.modelValue, (val) => {
@@ -255,6 +266,9 @@ watch(() => props.modelValue, (val) => {
   showHistory.value = false
 
   if (val) {
+    visible.value = true
+    exiting.value = false
+
     // History messages: all collapsed
     const hist = {}
     for (let i = 0; i < historyMessages.value.length; i++) {
@@ -274,6 +288,7 @@ watch(() => props.modelValue, (val) => {
   } else {
     collapsedMsgs.value = {}
     historyCollapsed.value = {}
+    if (visible.value) close()
   }
 }, { immediate: true })
 
@@ -491,6 +506,12 @@ const responseHeaders = computed(() => {
   position: fixed;
   inset: 0;
   z-index: 50;
+  background: var(--ls-card);
+  border-left: 1px solid var(--border);
+  animation: slideInRight .25s cubic-bezier(.4,0,.2,1);
+}
+.drawer-panel-fixed.exiting {
+  animation: slideOutRight .25s cubic-bezier(.4,0,.2,1) forwards;
 }
 @media (min-width: 1024px) {
   .drawer-panel-fixed {

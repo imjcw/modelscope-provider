@@ -21,6 +21,7 @@ import './assets/main.css'
 const routes = [
   { path: '/', name: 'dashboard', component: () => import('./pages/Dashboard.vue') },
   { path: '/suppliers', name: 'suppliers', component: () => import('./pages/Accounts.vue') },
+  { path: '/provider-types', name: 'provider-types', component: () => import('./pages/ProviderTypes.vue') },
   { path: '/mappings', name: 'mappings', component: () => import('./pages/Mappings.vue') },
   { path: '/logs', name: 'logs', component: () => import('./pages/Logs.vue') },
   { path: '/alerts', name: 'alerts', component: () => import('./pages/Alerts.vue') },

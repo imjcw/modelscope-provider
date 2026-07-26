@@ -29,12 +29,13 @@ const emit = defineEmits(['update:modelValue'])
       {{ opt.label }}
     </button>
   </div>
-  <div v-else class="flex bg-ls-card rounded-lg border border-ls-border p-0.5">
+  <div v-else class="flex items-center gap-1 bg-transparent rounded-lg border border-ls-border p-1">
     <button v-for="opt in options" :key="opt.value" type="button"
       @click="emit('update:modelValue', opt.value)"
-      class="px-2.5 rounded-md text-xs font-medium transition-colors"
-      :class="[size === 'sm' ? 'h-7' : 'h-8',
-        modelValue === opt.value ? 'bg-ls-elevated text-white' : 'text-gray-500 hover:text-white']">
+      class="whitespace-nowrap h-7 rounded-md flex items-center justify-center transition-all duration-150 text-xs px-2"
+      :class="modelValue === opt.value
+        ? 'bg-ls-accent/10 text-ls-accent'
+        : 'text-ls-muted hover:text-ls-text hover:bg-ls-card'">
       {{ opt.label }}
     </button>
   </div>

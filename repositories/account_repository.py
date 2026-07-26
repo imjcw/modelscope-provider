@@ -51,14 +51,14 @@ class AccountRepository:
             return [dict(row) for row in cursor.fetchall()]
 
     def create(self, name: str, api_key: str, base_url: str,
-               status: str = "active") -> dict:
+               status: str = "active", provider_type: str = "modelscope") -> dict:
         """Create a new account. account_id is auto-generated as UUID."""
         account_id = uuid.uuid4().hex
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                """INSERT INTO accounts (account_id, name, api_key, base_url, status)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (account_id, name, api_key, base_url, status),
+                """INSERT INTO accounts (account_id, name, api_key, base_url, provider_type, status)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (account_id, name, api_key, base_url, provider_type, status),
             )
             conn.commit()
             result = self.find_by_id(cursor.lastrowid)
@@ -67,7 +67,7 @@ class AccountRepository:
 
     def update(self, account_id: int, **kwargs) -> Optional[dict]:
         """Update account fields."""
-        allowed = {"api_key", "base_url", "status", "account_id", "name"}
+        allowed = {"api_key", "base_url", "status", "account_id", "name", "provider_type"}
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
             return None

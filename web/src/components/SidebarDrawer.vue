@@ -7,25 +7,23 @@
              :class="isOpen ? 'translate-x-0' : '-translate-x-full exiting'">
         <div class="px-5 py-5">
           <div class="flex items-center gap-2.5">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ls-accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="4" r="2"/>
+              <circle cx="4" cy="20" r="2"/>
+              <circle cx="20" cy="20" r="2"/>
+              <circle cx="12" cy="12" r="2"/>
+              <line x1="12" y1="6" x2="12" y2="10"/>
+              <line x1="5.5" y1="18.5" x2="10.5" y2="13.5"/>
+              <line x1="18.5" y1="18.5" x2="13.5" y2="13.5"/>
+            </svg>
             <span class="font-bold tracking-tight text-lg">
-              <span class="gradient-neon">AI</span>
-              <span class="text-ls-text"> Provider</span>
+              <span class="text-ls-accent">A</span><span class="text-ls-text">I</span>
+              <span class="text-ls-text">&nbsp;<span class="text-ls-fuchsia">P</span>rovider</span>
             </span>
           </div>
         </div>
         <SidebarNav @select="close" />
         <div class="px-4 py-3 border-t border-ls-border">
-          <div class="flex items-center gap-3 px-1 mb-3">
-            <div class="w-7 h-7 rounded-lg bg-ls-border border border-ls-borderLight flex items-center justify-center text-xs font-medium text-ls-text">J</div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-ls-text truncate">imjcw</p>
-              <p class="text-xs text-ls-muted truncate">admin@modelscope.ai</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 mb-2">
-            <div class="w-2 h-2 rounded-full bg-green-400"></div>
-            <span class="text-xs text-ls-muted">v0.2.0 · 运行中</span>
-          </div>
           <ThemeToggle />
         </div>
       </aside>

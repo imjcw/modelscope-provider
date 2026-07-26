@@ -21,7 +21,7 @@ defineProps({
       <span class="text-xs px-2 py-0.5 rounded-full border font-medium"
         :class="alerts.length
           ? 'bg-red-500/10 text-red-400 border-red-500/20'
-          : 'bg-ls-elevated text-ls-muted border-ls-border'">
+          : 'bg-ls-accent/10 text-ls-accent border-ls-accent/20'">
         {{ alerts.length }} 条
       </span>
     </div>

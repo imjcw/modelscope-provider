@@ -1,6 +1,6 @@
 <template>
-  <div>
-    <PageHeader title="Dashboard // Monitor" subtitle="// 实时查看 API 调用状态、模型健康度和资源消耗">
+  <div class="h-full flex flex-col overflow-hidden">
+    <PageHeader title="用量分析 // Monitor" subtitle="// 实时查看 API 调用状态、模型健康度和资源消耗">
       <template #action>
         <span class="inline-flex items-center gap-1.5 text-xs text-ls-dim">
           <span class="pulse-live h-2 w-2 rounded-full bg-ls-accent"></span>
@@ -11,7 +11,7 @@
     </PageHeader>
 
     <PageState :loading="loading" :error="error" loading-text="加载中..." error-prefix="错误: ">
-      <div class="px-6 md:px-8 py-6 space-y-6">
+      <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6 space-y-6">
 
         <!-- ── KPI 卡片 ── -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -42,16 +42,16 @@
             </template>
           </StatCard>
 
-          <!-- QPS -->
-          <StatCard label="QPS" :value="kpi.qps != null ? kpi.qps.toFixed(1) : '0.0'" unit="req/s"
-            :delta="qpsDelta.text" :delta-class="qpsDelta.cls" icon-bg-class="bg-purple-500/10">
+          <!-- 失败请求 -->
+          <StatCard label="失败请求" :value="fmtInt(kpi.failed)" unit=""
+            icon-bg-class="bg-red-500/10">
             <template #icon>
-              <svg class="w-3.5 h-3.5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/>
+              <svg class="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
               </svg>
             </template>
             <template #footer>
-              <KpiSparkline :values="series.map(s => s.qps)" stroke="#a855f7" />
+              <KpiSparkline :values="series.map(s => (s.total || 0) - (s.success || 0))" stroke="#ef4444" />
             </template>
           </StatCard>
 
@@ -71,18 +71,15 @@
 
         <!-- ── 图表行：QPS 趋势 + 请求结果分布 ── -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div class="lg:col-span-2 bg-ls-card rounded-lg border border-ls-border p-5 neon-glow">
+          <div class="lg:col-span-2 self-start bg-ls-card rounded-lg border border-ls-border p-5 neon-glow">
             <div class="flex items-center justify-between mb-4">
               <div>
-                <h3 class="text-sm uppercase tracking-[0.15em] text-ls-text">QPS 趋势 // Trend</h3>
-                <p class="text-xs text-ls-muted mt-0.5">// 最近 {{ windowLabel }}每秒请求数变化</p>
+                <h3 class="text-sm uppercase tracking-[0.15em] text-ls-text">请求趋势 // Trend</h3>
+                <p class="text-xs text-ls-muted mt-0.5">// 最近 {{ windowLabel }}请求数变化</p>
               </div>
               <div class="flex items-center gap-4 text-xs">
                 <span class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded bg-ls-accent"></span>QPS
-                </span>
-                <span class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded bg-[#22c55e]"></span>成功率
+                  <span class="w-2 h-2 rounded bg-ls-accent"></span>请求数
                 </span>
               </div>
             </div>
@@ -103,18 +100,6 @@
 
       </div>
     </PageState>
-
-    <!-- Footer -->
-    <div class="border-t border-ls-border mt-12">
-      <div class="px-6 md:px-8 py-6 flex items-center justify-between text-sm text-ls-muted">
-        <span>&copy; 2026 AI Provider Platform</span>
-        <div class="flex items-center gap-4">
-          <router-link to="/guide" class="hover:text-ls-accent transition-colors">文档</router-link>
-          <router-link to="/keys" class="hover:text-ls-accent transition-colors">API</router-link>
-          <router-link to="/alerts" class="hover:text-ls-accent transition-colors">状态</router-link>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -135,11 +120,11 @@ import { getWindowStats, getModelQuotas, getAlerts } from '@/api'
 
 // ── 时间窗 ──
 const WINDOW_OPTIONS = [
-  { label: '5 分钟', value: 300 },
-  { label: '1 小时', value: 3600 },
-  { label: '24 小时', value: 86400 },
+  { label: '1 天', value: 86400 },
+  { label: '7 天', value: 604800 },
+  { label: '30 天', value: 2592000 },
 ]
-const windowSeconds = ref(300)
+const windowSeconds = ref(86400)
 const windowLabel = computed(() => {
   const opt = WINDOW_OPTIONS.find(o => o.value === windowSeconds.value)
   return opt ? opt.label : `${windowSeconds.value}s`

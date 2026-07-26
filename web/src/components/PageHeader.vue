@@ -11,7 +11,7 @@ function toggleSidebar() {
 </script>
 
 <template>
-  <header class="sticky top-0 z-30 bg-ls-shell/90 backdrop-blur-md border-b border-ls-border px-6 md:px-8 py-3">
+  <header class="flex-shrink-0 bg-ls-shell border-b border-ls-border px-6 md:px-8 py-3">
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-3 min-w-0">
         <button @click="toggleSidebar"

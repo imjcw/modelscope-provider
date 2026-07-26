@@ -1,7 +1,7 @@
 <template>
   <div class="flex h-screen overflow-hidden">
     <Sidebar class="hidden lg:flex" />
-    <main class="flex-1 ml-0 lg:ml-60 bg-ls-bg min-h-screen min-w-0 overflow-y-auto">
+    <main class="flex-1 ml-0 lg:ml-60 bg-ls-bg h-full min-w-0 overflow-hidden">
       <router-view />
     </main>
     <Toast v-model:visible="toastVisible" :message="toastMessage" :type="toastType" />

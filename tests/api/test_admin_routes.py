@@ -253,3 +253,134 @@ def test_mapping_usage_days_param(client):
     r = client.get(f"/api/admin/mappings/{aid}/logs?days=30")
     assert r.status_code == 200
     assert r.json()["period_days"] == 30
+
+
+def test_mapping_usage_attributes_per_actual_model(client):
+    """经由虚拟模型路由的请求（model=别名, actual_model_id=底层模型）必须归因到
+    per_model 中对应的底层模型行。回归：此前归因误用查询候选 id，导致所有请求
+    carrier 都是别名，per_model 各行恒为 0（关联模型用量缺失）。"""
+    svc = client.app.state.admin_service
+    sup = _create(client, name=_tid("vm-sup"))
+    alias = _tid("virtual")
+    bound_model = f"real-model-{_tid('m')}"
+    # 先建立虚拟模型映射（mapping_models.alias_name 外键指向 model_mappings）
+    r = client.put("/api/admin/mappings/bulk", json={"mappings": {alias: bound_model}})
+    assert r.status_code == 200
+    r = client.post(
+        f"/api/admin/mappings/{alias}/models",
+        json={"supplier_id": sup["id"], "model_name": bound_model},
+    )
+    assert r.status_code == 200
+
+    # 记录一条经由虚拟模型路由的请求
+    svc.log_request(
+        model=alias, actual_model_id=bound_model,
+        account_id=sup["account_id"], account_name=sup["name"],
+        status_code=200, input_tokens=100, output_tokens=50,
+        latency_ms=12, is_stream=False,
+        raw_request="{}", raw_response="{}",
+    )
+
+    r = client.get(f"/api/admin/mappings/{alias}/logs")
+    assert r.status_code == 200
+    usage = r.json()["usage"]
+    assert usage["requests"] == 1
+    assert usage["input_tokens"] == 100
+    assert usage["output_tokens"] == 50
+
+    pm = {m["model"]: m for m in usage["per_model"]}
+    assert bound_model in pm
+    assert pm[bound_model]["requests"] == 1
+    assert pm[bound_model]["input_tokens"] == 100
+    assert pm[bound_model]["output_tokens"] == 50
+    assert pm[bound_model]["supplier"] == sup["name"]
+
+
+# ── Provider Types ─────────────────────────────────────────────────────────
+
+def test_list_provider_types_includes_builtins(client):
+    r = client.get("/api/admin/provider-types")
+    assert r.status_code == 200
+    keys = {pt["type_key"] for pt in r.json()}
+    assert {"modelscope", "sensetime"} <= keys
+    by_key = {pt["type_key"]: pt for pt in r.json()}
+    # config 应解析为 dict
+    assert isinstance(by_key["sensetime"]["config"], dict)
+    assert by_key["sensetime"]["config"].get("max_requests") == 1500
+
+
+def test_provider_type_crud(client):
+    key = _tid("ptype")
+    # create
+    r = client.post("/api/admin/provider-types", json={
+        "type_key": key, "name": "自定义", "strategy_type": "fixed_window",
+        "config": {"window_seconds": 3600, "max_requests": 100}, "color": "#a6e3a1",
+    })
+    assert r.status_code == 200
+    created = r.json()
+    assert created["type_key"] == key
+    assert created["config"]["max_requests"] == 100
+    pid = created["id"]
+
+    # update
+    r = client.put(f"/api/admin/provider-types/{pid}",
+                   json={"name": "自定义-改", "config": {"window_seconds": 7200, "max_requests": 200}})
+    assert r.status_code == 200
+    assert r.json()["name"] == "自定义-改"
+    assert r.json()["config"]["max_requests"] == 200
+
+    # delete custom type
+    r = client.delete(f"/api/admin/provider-types/{pid}")
+    assert r.status_code == 200
+
+
+def test_delete_builtin_provider_type_blocked(client):
+    pts = client.get("/api/admin/provider-types").json()
+    builtin = next(p for p in pts if p["type_key"] == "modelscope")
+    r = client.delete(f"/api/admin/provider-types/{builtin['id']}")
+    assert r.status_code == 409
+
+
+def test_create_provider_type_duplicate_409(client):
+    r = client.post("/api/admin/provider-types",
+                    json={"type_key": "modelscope", "name": "dup"})
+    assert r.status_code == 409
+
+
+def test_create_provider_type_per_model_strategy(client):
+    """Should create and update a provider type with fixed_window_per_model strategy."""
+    key = _tid("ptper")
+    # create with per-model config
+    r = client.post("/api/admin/provider-types", json={
+        "type_key": key, "name": "自定义按模型",
+        "strategy_type": "fixed_window_per_model",
+        "config": {
+            "window_seconds": 18000,
+            "max_requests": 1500,
+            "models": {
+                "model-a": {"window_seconds": 18000, "max_requests": 3000},
+                "model-b": {"max_requests": 500},
+            },
+        },
+        "color": "#f38ba8",
+    })
+    assert r.status_code == 200
+    created = r.json()
+    assert created["strategy_type"] == "fixed_window_per_model"
+    assert created["config"]["models"]["model-a"]["max_requests"] == 3000
+    pid = created["id"]
+
+    # update
+    r = client.put(f"/api/admin/provider-types/{pid}", json={
+        "config": {
+            "window_seconds": 3600,
+            "max_requests": 500,
+            "models": {"model-c": {"max_requests": 100}},
+        },
+    })
+    assert r.status_code == 200
+    assert r.json()["config"]["models"]["model-c"]["max_requests"] == 100
+
+    # delete
+    r = client.delete(f"/api/admin/provider-types/{pid}")
+    assert r.status_code == 200

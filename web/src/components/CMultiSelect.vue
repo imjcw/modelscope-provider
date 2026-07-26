@@ -58,7 +58,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleClickOutside))
 
     <!-- 多选下拉列表 -->
     <div v-if="open"
-      class="absolute z-30 top-full left-0 right-0 mt-1 bg-ls-card border border-ls-border rounded-lg shadow-lg shadow-black/30 max-h-48 overflow-y-auto">
+      class="absolute z-30 top-full left-0 right-0 mt-1 bg-ls-card border border-ls-border rounded-lg max-h-48 overflow-y-auto">
       <div v-if="options.length === 0" class="px-3 py-2 text-xs text-ls-muted">{{ emptyText }}</div>
       <button v-for="opt in options" :key="opt.value" type="button"
         @click="toggleValue(opt.value)"

@@ -14,10 +14,17 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
 const emit = defineEmits(['update'])
+const props = defineProps({
+  // 日志按 UTC 存储、以 UTC+8 展示。开启后日历的「今天/快捷方式」按 UTC+8
+  // 墙钟计算，并向后端透出换算后的 UTC 边界，避免时区错配导致筛选结果为空。
+  utc8: { type: Boolean, default: false },
+})
 
 const pad = (n) => String(n).padStart(2, '0')
-const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-const dateOnly = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
+const TZ = computed(() => (props.utc8 ? 8 : 0))
+// 日历内部统一用「UTC 午夜」的 Date 表示某一天，getTime 比较与浏览器时区无关
+const ymd = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
+const utcDay = (y, m, day) => new Date(Date.UTC(y, m, day))
 
 // ── Popover open / positioning (same pattern as CSelect) ──
 const open = ref(false)
@@ -46,19 +53,28 @@ const onOutside = (e) => { if (trigger.value && !trigger.value.contains(e.target
 onMounted(() => document.addEventListener('click', onOutside))
 onBeforeUnmount(() => document.removeEventListener('click', onOutside))
 
-// ── Range state (Date at midnight) ──
-const today = dateOnly(new Date())
+// ── Range state (UTC-midnight Date) ──
+// “今天”按目标时区墙钟计算（utc8 时即 UTC+8 当天），与日志列表展示一致
+function tzToday() {
+  const shifted = new Date(Date.now() + TZ.value * 3600000)
+  return utcDay(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate())
+}
+const today = tzToday()
 const start = ref(new Date(today.getTime() - 6 * 86400000)) // 7-day span inclusive
 const end = ref(today)
 const picking = ref('start') // which boundary the next calendar click sets
 const hover = ref(null)
 
+// 把「目标时区某天 00:00:00 / 23:59:59」换算成 UTC 边界字符串供后端查询
+function boundary(d, endOfDay) {
+  const ms = d.getTime() + (endOfDay ? 86399000 : 0) - TZ.value * 3600000
+  const u = new Date(ms)
+  return `${u.getUTCFullYear()}-${pad(u.getUTCMonth() + 1)}-${pad(u.getUTCDate())} ` +
+    `${pad(u.getUTCHours())}:${pad(u.getUTCMinutes())}:${pad(u.getUTCSeconds())}`
+}
 // clickDate / applyShortcut 都保证 start <= end，这里只负责透出
 function emitRange() {
-  emit('update', {
-    start: `${ymd(start.value)} 00:00:00`,
-    end: `${ymd(end.value)} 23:59:59`,
-  })
+  emit('update', { start: boundary(start.value, false), end: boundary(end.value, true) })
 }
 
 // ── Shortcuts ──
@@ -67,10 +83,10 @@ const SHORTCUTS = [
   { label: '昨天', range: () => [shift(today, -1), shift(today, -1)] },
   { label: '近7天', range: () => [shift(today, -6), today] },
   { label: '近30天', range: () => [shift(today, -29), today] },
-  { label: '本月', range: () => [new Date(today.getFullYear(), today.getMonth(), 1), today] },
+  { label: '本月', range: () => [utcDay(today.getUTCFullYear(), today.getUTCMonth(), 1), today] },
   { label: '上月', range: () => {
-    const e = new Date(today.getFullYear(), today.getMonth(), 0)
-    return [new Date(e.getFullYear(), e.getMonth(), 1), e]
+    const e = utcDay(today.getUTCFullYear(), today.getUTCMonth(), 0) // 上月最后一天
+    return [utcDay(e.getUTCFullYear(), e.getUTCMonth(), 1), e]
   } },
 ]
 function shift(d, days) { return new Date(d.getTime() + days * 86400000) }
@@ -82,24 +98,24 @@ function applyShortcut(fn) {
 
 // ── Dual-month calendar ──
 // `leftAnchor` is the month (year, month-0) shown on the left; right = +1 month.
-const leftAnchor = ref({ y: today.getFullYear(), m: today.getMonth() })
+const leftAnchor = ref({ y: today.getUTCFullYear(), m: today.getUTCMonth() })
 
 const MONTHS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
 const WEEKDAYS = ['一','二','三','四','五','六','日'] // Mon-first
 
 function gridFor(year, month) {
-  const first = new Date(year, month, 1)
-  const total = new Date(year, month + 1, 0).getDate()
-  const lead = (first.getDay() + 6) % 7 // blanks before Monday
+  const total = new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+  const firstDow = new Date(Date.UTC(year, month, 1)).getUTCDay()
+  const lead = (firstDow + 6) % 7 // blanks before Monday
   const cells = []
   for (let i = 0; i < lead; i++) cells.push(null)
-  for (let d = 1; d <= total; d++) cells.push(new Date(year, month, d))
+  for (let d = 1; d <= total; d++) cells.push(utcDay(year, month, d))
   while (cells.length % 7 !== 0) cells.push(null)
   return cells
 }
 function shiftMonth(y, m, delta) {
-  const d = new Date(y, m + delta, 1)
-  return { y: d.getFullYear(), m: d.getMonth() }
+  const d = new Date(Date.UTC(y, m + delta, 1))
+  return { y: d.getUTCFullYear(), m: d.getUTCMonth() }
 }
 const leftGrid = computed(() => gridFor(leftAnchor.value.y, leftAnchor.value.m))
 const rightMonth = computed(() => shiftMonth(leftAnchor.value.y, leftAnchor.value.m, 1))
@@ -151,8 +167,8 @@ onMounted(() => emitRange())
   <div class="c-select" ref="trigger">
     <!-- Trigger (matches CSelect trigger) -->
     <button type="button" @click="toggle"
-      class="h-8 text-xs px-2.5 w-full text-left inline-flex items-center justify-between bg-ls-bg rounded-lg border border-ls-border text-ls-text placeholder:text-ls-muted focus:outline-none focus:border-ls-accent focus:ring-1 focus:ring-ls-accent/20 transition-all"
-      :class="open ? 'border-ls-accent ring-1 ring-ls-accent/20' : ''">
+      class="h-8 text-xs px-2.5 w-full text-left inline-flex items-center justify-between bg-ls-bg rounded-lg border border-ls-border text-ls-text placeholder:text-ls-muted focus:outline-none focus:border-ls-accent transition-all"
+      :class="open ? 'border-ls-accent' : ''">
       <span class="truncate inline-flex items-center gap-1.5">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ls-muted flex-shrink-0">
           <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
@@ -167,7 +183,7 @@ onMounted(() => emitRange())
     <!-- Popover -->
     <Teleport to="body">
       <div v-if="open" class="c-select-popover" :style="popoverStyle" @click.stop>
-        <div class="flex bg-ls-card border border-ls-border rounded-xl shadow-xl shadow-black/40 overflow-hidden animate-in">
+        <div class="flex bg-ls-card border border-ls-border rounded-xl overflow-hidden animate-in">
 
           <!-- ── Left: quick shortcuts ── -->
           <div class="w-28 py-2 border-r border-ls-border flex-shrink-0">
@@ -213,10 +229,10 @@ onMounted(() => emitRange())
                       :class="[
                         isStart(d) || isEnd(d) ? 'bg-ls-accent text-ls-bg font-semibold' :
                         inRange(d) || isHoverBetween(d) ? 'bg-ls-accent/15 text-ls-text' :
-                        d.getTime() === today.getTime() ? 'ring-1 ring-ls-accent/50 text-ls-text' :
+                        d.getTime() === today.getTime() ? 'border border-ls-accent/50 text-ls-text' :
                         'text-ls-dim hover:bg-ls-elevated',
                       ]">
-                      {{ d.getDate() }}
+                      {{ d.getUTCDate() }}
                     </button>
                   </div>
                 </div>

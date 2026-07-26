@@ -15,8 +15,8 @@ import { ref, onMounted } from 'vue'
 const emit = defineEmits(['update'])
 
 const PRESETS = [
-  { key: '1h', label: '近1小时' },
   { key: 'today', label: '今天' },
+  { key: '1h', label: '近1小时' },
   { key: '7d', label: '近7天' },
   { key: '30d', label: '近30天' },
   { key: 'custom', label: '自定义' },
@@ -33,7 +33,7 @@ function toCSTStr(d) {
   )
 }
 
-const active = ref('7d')
+const active = ref('today')
 const customStart = ref('')
 const customEnd = ref('')
 
@@ -74,18 +74,18 @@ function onCustom() {
   }
 }
 
-onMounted(() => emit('update', rangeFor('7d')))
+onMounted(() => emit('update', rangeFor('today')))
 </script>
 
 <template>
   <div class="flex items-center gap-3">
     <!-- Segmented preset pills -->
-    <div class="flex bg-ls-bg rounded-lg border border-ls-border p-0.5">
+    <div class="flex items-center gap-1 bg-transparent rounded-lg border border-ls-border p-1">
       <button v-for="p in PRESETS" :key="p.key" type="button" @click="select(p.key)"
-        class="px-3 h-8 rounded-md text-xs font-medium transition-colors"
+        class="flex-1 h-7 rounded-md flex items-center justify-center transition-all duration-150 text-xs"
         :class="active === p.key
-          ? 'bg-ls-elevated text-ls-text'
-          : 'text-ls-muted hover:text-ls-text'">
+          ? 'bg-ls-accent/10 text-ls-accent'
+          : 'text-ls-muted hover:text-ls-text hover:bg-ls-card'">
         {{ p.label }}
       </button>
     </div>

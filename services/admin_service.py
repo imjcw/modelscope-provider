@@ -2,14 +2,18 @@
 import datetime
 import uuid
 
+from core.timezone import TZ, today, today_range, now as _tz_now
+
 from repositories.account_repository import AccountRepository
 from repositories.client_api_key_repository import ClientApiKeyRepository
 from repositories.config_repository import ConfigRepository
 from repositories.log_repository import LogRepository
 from repositories.mapping_repository import MappingRepository
 from repositories.mapping_model_repository import MappingModelRepository
+from repositories.provider_type_repository import ProviderTypeRepository
 from repositories.quota_repository import QuotaRepository
 from repositories.supplier_model_repository import SupplierModelRepository
+from services.providers import build_rate_limit_strategies, create_strategy
 
 
 class AdminService:
@@ -22,54 +26,64 @@ class AdminService:
                  quota_repo: QuotaRepository = None,
                  supplier_model_repo: SupplierModelRepository = None,
                  mapping_model_repo: MappingModelRepository = None,
-                 client_key_repo: ClientApiKeyRepository = None):
+                 client_key_repo: ClientApiKeyRepository = None,
+                 provider_type_repo: ProviderTypeRepository = None,
+                 rate_limit_strategies: dict = None,
+                 db=None,
+                 quota_updater=None):
         self.account_repo = account_repo
         self.mapping_repo = mapping_repo
         self.config_repo = config_repo
         self.log_repo = log_repo
         self.quota_repo = quota_repo
+        self.rate_limit_strategies = rate_limit_strategies or {}
         self.supplier_model_repo = supplier_model_repo
         self.mapping_model_repo = mapping_model_repo
         self.client_key_repo = client_key_repo
+        self.provider_type_repo = provider_type_repo
+        self.db = db
+        self.quota_updater = quota_updater
 
     # ── Accounts ──
 
     def get_suppliers(self):
         """List suppliers enriched with today's quota info (when quota_repo set)."""
         suppliers = self.account_repo.find_all()
-        if self.quota_repo is not None:
-            for s in suppliers:
-                info = self.quota_repo.get_account_info(s["account_id"])
-                if info:
-                    s["quota_remaining"] = info["quota_remaining"]
-                    s["quota_limit"] = info["quota_limit"]
-                else:
-                    s["quota_remaining"] = 0
-                    s["quota_limit"] = 0
-        else:
-            for s in suppliers:
-                s.setdefault("quota_remaining", 0)
-                s.setdefault("quota_limit", 0)
+        for s in suppliers:
+            self._enrich_quota(s)
         return suppliers
 
     def get_supplier(self, supplier_id: int):
         s = self.account_repo.find_by_id(supplier_id)
-        if s and self.quota_repo is not None:
-            info = self.quota_repo.get_account_info(s["account_id"])
-            if info:
-                s["quota_remaining"] = info["quota_remaining"]
-                s["quota_limit"] = info["quota_limit"]
-            else:
-                s["quota_remaining"] = 0
-                s["quota_limit"] = 0
-        elif s:
-            s.setdefault("quota_remaining", 0)
-            s.setdefault("quota_limit", 0)
+        if s:
+            self._enrich_quota(s)
         return s
 
+    def _enrich_quota(self, supplier: dict):
+        """Enrich a supplier dict with quota info from the appropriate strategy."""
+        provider_type = supplier.get("provider_type", "modelscope")
+        strategy = self.rate_limit_strategies.get(provider_type)
+
+        if strategy:
+            info = strategy.get_quota_info(supplier["account_id"])
+            supplier["quota_remaining"] = info.get("quota_remaining", 0)
+            supplier["quota_limit"] = info.get("quota_limit", 0)
+        elif self.quota_repo is not None:
+            info = self.quota_repo.get_account_info(supplier["account_id"])
+            if info:
+                supplier["quota_remaining"] = info["quota_remaining"]
+                supplier["quota_limit"] = info["quota_limit"]
+            else:
+                supplier["quota_remaining"] = 0
+                supplier["quota_limit"] = 0
+        else:
+            supplier.setdefault("quota_remaining", 0)
+            supplier.setdefault("quota_limit", 0)
+
     def create_supplier(self, name: str, api_key: str,
-                        base_url: str) -> dict:
-        return self.account_repo.create(name, api_key, base_url)
+                        base_url: str, provider_type: str = "modelscope") -> dict:
+        return self.account_repo.create(name, api_key, base_url,
+                                        provider_type=provider_type)
 
     def update_supplier(self, supplier_id: int, **kwargs) -> dict:
         return self.account_repo.update(supplier_id, **kwargs)
@@ -85,6 +99,79 @@ class AdminService:
             return None
         new_status = "disabled" if s["status"] == "active" else "active"
         return self.account_repo.update(supplier_id, status=new_status)
+
+    # ── Provider Types ──
+
+    def get_provider_types(self):
+        """List all provider types (config parsed to dict)."""
+        if self.provider_type_repo is None:
+            return []
+        return self.provider_type_repo.find_all()
+
+    def create_provider_type(self, type_key: str, name: str, description: str = "",
+                             strategy_type: str = "header_based",
+                             config: dict = None, color: str = "#89b4fa") -> dict:
+        if self.provider_type_repo is None:
+            raise NotImplementedError("Provider type repo not configured")
+        created = self.provider_type_repo.create(
+            type_key=type_key, name=name, description=description,
+            strategy_type=strategy_type, config=config or {}, color=color,
+        )
+        self.rebuild_rate_limit_strategies()
+        return created
+
+    def update_provider_type(self, type_id: int, **kwargs) -> dict:
+        if self.provider_type_repo is None:
+            raise NotImplementedError("Provider type repo not configured")
+        updated = self.provider_type_repo.update(type_id, **kwargs)
+        if updated:
+            self.rebuild_rate_limit_strategies()
+        return updated
+
+    def delete_provider_type(self, type_id: int) -> bool:
+        if self.provider_type_repo is None:
+            return False
+        pt = self.provider_type_repo.find_by_id(type_id)
+        if not pt:
+            return False
+        if pt.get("built_in"):
+            raise ValueError("内置供应商类型不可删除")
+        if self.provider_type_repo.count_accounts_by_type(pt["type_key"]) > 0:
+            raise ValueError("该类型下仍有供应商，无法删除")
+        ok = self.provider_type_repo.delete(type_id)
+        if ok:
+            self.rebuild_rate_limit_strategies()
+        return ok
+
+    def rebuild_rate_limit_strategies(self) -> None:
+        """按最新供应商类型表原地重建策略字典。
+
+        原地清空再填充，使 services 中共享的同一 dict 引用同步更新，
+        路由层无需重启即可使用新策略配置。先确保硬编码的内置类型始终可用。
+        """
+        fallback = {
+            "modelscope": create_strategy(
+                "header_based",
+                quota_updater=self.quota_updater,
+                quota_repository=self.quota_repo,
+            ),
+            "sensetime": create_strategy(
+                "fixed_window", db=self.db,
+            ),
+        }
+        self.rate_limit_strategies.clear()
+        self.rate_limit_strategies.update(fallback)
+
+        if self.provider_type_repo is not None:
+            try:
+                db_types = self.provider_type_repo.find_all()
+                if db_types:
+                    db_strategies = build_rate_limit_strategies(
+                        db_types, self.db, self.quota_updater, self.quota_repo,
+                    )
+                    self.rate_limit_strategies.update(db_strategies)
+            except Exception:
+                pass
 
     # ── Supplier Models ──
 
@@ -132,6 +219,7 @@ class AdminService:
                 "name": sup.get("name", ""),
                 "api_key": sup.get("api_key", ""),
                 "base_url": sup.get("base_url", ""),
+                "provider_type": sup.get("provider_type", "modelscope"),
                 "status": sup.get("status", "active"),
                 "models": [
                     {
@@ -144,7 +232,7 @@ class AdminService:
             })
         return {
             "version": "1.0",
-            "exported_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "exported_at": _tz_now().isoformat(timespec="seconds"),
             "suppliers": result,
         }
 
@@ -177,6 +265,7 @@ class AdminService:
                     raise ValueError("缺少必填字段 name / api_key / base_url")
 
                 status = entry.get("status", "active")
+                provider_type = entry.get("provider_type", "modelscope")
                 models = entry.get("models", [])
 
                 # ── Check for duplicate by name ──
@@ -191,6 +280,7 @@ class AdminService:
                             api_key=api_key,
                             base_url=base_url,
                             status=status,
+                            provider_type=provider_type,
                         )
                         if self.supplier_model_repo is not None and isinstance(models, list):
                             self._safe_bulk_models(existing["id"], models)
@@ -201,7 +291,8 @@ class AdminService:
 
                 # ── Create new supplier ──
                 created = self.account_repo.create(
-                    name=name, api_key=api_key, base_url=base_url, status=status
+                    name=name, api_key=api_key, base_url=base_url,
+                    status=status, provider_type=provider_type,
                 )
                 if self.supplier_model_repo is not None and isinstance(models, list):
                     self._safe_bulk_models(created["id"], models)
@@ -318,9 +409,9 @@ class AdminService:
           supplier) is excluded — its hits are rolled up into each supplier
           row that actually carried them.
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
-        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
+        cutoff = (_tz_now() - timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
 
         bound = self.mapping_model_repo.find_by_alias(alias_name) if self.mapping_model_repo else []
 
@@ -336,14 +427,11 @@ class AdminService:
 
         candidate_ids = [alias_name] + [b["model_name"] for b in bound]
 
-        # De-duplicated request records. Again query per candidate id; the
-        # first id in ``candidate_ids`` whose query returns a request "wins".
-        # Since the alias id is listed first, any request logged only at the
-        # alias level falls through to it; requests logged under a supplier
-        # model (actual_model_id) match the later (more specific) id and are
-        # attributed there.
+        # De-duplicated request records, queried per candidate id. Alias-routed
+        # requests carry model=<alias> and match the alias id; direct calls to a
+        # bound model match that model's id. De-dup by request_id keeps the union
+        # safe regardless of which id surfaced a record.
         kept: dict[str, dict] = {}      # request_id -> log record
-        kept_carrier: dict[str, str] = {}  # request_id -> carrier model id
         for mid in candidate_ids:
             records, _ = self.log_repo.find_all(
                 page=0, page_size=5000,
@@ -354,7 +442,6 @@ class AdminService:
                 if not rid or rid in kept:
                     continue
                 kept[rid] = r
-                kept_carrier[rid] = mid
 
         # One row per bound model, plus a roll-up fallback for alias-level.
         per_model_rows: list[dict] = []
@@ -369,9 +456,12 @@ class AdminService:
                       cache_tokens=0, partial=0, error_count=0)
 
         for rid, r in kept.items():
-            carrier = kept_carrier.get(rid)
+            # 关联模型归因以日志的 actual_model_id（实际承载请求的供应商模型）为准。
+            # 经由虚拟模型路由的请求其 model 列为别名，只有 actual_model_id 指向真正
+            # 执行该请求的底层模型；用它匹配 per_model 行才能正确统计关联模型用量。
+            carrier = r.get("actual_model_id") or ""
             row = None
-            if carrier and carrier != alias_name:
+            if carrier:
                 for pm in per_model_rows:
                     if pm["model"] == carrier:
                         row = pm
@@ -441,16 +531,17 @@ class AdminService:
         # Compute latency_ms from timing fields if not provided
         if latency_ms is None and request_start and end_time:
             try:
-                from datetime import datetime
+                from datetime import datetime, timezone
+
                 def parse_ts(ts: str) -> float:
-                    # Support both "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM:SS" formats
-                    ts = ts.replace(" ", "T")
-                    # Try parsing with milliseconds
-                    if "." in ts:
-                        dt = datetime.fromisoformat(ts.replace("+00:00", ""))
-                    else:
-                        dt = datetime.fromisoformat(ts.replace("+00:00", ""))
+                    # Normalise space→T separator; strip trailing Z
+                    ts = ts.replace(" ", "T").rstrip("Z")
+                    dt = datetime.fromisoformat(ts)
+                    # If naive (no tz info), treat as UTC — matches what routes.py stores
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
                     return dt.timestamp()
+
                 latency_ms = int((parse_ts(end_time) - parse_ts(request_start)) * 1000)
             except Exception:
                 latency_ms = None
@@ -477,11 +568,12 @@ class AdminService:
             return []
         keys = self.client_key_repo.find_all()
         # Enrich with today's log stats
-        today_start = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_start = today()
         for k in keys:
             k["today_requests"] = 0
             k["today_input_tokens"] = 0
             k["today_output_tokens"] = 0
+            k["today_cache_tokens"] = 0
             try:
                 records, _ = self.log_repo.find_all(
                     page=0, page_size=10000,
@@ -492,6 +584,9 @@ class AdminService:
                     k["today_requests"] += 1
                     k["today_input_tokens"] += r.get("input_tokens", 0) or 0
                     k["today_output_tokens"] += r.get("output_tokens", 0) or 0
+                    k["today_cache_tokens"] += (r.get("cached_tokens", 0) or 0) + (
+                        r.get("prompt_partial_cached", 0) or 0
+                    )
             except Exception:
                 pass
         return keys
@@ -548,9 +643,9 @@ class AdminService:
         key = self.client_key_repo.find_by_id(key_id)
         if not key:
             return {}
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
-        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        cutoff = (_tz_now() - timedelta(days=days)).isoformat()
         records, _ = self.log_repo.find_all(
             page=0,
             page_size=5000,
@@ -560,6 +655,7 @@ class AdminService:
         total_requests = len(records)
         total_input = sum(r.get("input_tokens", 0) or 0 for r in records)
         total_output = sum(r.get("output_tokens", 0) or 0 for r in records)
+        total_cache = sum((r.get("cached_tokens", 0) or 0) + (r.get("prompt_partial_cached", 0) or 0) for r in records)
         success_count = sum(1 for r in records if (r.get("status_code") or 0) < 400)
         error_count = total_requests - success_count
         avg_latency = (
@@ -569,140 +665,57 @@ class AdminService:
             if total_requests > 0
             else 0
         )
+
+        # Per-model breakdown
+        per_model = {}
+        for r in records:
+            model = r.get("model", "unknown")
+            if model not in per_model:
+                per_model[model] = dict(requests=0, input_tokens=0,
+                                        output_tokens=0, cache_tokens=0, error_count=0)
+            pm = per_model[model]
+            pm["requests"] += 1
+            pm["input_tokens"] += r.get("input_tokens", 0) or 0
+            pm["output_tokens"] += r.get("output_tokens", 0) or 0
+            pm["cache_tokens"] += (r.get("cached_tokens", 0) or 0) + (r.get("prompt_partial_cached", 0) or 0)
+            if (r.get("status_code") or 0) >= 400:
+                pm["error_count"] += 1
+
+        per_model_list = [
+            dict(model=m, **stats) for m, stats in sorted(per_model.items())
+        ]
+
         return {
             "key_name": key["name"],
             "total_requests": total_requests,
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,
+            "total_cache_tokens": total_cache,
             "success_count": success_count,
             "error_count": error_count,
             "avg_latency_ms": avg_latency,
+            "per_model": per_model_list,
         }
 
-    def get_key_docs(self, key_id: int):
-        """Generate integration documentation for a client API key."""
+    def get_key_docs(self, key_id: int, base_url: str = None):
+        """Return integration meta-data for a client API key.
+
+        Only dynamic data is returned — the rendering is done in the frontend
+        to keep documentation content, code snippets, and error-table content
+        in a single source of truth (Guide.vue).
+
+        Args:
+            key_id: Client API key primary key.
+            base_url: Real service base URL (e.g. ``https://example.com/api/v1``).
+        """
         if self.client_key_repo is None:
-            return ""
+            return {}
         key = self.client_key_repo.find_by_id(key_id)
         if not key:
-            return ""
-        status_label = "启用" if key["status"] == "active" else "已禁用"
-        key_display = key["key_value"]
-        return (
-            "# API Key 对接文档 - "
-            + key["name"]
-            + "\n\n"
-            "> **API Key**: `"
-            + key_display
-            + "`\n"
-            "> **状态**: "
-            + ("✅ " if key["status"] == "active" else "❌ ")
-            + status_label
-            + "\n"
-            "> **创建时间**: "
-            + str(key.get("created_at", ""))
-            + "\n\n"
-            "## 基础信息\n\n"
-            "- **Base URL**: `https://your-domain.com/api/v1`\n"
-            "- **认证方式**: Bearer Token\n\n"
-            "## 认证方式\n\n"
-            "在请求头中携带 API Key 进行认证，两种方式任选其一：\n\n"
-            "```http\n"
-            "Authorization: Bearer "
-            + key_display
-            + "\n"
-            "```\n\n"
-            "或者\n\n"
-            "```http\n"
-            "X-API-Key: "
-            + key_display
-            + "\n"
-            "```\n\n"
-            "## 接口说明\n\n"
-            "### 聊天补全 (Chat Completions)\n\n"
-            "兼容 OpenAI Chat Completions API 格式。\n\n"
-            "```http\n"
-            "POST /api/v1/chat/completions\n"
-            "Content-Type: application/json\n"
-            "Authorization: Bearer "
-            + key_display
-            + "\n"
-            "```\n\n"
-            "#### 请求体\n\n"
-            "```json\n"
-            "{\n"
-            '  "model": "alias-name",\n'
-            '  "messages": [\n'
-            '    { "role": "system", "content": "你是助手" },\n'
-            '    { "role": "user", "content": "你好" }\n'
-            "  ],\n"
-            '  "stream": false\n'
-            "}\n"
-            "```\n\n"
-            "#### 响应示例\n\n"
-            "```json\n"
-            "{\n"
-            '  "id": "chatcmpl-xxx",\n'
-            '  "object": "chat.completion",\n'
-            '  "choices": [\n'
-            "    {\n"
-            '      "index": 0,\n'
-            '      "message": { "role": "assistant", "content": "你好！" },\n'
-            '      "finish_reason": "stop"\n'
-            "    }\n"
-            "  ],\n"
-            '  "usage": {\n'
-            '    "prompt_tokens": 10,\n'
-            '    "completion_tokens": 20,\n'
-            '    "total_tokens": 30\n'
-            "  }\n"
-            "}\n"
-            "```\n\n"
-            "## 错误码\n\n"
-            "| 状态码 | 说明 |\n"
-            "|--------|------|\n"
-            "| 401 | API Key 无效或已禁用 |\n"
-            "| 429 | 请求频率过高 |\n"
-            "| 500 | 内部服务器错误 |\n\n"
-            "## 代码示例\n\n"
-            "### Python\n\n"
-            "```python\n"
-            "import openai\n\n"
-            "openai.api_key = \""
-            + key_display
-            + "\"\n"
-            'openai.base_url = "https://your-domain.com/api/v1"\n\n'
-            "response = openai.chat.completions.create(\n"
-            '    model="alias-name",\n'
-            '    messages=[{"role": "user", "content": "你好"}]\n'
-            ")\n"
-            "print(response.choices[0].message.content)\n"
-            "```\n\n"
-            "### cURL\n\n"
-            "```bash\n"
-            "curl -X POST https://your-domain.com/api/v1/chat/completions \\\n"
-            '  -H "Content-Type: application/json" \\\n'
-            '  -H "Authorization: Bearer '
-            + key_display
-            + '" \\\n'
-            '  -d \'{"model": "alias-name", "messages": [{"role": "user", "content": "你好"}]}\'\n'
-            "```\n\n"
-            "### Node.js\n\n"
-            "```javascript\n"
-            'import OpenAI from "openai";\n\n'
-            "const openai = new OpenAI({\n"
-            '  apiKey: "'
-            + key_display
-            + '",\n'
-            '  baseURL: "https://your-domain.com/api/v1"\n'
-            "});\n\n"
-            "const response = await openai.chat.completions.create({\n"
-            '  model: "alias-name",\n'
-            '  messages: [{"role": "user", "content": "你好"}]\n'
-            "});\n"
-            "console.log(response.choices[0].message.content);\n"
-            "```\n"
-        )
+            return {}
+        if not base_url:
+            base_url = "https://your-domain.com/api/v1"
+        return {"key_value": key["key_value"], "base_url": base_url}
 
     # ── Model Quotas ──
 
@@ -790,11 +803,7 @@ class AdminService:
 
     def _get_today_token_usage(self, account_id: str, model_name: str) -> tuple:
         """Get today's input and output token totals for an account+model from logs."""
-        from datetime import datetime
-
-        today = datetime.now().strftime("%Y-%m-%d")
-        start_of_day = f"{today} 00:00:00"
-        end_of_day = f"{today} 23:59:59"
+        start_of_day, end_of_day = today_range()
 
         records, _ = self.log_repo.find_all(
             page=0, page_size=10000,
@@ -915,7 +924,7 @@ class AdminService:
 
     # Window (seconds) → bucket granularity for the dashboard presets;
     # other windows get ~30 buckets.
-    _WINDOW_BUCKET_MAP = {300: 10, 3600: 120, 86400: 3600}
+    _WINDOW_BUCKET_MAP = {86400: 3600, 604800: 86400, 2592000: 86400}
 
     def get_window_stats(self, seconds: int = 300) -> dict:
         """Windowed statistics for the dashboard live panel.
@@ -973,8 +982,8 @@ class AdminService:
 
         # Bucketed series: SQL returns only non-empty epoch-aligned buckets;
         # fill the full grid so the chart always renders a continuous axis.
-        start_epoch = calendar.timegm(start_dt.timetuple())
-        end_epoch = calendar.timegm(now.timetuple())
+        start_epoch = calendar.timegm(start_dt.utctimetuple())
+        end_epoch = calendar.timegm(now.utctimetuple())
         first_epoch = (start_epoch // bucket) * bucket
         n_buckets = (end_epoch // bucket - start_epoch // bucket) + 1
 

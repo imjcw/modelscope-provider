@@ -22,7 +22,7 @@ defineProps({
     </div>
     <div class="bg-ls-bg rounded-lg border border-ls-border p-3">
       <MarkdownRender v-if="!raw" :source="source" />
-      <pre v-else class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ source }}</pre>
+      <div v-else class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{{ source }}</div>
     </div>
   </div>
 </template>

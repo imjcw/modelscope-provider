@@ -103,10 +103,6 @@ const focusCheckbox = () => {
 }
 
 /* Hover effect */
-.c-toggle:not(.c-toggle-disabled):hover {
-  box-shadow: 0 0 0 2px var(--ring);
-}
-
 .c-toggle:not(.c-toggle-disabled):hover .c-toggle-thumb {
   background: var(--text-dim);
 }

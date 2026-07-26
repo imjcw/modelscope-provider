@@ -19,7 +19,7 @@ const initials = computed(() => (props.text || '').slice(0, 2).toUpperCase())
 </script>
 
 <template>
-  <div class="rounded-md bg-ls-elevated flex items-center justify-center flex-shrink-0"
+  <div class="rounded-md bg-ls-accent/10 flex items-center justify-center flex-shrink-0"
     :class="size === 'sm' ? 'w-8 h-8' : 'w-10 h-10'">
     <span class="font-semibold"
       :class="[size === 'sm' ? 'text-xs' : 'text-sm', accent ? 'text-ls-accent' : 'text-ls-dim']">

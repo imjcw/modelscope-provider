@@ -1,6 +1,6 @@
 <template>
-  <div>
-    <PageHeader title="告警历史" subtitle="配额耗尽、请求失败等告警记录">
+  <div class="h-full flex flex-col overflow-hidden">
+    <PageHeader title="告警历史 // Alerts" subtitle="// 配额耗尽、请求失败等告警记录">
       <template #action>
         <div class="flex items-center gap-3">
           <ViewToggle v-model="viewMode" />
@@ -11,7 +11,7 @@
       </template>
     </PageHeader>
 
-    <div class="px-6 md:px-8 py-6">
+    <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6">
       <PageState :loading="loading">
       <!-- Summary cards -->
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">

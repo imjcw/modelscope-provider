@@ -1,6 +1,6 @@
 <template>
-  <div>
-    <PageHeader title="虚拟模型" subtitle="管理虚拟模型ID及其绑定的供应商模型">
+  <div class="h-full flex flex-col overflow-hidden">
+    <PageHeader title="虚拟模型 // Mappings" subtitle="// 管理虚拟模型ID及其绑定的供应商模型">
       <template #action>
         <button @click="openAdd" class="btn btn-primary">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -11,7 +11,7 @@
       </template>
     </PageHeader>
 
-    <div class="px-6 md:px-8 py-6">
+    <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6">
       <PageState :loading="loading" :error="error">
         <!-- ═══════════════════════════════════════════
              虚拟模型列表（表格形式）
@@ -20,7 +20,6 @@
           <thead>
             <tr>
               <th class="text-left">虚拟模型ID</th>
-              <th class="text-left">描述</th>
               <th class="text-left">绑定模型</th>
               <th class="text-left">状态</th>
               <th class="text-left">创建时间</th>
@@ -33,11 +32,6 @@
               :class="{ 'opacity-50': m.status !== 'active' }">
               <!-- 虚拟模型ID -->
               <td class="font-mono text-ls-accent font-semibold">{{ m.alias_name }}</td>
-              <!-- 描述 -->
-              <td class="text-ls-dim text-xs max-w-[200px] truncate" :title="m.description">
-                <span v-if="m.description">{{ m.description }}</span>
-                <span v-else class="text-ls-muted">—</span>
-              </td>
               <!-- 绑定模型个数 -->
               <td>
                 <span v-if="m.bound_models?.length" class="tag tag-accent">
@@ -57,7 +51,6 @@
               <td>
                 <button type="button" @click="openLog(m)" class="model-info-btn" title="使用统计">
                   <CIcon name="chart" :size="12" :stroke-width="2.2" />
-                  <span class="text-xs">使用统计</span>
                 </button>
               </td>
               <!-- 操作 -->
@@ -378,6 +371,17 @@ const submitForm = async () => {
     }
     allMappings[form.value.alias] = form.value.alias // 虚拟模型ID 自身作为 actual_model_id
     await apiBulkUpdate(allMappings)
+
+    // 创建模式：别名创建后，持久化暂存的绑定模型
+    if (!isEditing.value && bindingList.value.length > 0) {
+      for (const b of bindingList.value) {
+        await addMappingModel(form.value.alias, {
+          supplier_id: b.supplier_id,
+          model_name: b.model_name,
+        })
+      }
+    }
+
     await loadData()
     closeForm()
   } catch (e) {
@@ -393,25 +397,41 @@ const addSelectedModels = async () => {
     toast('请选择供应商和模型', 'error')
     return
   }
+  const sup = suppliers.value.find(s => s.id === selectedSupplier.value)
   try {
-    const alias = isEditing.value ? form.value.alias : form.value.alias
+    const alias = form.value.alias
     for (const modelName of selectedModels.value) {
       // 去重
       if (bindingList.value.some(b => b.supplier_id === selectedSupplier.value && b.model_name === modelName)) {
         continue
       }
-      const res = await addMappingModel(alias, {
-        supplier_id: selectedSupplier.value,
-        model_name: modelName,
-      })
-      bindingList.value.push({
-        id: res.data.id,
-        supplier_id: selectedSupplier.value,
-        model_name: modelName,
-        supplier_name: suppliers.value.find(s => s.id === selectedSupplier.value)?.name || '',
-        model_type: res.data.model_type || '',
-        context_length: res.data.context_length || null,
-      })
+      if (isEditing.value) {
+        // 编辑模式：别名已存在，立即调用 API 持久化
+        const res = await addMappingModel(alias, {
+          supplier_id: selectedSupplier.value,
+          model_name: modelName,
+        })
+        bindingList.value.push({
+          id: res.data.id,
+          supplier_id: selectedSupplier.value,
+          model_name: modelName,
+          supplier_name: sup?.name || '',
+          model_type: res.data.model_type || '',
+          context_length: res.data.context_length || null,
+        })
+      } else {
+        // 创建模式：别名尚未创建（外键约束），先暂存本地，提交时再持久化
+        const modelInfo = (sup?.models || []).find(m => m.model_name === modelName)
+        bindingList.value.push({
+          id: `pending-${Date.now()}-${modelName}`,
+          supplier_id: selectedSupplier.value,
+          model_name: modelName,
+          supplier_name: sup?.name || '',
+          model_type: modelInfo?.model_type || '',
+          context_length: modelInfo?.context_length || null,
+          _pending: true,
+        })
+      }
     }
     // 添加后清空选择
     selectedSupplier.value = null
@@ -430,11 +450,14 @@ const confirmBindingDelete = async () => {
   if (!deletingBinding.value) return
   const b = deletingBinding.value
   try {
-    await apiRemoveMappingModel(b.id)
+    // 暂存（未持久化）的绑定仅从本地列表移除
+    if (!b._pending) {
+      await apiRemoveMappingModel(b.id)
+    }
     bindingList.value = bindingList.value.filter(item => item.id !== b.id)
     // 同步更新 mappings 列表中的 bound_models
     const m = mappings.value.find(m => m.alias_name === form.value.alias)
-    if (m) m.bound_models = m.bound_models.filter(item => item.id !== b.id)
+    if (m && m.bound_models) m.bound_models = m.bound_models.filter(item => item.id !== b.id)
     showBindingDeleteModal.value = false
     deletingBinding.value = null
   } catch (e) {
@@ -461,6 +484,8 @@ const onDrop = async (targetIdx) => {
   // 重新排序数组
   const item = bindingList.value.splice(sourceIdx, 1)[0]
   bindingList.value.splice(targetIdx, 0, item)
+  // 含暂存（未持久化）绑定时仅本地排序，提交时按列表顺序持久化
+  if (bindingList.value.some(b => b._pending)) return
   // 通知后端更新顺序
   try {
     const orderedIds = bindingList.value.map(b => b.id)

@@ -45,6 +45,35 @@ export function areaPath(points, baseY) {
 }
 
 /**
+ * 点序列 → 平滑曲线路径（Catmull-Rom → 三次贝塞尔）。
+ * 相比直线 polyline 观感更柔和，用于 QPS 趋势「曲线图」。
+ * @param {Array<[number, number]>} pts  点数组（已按 x 升序，不含断点）
+ * @returns {string} SVG path 的 d 属性
+ */
+export function smoothLinePath(pts) {
+  if (!pts || pts.length === 0) return ''
+  if (pts.length === 1) return `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`
+  if (pts.length === 2) {
+    return `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)} L${pts[1][0].toFixed(1)},${pts[1][1].toFixed(1)}`
+  }
+  const p = pts
+  const n = p.length
+  let d = `M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = p[i - 1] || p[i]
+    const p1 = p[i]
+    const p2 = p[i + 1]
+    const p3 = p[i + 2] || p2
+    const cp1x = p1[0] + (p2[0] - p0[0]) / 6
+    const cp1y = p1[1] + (p2[1] - p0[1]) / 6
+    const cp2x = p2[0] - (p3[0] - p1[0]) / 6
+    const cp2y = p2[1] - (p3[1] - p1[1]) / 6
+    d += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`
+  }
+  return d
+}
+
+/**
  * 轴刻度取整：向上取到 1/2/5 × 10^n（如 24.8 → 30，6.2 → 10）。
  * 用于 QPS 趋势图 y 轴满量程，保证刻度是"漂亮"的数字。
  */

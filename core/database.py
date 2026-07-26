@@ -118,7 +118,34 @@ class DatabaseManager:
                     name TEXT NOT NULL DEFAULT '',
                     api_key TEXT NOT NULL,
                     base_url TEXT NOT NULL,
+                    provider_type TEXT NOT NULL DEFAULT 'modelscope',
                     status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS account_rate_windows (
+                    account_id TEXT NOT NULL,
+                    model_name TEXT NOT NULL DEFAULT '__global__',
+                    window_start TEXT NOT NULL,
+                    request_count INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (account_id, model_name)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS provider_types (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type_key TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    strategy_type TEXT NOT NULL DEFAULT 'header_based',
+                    config TEXT NOT NULL DEFAULT '{}',
+                    color TEXT NOT NULL DEFAULT '#89b4fa',
+                    built_in INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -299,5 +326,6 @@ class DatabaseManager:
             logger.info(f"Seeded {len(defaults) - len(existing)} default config values")
 
     def get_today_date(self) -> str:
-        """Get current date in YYYY-MM-DD format."""
-        return datetime.datetime.now().strftime("%Y-%m-%d")
+        """Get current date in YYYY-MM-DD format (Asia/Shanghai)."""
+        from core.timezone import today
+        return today()

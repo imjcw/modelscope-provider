@@ -21,6 +21,12 @@ export const createSupplierModel = (id, data) => api.post(`/suppliers/${id}/mode
 export const deleteSupplierModel = (id, modelId) => api.delete(`/suppliers/${id}/models/${modelId}`)
 export const bulkSetSupplierModels = (id, data) => api.put(`/suppliers/${id}/models/bulk`, data)
 
+// ── Provider Types ──
+export const getProviderTypes = () => api.get('/provider-types')
+export const createProviderType = (data) => api.post('/provider-types', data)
+export const updateProviderType = (id, data) => api.put(`/provider-types/${id}`, data)
+export const deleteProviderType = (id) => api.delete(`/provider-types/${id}`)
+
 // ── Mappings ──
 export const getMappings = () => api.get('/mappings')
 export const bulkUpdateMappings = (mappings) => api.put('/mappings/bulk', { mappings })
@@ -76,5 +82,5 @@ export const createClientKey = (data) => api.post('/client-keys', data)
 export const updateClientKey = (id, data) => api.put(`/client-keys/${id}`, data)
 export const deleteClientKey = (id) => api.delete(`/client-keys/${id}`)
 export const getClientKeyLogs = (id, params) => api.get(`/client-keys/${id}/logs`, { params })
-export const getClientKeyStats = (id) => api.get(`/client-keys/${id}/stats`)
+export const getClientKeyStats = (id, params) => api.get(`/client-keys/${id}/stats`, { params })
 export const getClientKeyDocs = (id) => api.get(`/client-keys/${id}/docs`)

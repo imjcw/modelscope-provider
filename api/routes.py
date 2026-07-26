@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, AsyncGenerator, Any
 import json
@@ -144,6 +144,7 @@ def get_services(request: Request):
                     name=a.get("name", ""),
                     api_key=a["api_key"],
                     base_url=a["base_url"],
+                    provider_type=a.get("provider_type", "modelscope"),
                 ))
 
             from services.load_balancer import LoadBalancer
@@ -237,6 +238,7 @@ async def stream_response_with_logging(
     admin_service,
     quota_updater=None,
     client_key_name: str = None,
+    strategy=None,
 ):
     """Streaming response wrapper that logs and updates quota after completion."""
     output_tokens = 0
@@ -313,8 +315,21 @@ async def stream_response_with_logging(
         except Exception as e:
             logger.error(f"Failed to log streaming request: {e}")
 
-    # Update quota from streaming usage data
-    if quota_updater and hasattr(account, 'api_key'):
+    # Update quota via provider strategy (or fallback to legacy quota_updater)
+    if strategy:
+        try:
+            strategy.record_request(
+                account.account_id, actual_model_id,
+                response_headers, stream_status_code,
+            )
+            if input_tokens > 0 or output_tokens > 0:
+                strategy.record_usage(
+                    account.account_id, actual_model_id,
+                    input_tokens, output_tokens,
+                )
+        except Exception as e:
+            logger.warning(f"Failed to update streaming quota via strategy: {e}")
+    elif quota_updater and hasattr(account, 'api_key'):
         try:
             if input_tokens > 0 or output_tokens > 0:
                 quota_updater.update_quota_from_usage(
@@ -327,6 +342,238 @@ async def stream_response_with_logging(
                 )
         except Exception as e:
             logger.warning(f"Failed to update streaming quota: {e}")
+
+
+async def _try_candidate(
+    request, selected_account, actual_model_id,
+    http_client, response_converter, admin_service,
+    quota_updater, services, client_key_name,
+    alias_router, alias_resolver, load_balancer,
+    candidate_idx: int, total_candidates: int,
+):
+    """尝试向一个候选供应商发送请求。
+
+    如果请求失败，抛出 HTTPException 供调用方 fallback 到下一个候选。
+    流式请求仅在发送前检查失败时 fallback，一旦开始流式传输则不再重试。
+    """
+    # Resolve per-provider rate-limit strategy
+    strategies = services.get("rate_limit_strategies", {})
+    strategy = strategies.get(selected_account.provider_type)
+
+    # Pre-request rate-limit check (SenseTime: atomic check-and-increment)
+    if strategy and not strategy.check_rate_limit(selected_account.account_id, request.model):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": {
+                    "message": f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
+                    "type": "rate_limit_exceeded",
+                    "param": None,
+                    "code": "rate_limit_exceeded",
+                }
+            },
+        )
+
+    # Prepare request body (forward all OpenAI-compatible parameters)
+    request_body = {
+        "model": actual_model_id,
+        "messages": request.messages,
+    }
+
+    # Forward optional parameters
+    if request.temperature is not None:
+        request_body["temperature"] = request.temperature
+    if request.max_tokens is not None:
+        request_body["max_tokens"] = request.max_tokens
+    if request.top_p is not None:
+        request_body["top_p"] = request.top_p
+    if request.stop is not None:
+        request_body["stop"] = request.stop
+    if request.n is not None:
+        request_body["n"] = request.n
+    if request.frequency_penalty is not None:
+        request_body["frequency_penalty"] = request.frequency_penalty
+    if request.presence_penalty is not None:
+        request_body["presence_penalty"] = request.presence_penalty
+    if request.logit_bias is not None:
+        request_body["logit_bias"] = request.logit_bias
+    if request.logprobs is not None:
+        request_body["logprobs"] = request.logprobs
+    if request.top_logprobs is not None:
+        request_body["top_logprobs"] = request.top_logprobs
+    if request.response_format is not None:
+        request_body["response_format"] = request.response_format
+    if request.seed is not None:
+        request_body["seed"] = request.seed
+    if request.service_tier is not None:
+        request_body["service_tier"] = request.service_tier
+    if request.tools is not None:
+        request_body["tools"] = request.tools
+    if request.tool_choice is not None:
+        request_body["tool_choice"] = request.tool_choice
+    if request.functions is not None:
+        request_body["functions"] = request.functions
+    if request.parallel_tool_calls is not None:
+        request_body["parallel_tool_calls"] = request.parallel_tool_calls
+
+    # Handle streaming request
+    if request.stream:
+        request_body["stream"] = True
+        return StreamingResponse(
+            stream_response_with_logging(
+                selected_account, http_client, request.model, request_body, actual_model_id, admin_service,
+                quota_updater=quota_updater,
+                client_key_name=client_key_name,
+                strategy=strategy,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "X-Upstream-Account": selected_account.account_id,
+                "X-Upstream-Model": actual_model_id or "",
+            },
+        )
+
+    # Non-streaming request
+    request_start = datetime.now(timezone.utc).isoformat()
+    url = f"{selected_account.base_url}/chat/completions"
+    response = await http_client.request(
+        selected_account,
+        "POST",
+        url,
+        json=request_body
+    )
+    first_response = datetime.now(timezone.utc).isoformat()
+
+    # Check for rate limit errors
+    if response.status_code == 429:
+        if strategy:
+            strategy.record_request(
+                selected_account.account_id,
+                actual_model_id,
+                dict(response.headers),
+                response.status_code,
+            )
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": {
+                    "message": f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
+                    "type": "rate_limit_exceeded",
+                    "param": None,
+                    "code": "rate_limit_exceeded"
+                }
+            }
+        )
+
+    response.raise_for_status()
+
+    # Parse response
+    response_text = response.text
+    decoder = json.JSONDecoder()
+
+    if response_text.startswith("data:"):
+        last_valid = None
+        for line in response_text.split("\n"):
+            if line.startswith("data:"):
+                data_str = line[5:].strip()
+                if data_str == "[DONE]":
+                    continue
+                try:
+                    obj, _ = decoder.raw_decode(data_str)
+                    last_valid = obj
+                except json.JSONDecodeError:
+                    continue
+        if last_valid is not None:
+            ms_response = last_valid
+        else:
+            raise ValueError("Could not parse SSE response")
+    else:
+        try:
+            ms_response, _ = decoder.raw_decode(response_text)
+        except json.JSONDecodeError:
+            raise ValueError(f"Could not parse response")
+
+    # Convert and return response
+    try:
+        openai_response = response_converter.convert_to_openai(ms_response)
+    except Exception as conv_err:
+        logger.error(f"Response conversion failed: {conv_err}", exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": {
+                    "message": f"Response conversion failed: {conv_err}",
+                    "type": "conversion_error",
+                    "param": None,
+                    "code": "conversion_error"
+                }
+            }
+        )
+
+    # Update quota via provider strategy
+    try:
+        if strategy:
+            strategy.record_request(
+                selected_account.account_id,
+                actual_model_id,
+                dict(response.headers),
+                response.status_code,
+            )
+    except Exception as qe:
+        logger.warning(f"Failed to update quota: {qe}")
+
+    # Log the request
+    end_time = datetime.now(timezone.utc).isoformat()
+    if admin_service:
+        try:
+            ms_usage = ms_response.get("usage", {}) or {}
+            cached_tokens = 0
+            prompt_partial_cached = 0
+            pt_details = ms_usage.get("prompt_tokens_details", {}) or {}
+            if pt_details:
+                cached_tokens = pt_details.get("cached_tokens", pt_details.get("prompt_cache_hit_tokens", 0)) or 0
+                prompt_partial_cached = pt_details.get("prompt_partial_cached_tokens", 0) or 0
+
+            resp_hdrs = {}
+            for k in ["x-ratelimit-remaining", "x-ratelimit-limit", "modelscope-ratelimit-requests-remaining", "modelscope-ratelimit-requests-limit"]:
+                if k in response.headers:
+                    resp_hdrs[k] = response.headers[k]
+
+            admin_service.log_request(
+                model=request.model,
+                actual_model_id=actual_model_id,
+                account_id=selected_account.account_id,
+                account_name=selected_account.name,
+                status_code=response.status_code,
+                input_tokens=ms_usage.get("prompt_tokens", 0),
+                output_tokens=ms_usage.get("completion_tokens", 0),
+                latency_ms=None,
+                is_stream=False,
+                raw_request=json.dumps(request_body, ensure_ascii=False),
+                raw_response=response_text,
+                request_start=request_start,
+                first_response=first_response,
+                end_time=end_time,
+                cached_tokens=cached_tokens,
+                prompt_partial_cached=prompt_partial_cached,
+                client_key_name=client_key_name,
+                response_headers=json.dumps(resp_hdrs if resp_hdrs else dict(response.headers), ensure_ascii=False),
+            )
+        except Exception as le:
+            logger.error(f"Failed to log request: {le}", exc_info=True)
+
+    try:
+        latency_ms = int((datetime.now(timezone.utc) - datetime.fromisoformat(request_start)).total_seconds() * 1000)
+    except Exception:
+        latency_ms = 0
+    return JSONResponse(
+        content=openai_response,
+        headers={
+            "X-Upstream-Account": selected_account.account_id,
+            "X-Upstream-Model": actual_model_id or "",
+            "X-Latency-Ms": str(latency_ms),
+        },
+    )
 
 
 @router.post("/v1/chat/completions")
@@ -348,212 +595,63 @@ async def chat_completions(
     client_key_name, _ = _authenticate_client_key(fastapi_request)
 
     try:
-        # 1. Try binding route
-        route_result = alias_router.route(request.model)
+        # 1. Try binding route — get all candidates for fallback
+        candidates = alias_router.get_candidates(request.model)
 
-        if route_result is not None:
-            # 2a. Has binding → use route result directly
-            selected_account = route_result.account
-            actual_model_id = route_result.model_name
-            logger.info(
-                f"AliasRouter selected account {selected_account.account_id} "
-                f"model {actual_model_id} for alias '{request.model}'"
-            )
-        else:
-            # 2b. No binding → old flow
-            selected_account = load_balancer.select_account(request.model)
-            actual_model_id = await alias_resolver.resolve_alias(
-                selected_account, request.model
-            )
-            logger.info(f"Resolved model {request.model} to {actual_model_id}")
-
-        # Prepare request body (forward all OpenAI-compatible parameters)
-        request_body = {
-            "model": actual_model_id,
-            "messages": request.messages,  # forward as-is for full compatibility
-        }
-
-        # Forward optional parameters
-        if request.temperature is not None:
-            request_body["temperature"] = request.temperature
-        if request.max_tokens is not None:
-            request_body["max_tokens"] = request.max_tokens
-        if request.top_p is not None:
-            request_body["top_p"] = request.top_p
-        if request.stop is not None:
-            request_body["stop"] = request.stop
-        if request.n is not None:
-            request_body["n"] = request.n
-        if request.frequency_penalty is not None:
-            request_body["frequency_penalty"] = request.frequency_penalty
-        if request.presence_penalty is not None:
-            request_body["presence_penalty"] = request.presence_penalty
-        if request.logit_bias is not None:
-            request_body["logit_bias"] = request.logit_bias
-        if request.logprobs is not None:
-            request_body["logprobs"] = request.logprobs
-        if request.top_logprobs is not None:
-            request_body["top_logprobs"] = request.top_logprobs
-        if request.response_format is not None:
-            request_body["response_format"] = request.response_format
-        if request.seed is not None:
-            request_body["seed"] = request.seed
-        if request.service_tier is not None:
-            request_body["service_tier"] = request.service_tier
-        if request.tools is not None:
-            request_body["tools"] = request.tools
-        if request.tool_choice is not None:
-            request_body["tool_choice"] = request.tool_choice
-        if request.functions is not None:
-            request_body["functions"] = request.functions
-        if request.parallel_tool_calls is not None:
-            request_body["parallel_tool_calls"] = request.parallel_tool_calls
-
-        # Handle streaming request
-        if request.stream:
-            # Add stream parameter for ModelScope
-            request_body["stream"] = True
-            return StreamingResponse(
-                stream_response_with_logging(
-                    selected_account, http_client, request.model, request_body, actual_model_id, admin_service,
-                    quota_updater=quota_updater,
-                    client_key_name=client_key_name,
-                ),
-                media_type="text/event-stream"
-            )
-
-        # Non-streaming request
-        request_start = datetime.now(timezone.utc).isoformat()
-        url = f"{selected_account.base_url}/chat/completions"
-        response = await http_client.request(
-            selected_account,
-            "POST",
-            url,
-            json=request_body
-        )
-        first_response = datetime.now(timezone.utc).isoformat()
-
-        # Check for rate limit errors
-        if response.status_code == 429:
-            quota_updater.update_quota_after_request(
-                selected_account,
-                dict(response.headers),
-                request.model
-            )
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "error": {
-                        "message": f"所有供应商的 {request.model} 模型配额已耗尽",
-                        "type": "rate_limit_exceeded",
-                        "param": None,
-                        "code": "rate_limit_exceeded"
-                    }
-                }
-            )
-
-        response.raise_for_status()
-
-        # Parse response - ModelScope may return SSE format or concatenated JSON
-        response_text = response.text
-        decoder = json.JSONDecoder()
-
-        # SSE format (starts with "data:")
-        if response_text.startswith("data:"):
-            last_valid = None
-            for line in response_text.split("\n"):
-                if line.startswith("data:"):
-                    data_str = line[5:].strip()
-                    if data_str == "[DONE]":
-                        continue
-                    try:
-                        obj, _ = decoder.raw_decode(data_str)
-                        last_valid = obj
-                    except json.JSONDecodeError:
-                        continue
-            if last_valid is not None:
-                ms_response = last_valid
-            else:
-                raise ValueError("Could not parse SSE response")
-        else:
-            # Raw JSON (possibly concatenated) - use raw_decode to safely extract the first object
-            try:
-                ms_response, _ = decoder.raw_decode(response_text)
-            except json.JSONDecodeError:
-                raise ValueError(f"Could not parse response")
-
-        # Convert and return response
-        try:
-            openai_response = response_converter.convert_to_openai(ms_response)
-        except Exception as conv_err:
-            logger.error(f"Response conversion failed: {conv_err}", exc_info=True)
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "error": {
-                        "message": f"Response conversion failed: {conv_err}",
-                        "type": "conversion_error",
-                        "param": None,
-                        "code": "conversion_error"
-                    }
-                }
-            )
-
-        # Update quota
-        try:
-            quota_updater.update_quota_after_request(
-                selected_account,
-                dict(response.headers),
-                request.model
-            )
-        except Exception as qe:
-            logger.warning(f"Failed to update quota: {qe}")
-
-        # Log the request (non-streaming)
-        end_time = datetime.now(timezone.utc).isoformat()
-        if admin_service:
-            try:
-                ms_usage = ms_response.get("usage", {}) or {}
-
-                # Extract cached tokens from usage
-                cached_tokens = 0
-                prompt_partial_cached = 0
-                pt_details = ms_usage.get("prompt_tokens_details", {}) or {}
-                if pt_details:
-                    cached_tokens = pt_details.get("cached_tokens", pt_details.get("prompt_cache_hit_tokens", 0)) or 0
-                    prompt_partial_cached = pt_details.get("prompt_partial_cached_tokens", 0) or 0
-
-                # Extract relevant response headers
-                resp_hdrs = {}
-                for k in ["x-ratelimit-remaining", "x-ratelimit-limit", "modelscope-ratelimit-requests-remaining", "modelscope-ratelimit-requests-limit"]:
-                    if k in response.headers:
-                        resp_hdrs[k] = response.headers[k]
-
-                admin_service.log_request(
-                    model=request.model,
-                    actual_model_id=actual_model_id,
-                    account_id=selected_account.account_id,
-                    account_name=selected_account.name,
-                    status_code=response.status_code,
-                    input_tokens=ms_usage.get("prompt_tokens", 0),
-                    output_tokens=ms_usage.get("completion_tokens", 0),
-                    latency_ms=None,
-                    is_stream=False,
-                    raw_request=json.dumps(request_body, ensure_ascii=False),
-                    raw_response=response_text,
-                    request_start=request_start,
-                    first_response=first_response,
-                    end_time=end_time,
-                    cached_tokens=cached_tokens,
-                    prompt_partial_cached=prompt_partial_cached,
-                    client_key_name=client_key_name,
-                    response_headers=json.dumps(resp_hdrs if resp_hdrs else dict(response.headers), ensure_ascii=False),
+        if candidates:
+            last_error = None
+            for candidate_idx, candidate in enumerate(candidates):
+                selected_account = candidate.account
+                actual_model_id = candidate.model_name
+                logger.info(
+                    f"AliasRouter candidate {candidate_idx + 1}/{len(candidates)}: "
+                    f"account {selected_account.account_id} model {actual_model_id}"
                 )
-                logger.info(f"Logged non-streaming request: model={request.model} account={selected_account.account_id} status={response.status_code}")
-            except Exception as le:
-                logger.error(f"Failed to log request: {le}", exc_info=True)
 
-        return openai_response
+                try:
+                    return await _try_candidate(
+                        request, selected_account, actual_model_id,
+                        http_client, response_converter, admin_service,
+                        quota_updater, services, client_key_name,
+                        alias_router, alias_resolver, load_balancer,
+                        candidate_idx, len(candidates),
+                    )
+                except HTTPException as e:
+                    last_error = e
+                    logger.warning(
+                        f"Candidate {candidate_idx + 1}/{len(candidates)} failed: "
+                        f"account={selected_account.account_id} "
+                        f"model={actual_model_id} status={e.status_code}"
+                    )
+                    continue
+
+            # All candidates failed
+            raise last_error or HTTPException(
+                status_code=503,
+                detail={
+                    "error": {
+                        "message": f"所有供应商的 {request.model} 模型请求均失败",
+                        "type": "all_failed",
+                        "param": None,
+                        "code": "all_failed"
+                    }
+                }
+            )
+
+        # 2. No binding → old flow
+        selected_account = load_balancer.select_account(request.model)
+        actual_model_id = await alias_resolver.resolve_alias(
+            selected_account, request.model
+        )
+        logger.info(f"Resolved model {request.model} to {actual_model_id}")
+
+        return await _try_candidate(
+            request, selected_account, actual_model_id,
+            http_client, response_converter, admin_service,
+            quota_updater, services, client_key_name,
+            alias_router, alias_resolver, load_balancer,
+            0, 1,
+        )
 
     except HTTPException:
         raise

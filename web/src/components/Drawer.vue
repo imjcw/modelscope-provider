@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="drawer-overlay" @click.self="close">
+    <div v-if="visible" class="drawer-overlay" :class="{ 'exiting': exiting }" @click.self="close">
       <div class="drawer drawer-right"
            :class="{ 'drawer-full': mobileFull && isMobile }"
            :style="(mobileFull && isMobile) ? {} : { width: props.width }">

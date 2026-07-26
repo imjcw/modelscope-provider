@@ -1,6 +1,6 @@
 <template>
-  <div>
-    <PageHeader title="请求日志" subtitle="查看、筛选和排查所有上游请求记录">
+  <div class="h-full flex flex-col overflow-hidden">
+    <PageHeader title="请求日志 // Logs" subtitle="// 查看、筛选和排查所有上游请求记录">
       <template #action>
         <div class="flex items-center gap-3">
           <!-- 定时刷新 -->
@@ -11,12 +11,12 @@
       </template>
     </PageHeader>
 
-    <div class="px-6 md:px-8 py-6">
+    <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6">
       <PageState :loading="loading && logs.length === 0">
       <!-- Filters (1 row) -->
       <div class="flex flex-wrap gap-3 mb-5 items-center">
         <FilterField label="时间" width="lg:w-56">
-          <DateRangePicker @update="onTimeChange" />
+          <DateRangePicker :utc8="true" @update="onTimeChange" />
         </FilterField>
         <FilterField label="供应商" width="lg:w-36">
           <CSelect v-model="filters.accountId" :options="ACCOUNT_OPTIONS" size="sm" placeholder="选择供应商" />
@@ -47,9 +47,9 @@
               <th class="text-left">供应商</th>
               <th class="text-left">模型</th>
               <th class="text-left">状态</th>
-              <th class="text-left">输入 Token</th>
-              <th class="text-left">Cache 命中</th>
-              <th class="text-left">输出 Token</th>
+              <th class="text-left">输入</th>
+              <th class="text-left">缓存命中</th>
+              <th class="text-left">输出</th>
               <th class="text-left">延迟</th>
               <th class="text-left">流式</th>
             </tr>
@@ -61,13 +61,13 @@
               <td class="text-ls-dim font-mono">{{ log.request_id }}</td>
               <td>
                 <span class="inline-flex items-center gap-1.5 text-ls-dim">
-                  <span class="w-4 h-4 rounded bg-ls-elevated flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ (log.account_name || log.account_id || '')[0].toUpperCase() }}</span>
+                  <span class="w-4 h-4 rounded bg-ls-accent/10 flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ (log.account_name || log.account_id || '')[0].toUpperCase() }}</span>
                   {{ log.account_name || log.account_id }}
                 </span>
               </td>
               <td>
                 <span class="text-ls-text hover:underline inline-flex items-center gap-1.5">
-                  <span class="w-4 h-4 rounded bg-ls-elevated flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ log.model[0].toUpperCase() }}</span>
+                  <span class="w-4 h-4 rounded bg-ls-accent/10 flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ log.model[0].toUpperCase() }}</span>
                   <span class="font-mono">{{ log.model }}</span>
                 </span>
               </td>
@@ -162,11 +162,16 @@ function setRefresh(ms) {
 onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 
 // ── 时间范围 ──
+// 重置到第一页并加载：page 已为 0 时 watch(page) 不会触发，需手动加载，避免重复请求
+function resetAndLoad() {
+  if (page.value !== 0) page.value = 0 // 触发 watch(page) → loadLogs
+  else loadLogs()
+}
+
 function onTimeChange({ start, end }) {
   filters.value.startTime = start
   filters.value.endTime = end
-  page.value = 0
-  loadLogs()
+  resetAndLoad()
 }
 
 // 筛选已由后端完成，这里直接透出当前页数据
@@ -205,7 +210,7 @@ watch(page, () => loadLogs())
 // 非时间筛选变化时，回到第一页并重新加载
 watch(
   () => [filters.value.model, filters.value.accountId, filters.value.statusCode, filters.value.isStream],
-  () => { page.value = 0; loadLogs() },
+  () => resetAndLoad(),
 )
 
 const loadFilterOptions = async () => {
@@ -235,6 +240,7 @@ const loadFilterOptions = async () => {
 
 onMounted(async () => {
   await loadFilterOptions()
+  // 显式加载日志数据（DateRangePicker 的 mount emit 可能因时序问题未能触发首次加载）
   loadLogs()
 })
 </script>

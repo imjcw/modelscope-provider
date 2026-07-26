@@ -1,5 +1,9 @@
 <script setup>
-import { computed } from 'vue'
+/**
+ * MarkdownRender — 渲染 markdown 内容。
+ * 代码块通过事件委托实现复制，避免 inline onclick 的转义问题。
+ */
+import { computed, onMounted, onBeforeUnmount, ref, inject } from 'vue'
 import MarkdownIt from 'markdown-it'
 
 const props = defineProps({
@@ -8,6 +12,9 @@ const props = defineProps({
 
 const emit = defineEmits(['frontmatter'])
 
+const containerRef = ref(null)
+const toast = inject('$toast', null)
+
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -15,51 +22,50 @@ const md = new MarkdownIt({
   breaks: true,
 })
 
-// Plugin: wrap fenced code blocks in a styled container with header + line numbers
+// Plugin: fenced code blocks with base64 data-code for copy handler
 md.use(function codeBlockPlugin(md) {
   md.renderer.rules.fence = function(tokens, idx) {
     const token = tokens[idx]
     const lang = token.info ? token.info.trim() : ''
     const content = token.content
 
+    const dataCode = btoa(unescape(encodeURIComponent(content)))
     const rawLines = content.endsWith('\n') ? content.slice(0, -1).split('\n') : content.split('\n')
-    const lineCount = rawLines.length || 1
 
-    let lineNums = ''
-    for (let i = 1; i <= lineCount; i++) {
-      lineNums += '<span>' + i + '</span>'
+    let bodyHtml = ''
+    for (let i = 0; i < rawLines.length; i++) {
+      const num = String(i + 1).padStart(2, ' ')
+      const text = md.utils.escapeHtml(rawLines[i])
+      bodyHtml += '<div style="display:flex">' +
+        '<span class="cb-num" style="color:var(--code-num)">' + num + '</span>' +
+        '<span class="cb-text" style="color:var(--code-text)">' + text + '</span>' +
+        '</div>'
     }
 
     const langHtml = lang
       ? '<span class="cb-lang"><span class="cb-dot"></span>' + md.utils.escapeHtml(lang) + '</span>'
-      : '<span class="cb-lang"><span class="cb-dot"></span></span>'
+      : '<span class="cb-lang"><span class="cb-dot"></span>&nbsp;</span>'
 
-    const innerHtml = md.utils.escapeHtml(content)
-
-    return '<div class="codeblock">' +
+    return '<div class="codeblock" data-code="' + dataCode + '">' +
       '<div class="cb-header">' + langHtml +
-      '<button class="cb-copy" type="button" title="Copy" onclick="navigator.clipboard.writeText(this.closest(\'.codeblock\').querySelector(\'.cb-code\').innerText)">&#x1F4CB;</button></div>' +
-      '<div class="cb-body">' +
-      '<div class="cb-linenumbers">' + lineNums + '</div>' +
-      '<div class="cb-code">' + innerHtml + '</div>' +
-      '</div></div>\n'
+      '<button class="cb-copy" type="button" title="复制">' +
+      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<rect x="9" y="9" width="13" height="13" rx="2"/>' +
+      '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>' +
+      '<div class="cb-body">' + bodyHtml + '</div></div>\n'
   }
 })
 
-// Extract YAML frontmatter: ---\n...\n--- at the very start
 const YAML_FRONTMATTER_RE = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/
 
-// Strip line number prefixes like "1 ---\n2 name: ..." that some tools embed
 function stripLineNumbers(src) {
   const lines = src.split('\n')
   if (lines.length < 2) return src
-
   const LINE_NUM_RE = /^\s*(\d+)\s+(.*)$/
   let matched = 0
   for (const line of lines) {
     if (LINE_NUM_RE.test(line)) matched++
   }
-
   if (matched / lines.length > 0.5) {
     return lines.map(line => {
       const m = line.match(LINE_NUM_RE)
@@ -71,42 +77,59 @@ function stripLineNumbers(src) {
 
 function parseSource(src) {
   const cleaned = stripLineNumbers(src)
-  const match = cleaned.match(YAML_FRONTMATTER_RE)
+  // Strip internal framework injection tags that should never render
+  const stripped = cleaned.replace(/<\?system-reminder[\s\S]*?<\/system-reminder\?>/gi, '')
+  const match = stripped.match(YAML_FRONTMATTER_RE)
   if (match) {
     emit('frontmatter', match[1])
     return match[2]
   }
-  return cleaned
+  return stripped
 }
 
 const html = computed(() => {
   const body = parseSource(props.source)
   return md.render(body)
 })
+
+function handleCopyClick(e) {
+  const btn = e.target.closest('.cb-copy')
+  if (!btn) return
+  e.preventDefault()
+  const block = btn.closest('.codeblock')
+  if (!block) return
+  const code = decodeURIComponent(escape(atob(block.dataset.code || '')))
+  navigator.clipboard.writeText(code).then(() => {
+    toast?.('已复制到剪贴板', 'success')
+  }).catch(() => {
+    toast?.('复制失败', 'error')
+  })
+}
+
+onMounted(() => {
+  containerRef.value?.addEventListener('click', handleCopyClick)
+})
+onBeforeUnmount(() => {
+  containerRef.value?.removeEventListener('click', handleCopyClick)
+})
 </script>
 
 <template>
-  <div class="md-content">
+  <div ref="containerRef" class="md-content">
     <div v-html="html"></div>
   </div>
 </template>
 
 <style scoped>
-/* ── Prose base ── */
 .md-content {
   color: var(--text);
   font-size: 13px;
   line-height: 1.7;
 }
 
-.md-content :deep(p) {
-  margin: 0 0 0.8em;
-}
-.md-content :deep(p:last-child) {
-  margin-bottom: 0;
-}
+.md-content :deep(p) { margin: 0 0 0.8em; }
+.md-content :deep(p:last-child) { margin-bottom: 0; }
 
-/* ── Headings ── */
 .md-content :deep(h1), .md-content :deep(h2), .md-content :deep(h3),
 .md-content :deep(h4), .md-content :deep(h5), .md-content :deep(h6) {
   margin: 1em 0 0.5em;
@@ -119,31 +142,20 @@ const html = computed(() => {
 .md-content :deep(h3) { font-size: 1.05em; }
 .md-content :deep(h4) { font-size: 1em; }
 
-/* ── Lists ── */
 .md-content :deep(ul), .md-content :deep(ol) {
   margin: 0.5em 0;
   padding-left: 1.6em;
 }
-.md-content :deep(li) {
-  margin: 0.2em 0;
-}
-.md-content :deep(li p) {
-  margin: 0.15em 0;
-}
-.md-content :deep(li > ul), .md-content :deep(li > ol) {
-  margin: 0.2em 0;
-}
+.md-content :deep(li) { margin: 0.2em 0; }
+.md-content :deep(li p) { margin: 0.15em 0; }
+.md-content :deep(li > ul), .md-content :deep(li > ol) { margin: 0.2em 0; }
 
-/* ── Links ── */
 .md-content :deep(a) {
   color: var(--accent);
   text-decoration: none;
 }
-.md-content :deep(a:hover) {
-  text-decoration: underline;
-}
+.md-content :deep(a:hover) { text-decoration: underline; }
 
-/* ── Blockquote ── */
 .md-content :deep(blockquote) {
   margin: 0.6em 0;
   padding: 0.3em 0.8em;
@@ -152,18 +164,14 @@ const html = computed(() => {
   background: rgba(137, 180, 250, 0.04);
   border-radius: 0 6px 6px 0;
 }
-.md-content :deep(blockquote p:last-child) {
-  margin-bottom: 0;
-}
+.md-content :deep(blockquote p:last-child) { margin-bottom: 0; }
 
-/* ── Horizontal rule ── */
 .md-content :deep(hr) {
   margin: 1.2em 0;
   border: none;
   border-top: 1px solid var(--border);
 }
 
-/* ── Tables ── */
 .md-content :deep(table) {
   border-collapse: collapse;
   margin: 0.6em 0;
@@ -185,106 +193,99 @@ const html = computed(() => {
   background: rgba(255, 255, 255, 0.015);
 }
 
-/* ── Images ── */
 .md-content :deep(img) {
   max-width: 100%;
   border-radius: 8px;
   border: 1px solid var(--border);
 }
 
-/* ── Inline code ── */
 .md-content :deep(code) {
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   font-size: 0.85em;
   padding: 0.15em 0.4em;
   border-radius: 5px;
-  background: var(--surface-2);
-  color: #f2cdcd;
+  color: var(--text);
   border: 1px solid var(--border);
 }
 
-/* ── Fenced code blocks (custom plugin output) ── */
+/* Fenced code blocks */
 .md-content :deep(.codeblock) {
   margin: 0.8em 0;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: #0f0f10;
+  border-radius: 0.5rem;
+  border: 1px solid var(--code-border);
   overflow: hidden;
+  background: transparent;
 }
 
 .md-content :deep(.cb-header) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+  height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--code-sep);
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .md-content :deep(.cb-lang) {
   display: flex;
   align-items: center;
   gap: 6px;
+  font-size: 10px;
+  color: var(--code-muted);
 }
 
 .md-content :deep(.cb-dot) {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: #3b82f6;
 }
 
 .md-content :deep(.cb-copy) {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 2px;
   border-radius: 3px;
-  font-size: 13px;
-  opacity: 0.5;
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.6;
   transition: opacity 0.15s;
 }
 .md-content :deep(.cb-copy:hover) {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
 }
 
 .md-content :deep(.cb-body) {
-  display: flex;
-  overflow-x: auto;
-}
-
-.md-content :deep(.cb-linenumbers) {
-  padding: 12px 0;
-  line-height: 1.6;
-  color: #4a4a5a;
-  font-size: 12px;
-  text-align: right;
-  user-select: none;
-  flex-shrink: 0;
-}
-.md-content :deep(.cb-linenumbers span) {
-  display: block;
-  padding-right: 12px;
-  min-width: 24px;
-}
-
-.md-content :deep(.cb-code) {
-  flex: 1;
-  min-width: 0;
-}
-
-.md-content :deep(.cb-code) {
-  padding: 12px 16px 12px 12px;
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   font-size: 12px;
-  line-height: 1.6;
-  color: var(--text);
+  overflow-x: auto;
+  padding: 8px 0;
+}
+
+.md-content :deep(.cb-body > div) { display: flex; }
+
+.md-content :deep(.cb-num) {
+  width: 36px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 8px;
+  user-select: none;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  border-right: 1px solid var(--code-sep);
+  margin: -8px 0;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.md-content :deep(.cb-text) {
+  flex: 1;
+  line-height: 20px;
   white-space: pre-wrap;
-  word-break: break-all;
+  padding-left: 12px;
 }
 </style>

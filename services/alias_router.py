@@ -2,7 +2,7 @@
 import logging
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,22 +40,81 @@ class AliasRouter:
             return val
         return "round_robin"
 
+    def _build_candidates(self, alias: str) -> List[tuple]:
+        """解析 alias 的所有绑定条目，返回 (account_dict, model_name) 候选列表。"""
+        entries = self.mapping_model_repo.find_by_alias(alias)
+        if not entries:
+            return []
+
+        candidates = []
+        for entry in entries:
+            account_dict = self.account_repo.find_by_id(entry["supplier_id"])
+            if account_dict:
+                candidates.append((account_dict, entry["model_name"]))
+
+        return candidates
+
+    def _to_ms_account(self, account_dict: dict) -> object:
+        """将 account dict 转换为 ModelScopeAccount。"""
+        from models.account import ModelScopeAccount
+        return ModelScopeAccount(
+            account_id=account_dict["account_id"],
+            name=account_dict.get("name", ""),
+            api_key=account_dict["api_key"],
+            base_url=account_dict["base_url"],
+            provider_type=account_dict.get("provider_type", "modelscope"),
+        )
+
+    def get_candidates(self, alias: str) -> List[RoutingResult]:
+        """返回 alias 的所有可用候选路由，按策略排序。
+
+        与 route() 不同，此方法返回所有候选而非只选一个，
+        调用方可在失败时尝试下一个候选。
+
+        Returns:
+            按策略排序的 RoutingResult 列表（可能为空）。
+        """
+        candidates = self._build_candidates(alias)
+        if not candidates:
+            return []
+
+        strategy = self._get_strategy()
+
+        if strategy == "round_robin":
+            # 从当前轮询位置开始，取所有候选
+            idx = self._round_robin_index(alias, len(candidates))
+            # 重排：从 idx 开始，循环取完所有
+            ordered = candidates[idx:] + candidates[:idx]
+        elif strategy == "random":
+            ordered = candidates.copy()
+            random.shuffle(ordered)
+        else:  # least_conn — 按连接数升序排列
+            counts = self._get_conn_counts(alias, len(candidates))
+            ordered = [c for _, c in sorted(zip(counts, candidates))]
+            # 递增第一个候选的连接数（模拟选中）
+            first_idx = candidates.index(ordered[0])
+            counts[first_idx] += 1
+
+        results = []
+        for account_dict, model_name in ordered:
+            ms_account = self._to_ms_account(account_dict)
+            results.append(RoutingResult(account=ms_account, model_name=model_name))
+
+        logger.info(
+            f"AliasRouter: got {len(results)} candidates for '{alias}', "
+            f"strategy={strategy}"
+        )
+        return results
+
     def route(self, alias: str) -> Optional[RoutingResult]:
         """为 alias 选择一个绑定条目。
 
         Returns:
             RoutingResult（有绑定时）或 None（无绑定时）
         """
-        entries = self.mapping_model_repo.find_by_alias(alias)
-        if not entries:
+        candidates = self._build_candidates(alias)
+        if not candidates:
             return None
-
-        # 解析每个条目对应的 account
-        candidates = []
-        for entry in entries:
-            account_dict = self.account_repo.find_by_id(entry["supplier_id"])
-            if account_dict:
-                candidates.append((account_dict, entry["model_name"]))
 
         if not candidates:
             logger.warning(
@@ -74,16 +133,7 @@ class AliasRouter:
             selected = self._least_conn(alias, candidates)
 
         account_dict, model_name = selected
-
-        # 转换为 ModelScopeAccount
-        from models.account import ModelScopeAccount
-
-        ms_account = ModelScopeAccount(
-            account_id=account_dict["account_id"],
-            name=account_dict.get("name", ""),
-            api_key=account_dict["api_key"],
-            base_url=account_dict["base_url"],
-        )
+        ms_account = self._to_ms_account(account_dict)
 
         logger.info(
             f"AliasRouter: routed '{alias}' → account={ms_account.account_id}, "
@@ -99,12 +149,15 @@ class AliasRouter:
 
     def _least_conn(self, alias: str, candidates):
         """least_conn 策略：选择当前连接数最少的候选。"""
-        if alias not in self._conn_counts:
-            self._conn_counts[alias] = [0] * len(candidates)
-        counts = self._conn_counts[alias]
-        # 候选数可能变化，补齐
-        while len(counts) < len(candidates):
-            counts.append(0)
+        counts = self._get_conn_counts(alias, len(candidates))
         min_idx = counts.index(min(counts[:len(candidates)]))
         counts[min_idx] += 1
         return candidates[min_idx]
+
+    def _get_conn_counts(self, alias: str, size: int) -> list:
+        """获取或初始化 least_conn 计数数组。"""
+        if alias not in self._conn_counts:
+            self._conn_counts[alias] = [0] * size
+        while len(self._conn_counts[alias]) < size:
+            self._conn_counts[alias].append(0)
+        return self._conn_counts[alias]

@@ -96,6 +96,377 @@
       70% { box-shadow: 0 0 0 6px rgba(0, 180, 216, 0); }
       100% { box-shadow: 0 0 0 0 rgba(0, 180, 216, 0); }
     }
+
+    /* ═══════════════════════════════════════════════════
+       List Page — Table + pagination + action row
+       ═══════════════════════════════════════════════════ */
+    .list-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .list-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .list-toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .list-toolbar .search-box {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+    }
+    .list-toolbar .search-box input {
+      border: none;
+      background: transparent;
+      outline: none;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text);
+      width: 160px;
+    }
+    .list-toolbar .search-box input::placeholder { color: var(--text-mute); }
+
+    .list-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-dim);
+      background: var(--surface);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .list-btn:hover {
+      color: var(--cyan);
+      border-color: rgba(0, 180, 216, 0.3);
+      background: rgba(0, 180, 216, 0.04);
+    }
+    .list-btn.primary {
+      background: rgba(0, 180, 216, 0.1);
+      color: var(--cyan);
+      border-color: rgba(0, 180, 216, 0.3);
+    }
+    .list-btn.primary:hover {
+      background: rgba(0, 180, 216, 0.18);
+    }
+
+    .list-filter {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .list-filter .pill {
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .list-filter .pill.active {
+      color: var(--cyan);
+      background: rgba(0, 180, 216, 0.1);
+      border-color: rgba(0, 180, 216, 0.3);
+    }
+    .list-filter .pill:hover:not(.active) {
+      color: var(--cyan);
+      border-color: rgba(0, 180, 216, 0.2);
+    }
+
+    /* Table inside list card */
+    .list-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .list-table thead th {
+      padding: 9px 16px;
+      text-align: left;
+      font-size: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-dim);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .list-table tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    .list-table tbody tr:last-child { border-bottom: none; }
+    .list-table tbody tr:hover { background: rgba(0, 180, 216, 0.04); }
+    .list-table tbody td {
+      padding: 11px 16px;
+      vertical-align: middle;
+      color: var(--text);
+    }
+
+    .list-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .list-name .icon {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(0, 180, 216, 0.1);
+      color: var(--cyan);
+      flex-shrink: 0;
+    }
+    .list-name .name-text {
+      font-weight: 500;
+      color: var(--text);
+    }
+    .list-name .sub-text {
+      font-size: 11px;
+      color: var(--text-mute);
+      margin-top: 1px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-size: 10px;
+      font-weight: 500;
+    }
+    .badge.active { background: rgba(34, 197, 94, 0.1); color: #16a34a; border: 1px solid rgba(34, 197, 94, 0.2); }
+    .badge.inactive { background: rgba(107, 114, 128, 0.1); color: #6b7280; border: 1px solid rgba(107, 114, 128, 0.2); }
+    .badge.expired { background: rgba(239, 68, 68, 0.1); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.2); }
+
+    .row-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .row-actions button {
+      width: 26px;
+      height: 26px;
+      border-radius: 5px;
+      border: 1px solid transparent;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-mute);
+      transition: all 0.15s;
+    }
+    .row-actions button:hover {
+      background: var(--bg);
+      border-color: var(--border);
+      color: var(--cyan);
+    }
+    .row-actions button.danger:hover {
+      color: #dc2626;
+      background: rgba(239, 68, 68, 0.06);
+      border-color: rgba(239, 68, 68, 0.2);
+    }
+
+    /* Pagination */
+    .list-pager {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-mute);
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .list-pager .pager-group {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .list-pager button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 28px;
+      padding: 0 8px;
+      border-radius: 5px;
+      border: 1px solid transparent;
+      background: transparent;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .list-pager button:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--border);
+      color: var(--cyan);
+    }
+    .list-pager button.active {
+      background: rgba(0, 180, 216, 0.12);
+      color: var(--cyan);
+      border-color: rgba(0, 180, 216, 0.3);
+    }
+    .list-pager button:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       Code Snippet — light-theme code block
+       ═══════════════════════════════════════════════════ */
+    .codeblock {
+      margin: 0.8em 0;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .codeblock.neon {
+      border-color: rgba(0, 180, 216, 0.25);
+    }
+    .codeblock.neon:hover {
+      box-shadow: 0 0 14px rgba(0, 180, 216, 0.1);
+      border-color: rgba(0, 180, 216, 0.4);
+    }
+
+    .cb-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 14px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-mute);
+    }
+    .cb-lang {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .cb-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 6px rgba(0, 180, 216, 0.5);
+    }
+    .cb-meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .cb-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-mute);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .cb-copy:hover {
+      color: var(--cyan);
+      background: rgba(0, 180, 216, 0.06);
+      border-color: rgba(0, 180, 216, 0.2);
+    }
+
+    .cb-body {
+      display: flex;
+      overflow-x: auto;
+    }
+    .cb-linenumbers {
+      padding: 12px 0;
+      line-height: 1.6;
+      color: var(--text-mute);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      text-align: right;
+      user-select: none;
+      flex-shrink: 0;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+    }
+    .cb-linenumbers span {
+      display: block;
+      padding: 0 12px;
+      min-width: 28px;
+    }
+    .cb-code {
+      flex: 1;
+      min-width: 0;
+      padding: 12px 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: var(--surface);
+    }
+
+    /* Inline code */
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--fuchsia);
+      border: 1px solid var(--border);
+    }
+
+    /* Code color tokens (light) */
+    .tok-kw    { color: #7c3aed; }   /* keywords */
+    .tok-str   { color: #059669; }   /* strings */
+    .tok-num   { color: #d97706; }   /* numbers */
+    .tok-cm    { color: #9ca3af; font-style: italic; } /* comments */
+    .tok-fn    { color: #00b4d8; }   /* functions */
+    .tok-pro   { color: var(--text); }                      /* properties */
+    .tok-op    { color: #6b7280; }   /* operators */
+    .tok-punc  { color: #9ca3af; }   /* punctuation */
+    .tok-tag   { color: #d600d6; }   /* JSX/tags */
+    .tok-attr  { color: #7c3aed; }   /* attributes */
   </style>
 </head>
 <body class="antialiased">
@@ -664,6 +1035,257 @@
                 <p class="text-xs text-[#5a5a7a] mt-1 leading-relaxed">已使用 88% 的每分钟配额，策略：队列等待</p>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- ── Code Snippets ── -->
+        <div class="bg-white rounded-lg border border-[#e0e0ea] p-5 neon-glow" style="border-color: rgba(0, 180, 216, 0.2);">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="text-sm uppercase tracking-[0.15em] text-[#1a1a2e]">代码片段 // Code Snippets</h3>
+              <p class="text-xs text-[#8888aa] mt-0.5">// API 调用示例 · 行号 · 语言标识 · 一键复制</p>
+            </div>
+            <span class="text-xs text-[#8888aa]">2 个片段</span>
+          </div>
+
+          <!-- Snippet 1: Python -->
+          <div class="codeblock neon">
+            <div class="cb-header">
+              <span class="cb-lang"><span class="cb-dot"></span>python</span>
+              <div class="cb-meta">
+                <span style="font-size:10px;color:var(--text-mute)">chat.py</span>
+                <button class="cb-copy">📋 Copy</button>
+              </div>
+            </div>
+            <div class="cb-body">
+              <div class="cb-linenumbers">
+                <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span>
+              </div>
+              <div class="cb-code"><span class="tok-cm"># Initialize ModelScope Provider client</span>
+<span class="tok-kw">from</span> <span class="tok-pro">modelscope_provider</span> <span class="tok-kw">import</span> <span class="tok-fn">Provider</span>
+
+<span class="tok-pro">client</span> <span class="tok-op">=</span> <span class="tok-fn">Provider</span><span class="tok-punc">(</span><span class="tok-attr">api_key</span><span class="tok-op">=</span><span class="tok-str">"sk-prod-****"</span><span class="tok-punc">)</span>
+
+<span class="tok-pro">response</span> <span class="tok-op">=</span> <span class="tok-pro">client</span><span class="tok-punc">.</span><span class="tok-fn">chat</span><span class="tok-punc">(</span>
+    <span class="tok-attr">model</span><span class="tok-op">=</span><span class="tok-str">"gpt-4o"</span><span class="tok-punc">,</span>
+    <span class="tok-attr">messages</span><span class="tok-op">=</span><span class="tok-punc">[</span><span class="tok-punc">{</span><span class="tok-str">"role"</span><span class="tok-punc">:</span> <span class="tok-str">"user"</span><span class="tok-punc">,</span> <span class="tok-str">"content"</span><span class="tok-punc">:</span> <span class="tok-str">"Hello!"</span><span class="tok-punc">}</span><span class="tok-punc">]</span><span class="tok-punc">,</span>
+    <span class="tok-attr">temperature</span><span class="tok-op">=</span><span class="tok-num">0.7</span><span class="tok-punc">,</span>
+<span class="tok-punc">)</span>
+<span class="tok-fn">print</span><span class="tok-punc">(</span><span class="tok-pro">response</span><span class="tok-punc">.</span><span class="tok-pro">choices</span><span class="tok-punc">[</span><span class="tok-num">0</span><span class="tok-punc">]</span><span class="tok-punc">.</span><span class="tok-pro">message</span><span class="tok-punc">.</span><span class="tok-pro">content</span><span class="tok-punc">)</span></div>
+            </div>
+          </div>
+
+          <!-- Snippet 2: curl -->
+          <div class="codeblock neon">
+            <div class="cb-header">
+              <span class="cb-lang"><span class="cb-dot"></span>curl</span>
+              <div class="cb-meta">
+                <span style="font-size:10px;color:var(--text-mute)">api-request.sh</span>
+                <button class="cb-copy">📋 Copy</button>
+              </div>
+            </div>
+            <div class="cb-body">
+              <div class="cb-linenumbers">
+                <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span>
+              </div>
+              <div class="cb-code"><span class="tok-cm"># Direct REST API call</span>
+<span class="tok-fn">curl</span> <span class="tok-op">-X</span> <span class="tok-str">POST</span> <span class="tok-str">https://api.provider.ai/v1/chat/completions</span> \
+  <span class="tok-op">-H</span> <span class="tok-str">"Authorization: Bearer sk-prod-****"</span> \
+  <span class="tok-op">-H</span> <span class="tok-str">"Content-Type: application/json"</span> \
+  <span class="tok-op">-d</span> <span class="tok-punc">'</span><span class="tok-punc">{</span><span class="tok-punc">}</span><span class="tok-punc">'</span>
+
+<span class="tok-cm"># Response: HTTP 200, latency ~382ms</span></div>
+            </div>
+          </div>
+
+          <!-- Inline code example -->
+          <div class="mt-3 p-3 rounded-lg bg-[#f0f0f5]/60 border border-[#e0e0ea]">
+            <p class="text-xs text-[#5a5a7a] leading-relaxed">
+              在文本中引用代码使用 <code>inline code</code> 样式，例如传入 <code>model="gpt-4o"</code> 和 <code>max_tokens=2048</code> 参数。
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ── List Page Demo ── -->
+      <div class="list-card neon-glow">
+        <!-- Toolbar -->
+        <div class="list-toolbar">
+          <div class="list-toolbar-left">
+            <h3 class="text-sm uppercase tracking-[0.15em] text-[#1a1a2e]">API Keys // 列表</h3>
+            <span class="text-xs text-[#8888aa]">// 管理与监控所有 API Key</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="list-filter">
+              <span class="pill active">全部</span>
+              <span class="pill">正常</span>
+              <span class="pill">已过期</span>
+            </div>
+            <div class="search-box">
+              <svg class="w-3.5 h-3.5 text-[#8888aa]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+              </svg>
+              <input type="text" placeholder="搜索 Key 名称或 ID…">
+            </div>
+            <button class="list-btn primary">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+              </svg>
+              新建 Key
+            </button>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <table class="list-table">
+          <thead>
+            <tr>
+              <th class="w-12"><span class="text-[#8888aa]">#</span></th>
+              <th>名称</th>
+              <th class="hidden md:table-cell">Key 标识</th>
+              <th class="hidden sm:table-cell">分组</th>
+              <th>状态</th>
+              <th class="hidden md:table-cell text-right">今日调用</th>
+              <th class="hidden lg:table-cell text-right">配额</th>
+              <th class="text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="text-xs text-[#8888aa] font-mono">01</span></td>
+              <td>
+                <div class="list-name">
+                  <div class="icon">P</div>
+                  <div>
+                    <div class="name-text">production-main</div>
+                    <div class="sub-text">生产环境主 Key</div>
+                  </div>
+                </div>
+              </td>
+              <td class="hidden md:table-cell"><span class="text-xs font-mono text-[#5a5a7a]">sk-prod-a1b2c3****</span></td>
+              <td class="hidden sm:table-cell"><span class="text-xs px-1.5 py-0.5 rounded text-[#00b4d8] bg-[#00b4d8]/10">生产</span></td>
+              <td><span class="badge active">● 正常</span></td>
+              <td class="hidden md:table-cell text-right"><span class="text-sm font-mono text-[#1a1a2e]">8,420</span></td>
+              <td class="hidden lg:table-cell text-right"><span class="text-xs text-[#5a5a7a]">8,420 / 50,000</span></td>
+              <td>
+                <div class="row-actions">
+                  <button title="复制"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+                  <button title="编辑"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg></button>
+                  <button class="danger" title="删除"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.679-.113 1.02-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg></button>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="text-xs text-[#8888aa] font-mono">02</span></td>
+              <td>
+                <div class="list-name">
+                  <div class="icon">D</div>
+                  <div>
+                    <div class="name-text">dev-testing</div>
+                    <div class="sub-text">开发测试 Key</div>
+                  </div>
+                </div>
+              </td>
+              <td class="hidden md:table-cell"><span class="text-xs font-mono text-[#5a5a7a]">sk-dev-d4e5f6****</span></td>
+              <td class="hidden sm:table-cell"><span class="text-xs px-1.5 py-0.5 rounded text-yellow-600 bg-yellow-500/10">测试</span></td>
+              <td><span class="badge active">● 正常</span></td>
+              <td class="hidden md:table-cell text-right"><span class="text-sm font-mono text-[#1a1a2e]">2,180</span></td>
+              <td class="hidden lg:table-cell text-right"><span class="text-xs text-[#5a5a7a]">2,180 / 10,000</span></td>
+              <td>
+                <div class="row-actions">
+                  <button title="复制"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+                  <button title="编辑"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg></button>
+                  <button class="danger" title="删除"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.679-.113 1.02-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg></button>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="text-xs text-[#8888aa] font-mono">03</span></td>
+              <td>
+                <div class="list-name">
+                  <div class="icon" style="background:rgba(239,68,68,0.1);color:#dc2626">E</div>
+                  <div>
+                    <div class="name-text">legacy-integration</div>
+                    <div class="sub-text">遗留系统集成 (已过期)</div>
+                  </div>
+                </div>
+              </td>
+              <td class="hidden md:table-cell"><span class="text-xs font-mono text-[#5a5a7a]">sk-legacy-g7h8i9****</span></td>
+              <td class="hidden sm:table-cell"><span class="text-xs px-1.5 py-0.5 rounded text-gray-500 bg-gray-500/10">遗留</span></td>
+              <td><span class="badge expired">● 已过期</span></td>
+              <td class="hidden md:table-cell text-right"><span class="text-sm font-mono text-[#1a1a2e]">0</span></td>
+              <td class="hidden lg:table-cell text-right"><span class="text-xs text-[#5a5a7a]">0 / 5,000</span></td>
+              <td>
+                <div class="row-actions">
+                  <button title="复制"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+                  <button title="编辑"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg></button>
+                  <button class="danger" title="删除"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.679-.113 1.02-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg></button>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="text-xs text-[#8888aa] font-mono">04</span></td>
+              <td>
+                <div class="list-name">
+                  <div class="icon" style="background:rgba(214,0,214,0.1);color:var(--fuchsia)">S</div>
+                  <div>
+                    <div class="name-text">staging-deploy</div>
+                    <div class="sub-text">预发布部署 Key</div>
+                  </div>
+                </div>
+              </td>
+              <td class="hidden md:table-cell"><span class="text-xs font-mono text-[#5a5a7a]">sk-stage-j1k2l3****</span></td>
+              <td class="hidden sm:table-cell"><span class="text-xs px-1.5 py-0.5 rounded text-purple-600 bg-purple-500/10">预发布</span></td>
+              <td><span class="badge active">● 正常</span></td>
+              <td class="hidden md:table-cell text-right"><span class="text-sm font-mono text-[#1a1a2e]">560</span></td>
+              <td class="hidden lg:table-cell text-right"><span class="text-xs text-[#5a5a7a]">560 / 20,000</span></td>
+              <td>
+                <div class="row-actions">
+                  <button title="复制"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+                  <button title="编辑"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg></button>
+                  <button class="danger" title="删除"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.679-.113 1.02-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg></button>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="text-xs text-[#8888aa] font-mono">05</span></td>
+              <td>
+                <div class="list-name">
+                  <div class="icon" style="background:rgba(107,114,128,0.1);color:#6b7280">O</div>
+                  <div>
+                    <div class="name-text">old-monitor</div>
+                    <div class="sub-text">旧版监控 Key (已停用)</div>
+                  </div>
+                </div>
+              </td>
+              <td class="hidden md:table-cell"><span class="text-xs font-mono text-[#5a5a7a]">sk-old-m4n5o6****</span></td>
+              <td class="hidden sm:table-cell"><span class="text-xs px-1.5 py-0.5 rounded text-gray-500 bg-gray-500/10">监控</span></td>
+              <td><span class="badge inactive">● 已停用</span></td>
+              <td class="hidden md:table-cell text-right"><span class="text-sm font-mono text-[#1a1a2e]">0</span></td>
+              <td class="hidden lg:table-cell text-right"><span class="text-xs text-[#5a5a7a]">0 / 1,000</span></td>
+              <td>
+                <div class="row-actions">
+                  <button title="复制"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+                  <button title="编辑"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg></button>
+                  <button class="danger" title="删除"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.679-.113 1.02-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg></button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Pagination -->
+        <div class="list-pager">
+          <span>显示 1–5 / 共 12 条记录</span>
+          <div class="pager-group">
+            <button disabled>⇤ 首页</button>
+            <button disabled>← 上页</button>
+            <button class="active">1</button>
+            <button>2</button>
+            <button>3</button>
+            <button>下页 →</button>
+            <button>末页 ⇥</button>
           </div>
         </div>
       </div>

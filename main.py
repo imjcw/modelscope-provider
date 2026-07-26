@@ -71,6 +71,7 @@ async def initialize_services():
         from provider.repositories.quota_repository import QuotaRepository
         from provider.repositories.supplier_model_repository import SupplierModelRepository
         from provider.repositories.client_api_key_repository import ClientApiKeyRepository
+        from provider.repositories.provider_type_repository import ProviderTypeRepository
     except ImportError:
         from services.admin_service import AdminService
         from repositories.account_repository import AccountRepository
@@ -81,6 +82,7 @@ async def initialize_services():
         from repositories.quota_repository import QuotaRepository
         from repositories.supplier_model_repository import SupplierModelRepository
         from repositories.client_api_key_repository import ClientApiKeyRepository
+        from repositories.provider_type_repository import ProviderTypeRepository
 
     db = _services["database"]
     admin_service = AdminService(
@@ -92,6 +94,10 @@ async def initialize_services():
         supplier_model_repo=SupplierModelRepository(db),
         mapping_model_repo=MappingModelRepository(db),
         client_key_repo=ClientApiKeyRepository(db),
+        provider_type_repo=ProviderTypeRepository(db),
+        rate_limit_strategies=_services.get("rate_limit_strategies"),
+        db=db,
+        quota_updater=_services.get("quota_updater"),
     )
     _admin_service = admin_service
     logger.info(f"Loaded {len(_services['accounts'])} accounts, admin service initialized")

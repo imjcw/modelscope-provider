@@ -1,6 +1,6 @@
 <template>
-  <div>
-    <PageHeader title="使用指南" subtitle="将代理服务接入你的工具和项目">
+  <div class="h-full flex flex-col overflow-hidden">
+    <PageHeader title="使用指南 // Guide" subtitle="// 将代理服务接入你的工具和项目">
       <template #action>
         <span class="text-xs text-ls-muted">API 基础地址</span>
         <div class="flex items-center gap-1 bg-ls-card rounded-md border border-ls-border px-2.5 py-1">
@@ -12,7 +12,7 @@
       </template>
     </PageHeader>
 
-    <div class="px-6 md:px-8 py-6 space-y-6">
+    <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6 space-y-6">
       <!-- 步骤导航 -->
       <CCard>
         <h2 class="font-semibold text-ls-text mb-4">三步开始使用</h2>
@@ -43,7 +43,7 @@
             <h3 class="text-sm font-medium text-ls-text">Python · OpenAI SDK</h3>
             <p class="text-xs text-ls-muted mt-0.5">只需修改 base_url，其余代码不变</p>
           </div>
-          <pre class="code-block"><code>{{ pythonSdkCode }}</code></pre>
+          <CodeBlock lang="python" :code="pythonSdkCode" />
           <div class="bg-ls-bg rounded-md border border-ls-border p-3">
             <div class="flex items-center gap-2 mb-1">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
@@ -59,7 +59,7 @@
             <h3 class="text-sm font-medium text-ls-text">JavaScript / TypeScript · OpenAI SDK</h3>
             <p class="text-xs text-ls-muted mt-0.5">npm 包 <code class="text-ls-accent">@openai/openai</code> 同样兼容</p>
           </div>
-          <pre class="code-block"><code>{{ jsSdkCode }}</code></pre>
+          <CodeBlock lang="javascript" :code="jsSdkCode" />
         </div>
 
         <!-- Tab: curl -->
@@ -68,12 +68,12 @@
             <h3 class="text-sm font-medium text-ls-text">curl · 直接 HTTP 调用</h3>
             <p class="text-xs text-ls-muted mt-0.5">适合快速验证或无 SDK 环境</p>
           </div>
-          <pre class="code-block"><code>{{ curlCode }}</code></pre>
+          <CodeBlock lang="bash" :code="curlCode" />
           <div>
             <h3 class="text-sm font-medium text-ls-text mt-3">流式响应（SSE）</h3>
             <p class="text-xs text-ls-muted mt-0.5">添加 <code class="text-ls-accent">"stream": true</code> 即可</p>
           </div>
-          <pre class="code-block"><code>{{ curlStreamCode }}</code></pre>
+          <CodeBlock lang="bash" :code="curlStreamCode" />
         </div>
 
         <!-- Tab: 第三方工具 -->
@@ -118,11 +118,11 @@
           </div>
           <div>
             <p class="text-xs text-ls-dim mb-1.5">请求体</p>
-            <pre class="code-block"><code>{{ requestFormat }}</code></pre>
+            <CodeBlock lang="json" :code="requestFormat" />
           </div>
           <div>
             <p class="text-xs text-gray-400 mb-1.5">响应体</p>
-            <pre class="code-block"><code>{{ responseFormat }}</code></pre>
+            <CodeBlock lang="json" :code="responseFormat" />
           </div>
         </div>
 
@@ -163,6 +163,7 @@ import { ref, computed } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import CCard from '@/components/CCard.vue'
 import CopyButton from '@/components/CopyButton.vue'
+import CodeBlock from '@/components/CodeBlock.vue'
 
 // ── 页面级数据 ──
 const apiBaseUrl = computed(() => window.location.origin + '/api/v1')
@@ -340,13 +341,5 @@ const errors = [
 <style scoped>
 code {
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-}
-
-.code-block {
-  @apply bg-ls-bg rounded-md border border-ls-border p-4 text-xs text-gray-300
-    font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed;
-}
-.code-block code {
-  @apply text-gray-300;
 }
 </style>

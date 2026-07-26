@@ -43,8 +43,8 @@ const toolOutput = computed(() =>
       <span v-if="inputBadge"
         class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] bg-green-500/20 text-green-300 border border-green-500/30">本次输入</span>
       <button v-if="msg.content || msg.toolArguments || msg.toolResult" @click.stop="$emit('toggle-render')"
-        class="text-xs text-gray-500 hover:text-white px-1.5 py-0.5 rounded transition-colors"
-        :class="isRaw ? 'bg-ls-elevated text-gray-300' : ''">
+        class="text-xs text-ls-muted px-1.5 py-0.5 rounded transition-colors"
+        :class="isRaw ? 'bg-ls-accent/10 text-ls-accent' : 'hover:bg-ls-accent/10 hover:text-ls-accent'">
         {{ isRaw ? 'RAW' : 'MD' }}
       </button>
       <span class="ml-auto text-gray-500 text-xs transition-transform" :class="expanded ? 'rotate-90' : ''">▶</span>
@@ -63,8 +63,7 @@ const toolOutput = computed(() =>
       <div v-if="!isTool && msg.content && !isRaw">
         <MarkdownRender :source="msg.content" />
       </div>
-      <pre v-if="!isTool && msg.content && isRaw"
-        class="bg-ls-bg rounded-lg border border-ls-border p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto">{{ msg.content }}</pre>
+      <div v-if="!isTool && msg.content && isRaw" class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{{ msg.content }}</div>
       <!-- assistant 内联 toolCalls -->
       <div v-if="msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0"
         class="mt-3 pt-3 border-t border-ls-border space-y-2">

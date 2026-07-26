@@ -43,7 +43,8 @@ class ConfigManager:
                 account_id=account_data.get("account_id", ""),
                 name=name,
                 api_key=account_data["api_key"],
-                base_url=account_data["base_url"]
+                base_url=account_data["base_url"],
+                provider_type=account_data.get("provider_type", "modelscope"),
             )
             accounts_list.append(account)
 
@@ -71,6 +72,7 @@ class ConfigManager:
                 name=a.get("name", ""),
                 api_key=a["api_key"],
                 base_url=a["base_url"],
+                provider_type=a.get("provider_type", "modelscope"),
             ))
         return accounts
 

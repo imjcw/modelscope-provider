@@ -159,3 +159,71 @@ class TestAliasRouterRoute:
         result = router.route("my-alias")
         assert isinstance(result, RoutingResult)
         assert isinstance(result.account, ModelScopeAccount)
+
+
+class TestAliasRouterGetCandidates:
+    """get_candidates() 方法的测试。"""
+
+    def test_returns_empty_when_no_bindings(self):
+        """无绑定时返回空列表。"""
+        router = AliasRouter(
+            mapping_model_repo=MockMappingModelRepo({}),
+            account_repo=MockAccountRepo({}),
+            config_repo=MockConfigRepo(),
+        )
+        assert router.get_candidates("unknown") == []
+
+    def test_returns_all_candidates(self):
+        """返回所有绑定的候选。"""
+        accounts = {1: _make_account(1), 2: _make_account(2)}
+        router = AliasRouter(
+            mapping_model_repo=MockMappingModelRepo({
+                "my-alias": [
+                    {"id": 1, "supplier_id": 1, "model_name": "qwen"},
+                    {"id": 2, "supplier_id": 2, "model_name": "gpt-4o"},
+                ]
+            }),
+            account_repo=MockAccountRepo(accounts),
+            config_repo=MockConfigRepo("round_robin"),
+        )
+        candidates = router.get_candidates("my-alias")
+        assert len(candidates) == 2
+        assert all(isinstance(c, RoutingResult) for c in candidates)
+        assert {c.model_name for c in candidates} == {"qwen", "gpt-4o"}
+
+    def test_round_robin_ordering(self):
+        """round_robin 策略下 get_candidates 以轮询位置起始排序。"""
+        accounts = {1: _make_account(1), 2: _make_account(2), 3: _make_account(3)}
+        router = AliasRouter(
+            mapping_model_repo=MockMappingModelRepo({
+                "my-alias": [
+                    {"id": 1, "supplier_id": 1, "model_name": "m1"},
+                    {"id": 2, "supplier_id": 2, "model_name": "m2"},
+                    {"id": 3, "supplier_id": 3, "model_name": "m3"},
+                ]
+            }),
+            account_repo=MockAccountRepo(accounts),
+            config_repo=MockConfigRepo("round_robin"),
+        )
+        # 第一次 route 消耗 acc-1，所以 get_candidates 应从 acc-2 开始
+        router.route("my-alias")  # 消耗 acc-1
+        candidates = router.get_candidates("my-alias")
+        assert len(candidates) == 3
+        assert candidates[0].account.account_id == "acc-2"
+
+    def test_skips_invalid_accounts(self):
+        """跳过无对应账号的绑定条目。"""
+        accounts = {1: _make_account(1)}
+        router = AliasRouter(
+            mapping_model_repo=MockMappingModelRepo({
+                "my-alias": [
+                    {"id": 1, "supplier_id": 1, "model_name": "qwen"},
+                    {"id": 2, "supplier_id": 999, "model_name": "invalid"},  # 不存在的账号
+                ]
+            }),
+            account_repo=MockAccountRepo(accounts),
+            config_repo=MockConfigRepo(),
+        )
+        candidates = router.get_candidates("my-alias")
+        assert len(candidates) == 1
+        assert candidates[0].model_name == "qwen"

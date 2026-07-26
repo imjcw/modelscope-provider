@@ -68,7 +68,7 @@ class QuotaRepository:
                 )
 
     def update_quota(self, account_id: str, quota_remaining: int, quota_limit: int):
-        """Update quota for today."""
+        """Update quota for today. Creates entry if none exists."""
         today = self.db.get_today_date()
 
         with self.db.get_connection() as conn:
@@ -78,6 +78,13 @@ class QuotaRepository:
                 SET quota_remaining = ?, quota_limit = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE account_id = ? AND quota_date = ?
             """, (quota_remaining, quota_limit, account_id, today))
+
+            if cursor.rowcount == 0:
+                cursor.execute("""
+                    INSERT INTO account_quotas
+                    (account_id, quota_date, quota_remaining, quota_limit, unavailable_models)
+                    VALUES (?, ?, ?, ?, '[]')
+                """, (account_id, today, quota_remaining, quota_limit))
 
     def mark_model_unavailable(self, account_id: str, model_name: str):
         """Mark a model as unavailable for today."""

@@ -36,7 +36,8 @@ def get_admin_service(request: Request):
 class SupplierCreate(BaseModel):
     name: str = Field(..., description="Supplier display name")
     api_key: str = Field(..., description="API key")
-    base_url: str = Field(..., description="ModelScope base URL")
+    base_url: str = Field(..., description="Provider base URL")
+    provider_type: str = Field(default="modelscope", description="Provider type: modelscope, sensetime")
 
 
 class SupplierUpdate(BaseModel):
@@ -44,6 +45,7 @@ class SupplierUpdate(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     status: Optional[str] = None
+    provider_type: Optional[str] = None
 
 
 class MappingUpsert(BaseModel):
@@ -88,6 +90,24 @@ class SupplierModelBulkUpdate(BaseModel):
 class MappingModelCreate(BaseModel):
     supplier_id: int = Field(..., description="Supplier ID")
     model_name: str = Field(..., description="Model name on supplier")
+
+
+class ProviderTypeCreate(BaseModel):
+    type_key: str = Field(..., description="Unique provider type key")
+    name: str = Field(..., description="Display name")
+    description: str = ""
+    strategy_type: Literal["header_based", "fixed_window", "fixed_window_per_model"] = "header_based"
+    config: Dict[str, Any] = Field(default_factory=dict)
+    color: str = "#89b4fa"
+
+
+class ProviderTypeUpdate(BaseModel):
+    type_key: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    strategy_type: Optional[Literal["header_based", "fixed_window", "fixed_window_per_model"]] = None
+    config: Optional[Dict[str, Any]] = None
+    color: Optional[str] = None
 
 
 class LogQueryParams(BaseModel):
@@ -203,6 +223,7 @@ def create_supplier(body: SupplierCreate, service=Depends(get_admin_service)):
             name=body.name,
             api_key=body.api_key,
             base_url=body.base_url,
+            provider_type=body.provider_type,
         )
     except Exception as e:
         if "UNIQUE constraint" in str(e):
@@ -231,6 +252,44 @@ def delete_supplier(supplier_id: int, service=Depends(get_admin_service)):
     if not service.delete_supplier(supplier_id):
         raise HTTPException(status_code=404, detail="Supplier not found")
     return {"ok": True}
+
+
+# ── Provider Types ─────────────────────────────────────────────────────────
+
+@router.get("/provider-types")
+def list_provider_types(service=Depends(get_admin_service)):
+    return service.get_provider_types()
+
+
+@router.post("/provider-types")
+def create_provider_type(body: ProviderTypeCreate, service=Depends(get_admin_service)):
+    try:
+        return service.create_provider_type(
+            type_key=body.type_key, name=body.name, description=body.description,
+            strategy_type=body.strategy_type, config=body.config, color=body.color,
+        )
+    except Exception as e:
+        if "UNIQUE constraint" in str(e):
+            raise HTTPException(status_code=409, detail=f"类型标识 {body.type_key} 已存在")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/provider-types/{type_id}")
+def update_provider_type(type_id: int, body: ProviderTypeUpdate, service=Depends(get_admin_service)):
+    updated = service.update_provider_type(type_id, **body.model_dump(exclude_unset=True))
+    if not updated:
+        raise HTTPException(status_code=404, detail="Provider type not found")
+    return updated
+
+
+@router.delete("/provider-types/{type_id}")
+def delete_provider_type(type_id: int, service=Depends(get_admin_service)):
+    try:
+        if not service.delete_provider_type(type_id):
+            raise HTTPException(status_code=404, detail="Provider type not found")
+        return {"ok": True}
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 # ── Supplier Models ────────────────────────────────────────────────────────
@@ -502,9 +561,11 @@ def get_model_quotas(service=Depends(get_admin_service)):
 @router.get("/alerts")
 def list_alerts(days: int = 7, service=Depends(get_admin_service)):
     """Get alerts from the past N days (derived from logs)."""
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
-    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    from core.timezone import now as _tz_now
+
+    cutoff = (_tz_now() - timedelta(days=days)).isoformat()
     records, _ = service.get_logs(start_time=cutoff, page_size=500)
 
     alerts = []
@@ -606,17 +667,24 @@ def get_client_key_logs(
     key_id: int,
     page: int = 0,
     page_size: int = 50,
+    days: Optional[int] = None,
     status_code: Optional[int] = None,
     model: Optional[str] = None,
     service=Depends(get_admin_service),
 ):
     """Get usage logs for a specific client API key."""
+    extra = {}
+    if days is not None:
+        from datetime import timedelta
+        from core.timezone import now as _tz_now
+        extra["start_time"] = (_tz_now() - timedelta(days=days)).isoformat()
     records, total = service.get_key_usage(
         key_id=key_id,
         page=page,
         page_size=page_size,
         status_code=status_code,
         model=model,
+        **extra,
     )
     return {"records": records, "total": total, "page": page, "page_size": page_size}
 
@@ -631,9 +699,11 @@ def get_client_key_stats(key_id: int, days: int = 30, service=Depends(get_admin_
 
 
 @router.get("/client-keys/{key_id}/docs")
-def get_client_key_docs(key_id: int, service=Depends(get_admin_service)):
-    """Generate integration documentation for a specific client API key."""
-    docs = service.get_key_docs(key_id=key_id)
+def get_client_key_docs(key_id: int, request: Request, service=Depends(get_admin_service)):
+    """Return integration meta-data for a specific client API key (rendered in frontend)."""
+    prefix = f"{request.url.scheme}://{request.url.netloc}"
+    base_url = prefix + "/api/v1"
+    docs = service.get_key_docs(key_id=key_id, base_url=base_url)
     if not docs:
         raise HTTPException(status_code=404, detail="Client key not found")
-    return {"markdown": docs}
+    return docs

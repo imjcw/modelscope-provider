@@ -32,7 +32,7 @@ const typeColor = () => colorMap[props.type] || colorMap.info
   <Teleport to="body">
     <div v-if="visible" class="toast-enter" :style="{ position: 'fixed', right: '24px', bottom: '24px', zIndex: 100 }">
       <div
-        class="flex items-start gap-4 pl-3 py-3 pr-4 rounded-lg shadow-lg border"
+        class="flex items-start gap-4 pl-3 py-3 pr-4 rounded-lg border"
         :style="{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }"
       >
         <span class="inline-block w-1 h-8 rounded-full flex-shrink-0 mt-0.5" :style="{ backgroundColor: typeColor() }"></span>

@@ -1,9 +1,8 @@
 <template>
-  <div>
-    <PageHeader title="API Keys" subtitle="管理下游客户端 API 密钥">
+  <div class="h-full flex flex-col overflow-hidden">
+    <PageHeader title="API Keys // Credentials" subtitle="// 管理下游客户端 API 密钥">
       <template #action>
         <div class="flex items-center gap-3">
-          <ViewToggle v-model="viewMode" />
           <button @click="openAdd" class="btn btn-primary">
             <CIcon name="plus" :stroke-width="2.5" />
             生成 Key
@@ -12,113 +11,19 @@
       </template>
     </PageHeader>
 
-    <div class="px-6 md:px-8 py-6">
+    <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6">
       <PageState :loading="loading" :error="error">
 
-      <!-- ═══════════════════════════════════════════
-           视图 1：卡片行（默认）
-           ═══════════════════════════════════════════ -->
-      <div v-if="viewMode === 'row'" class="space-y-3">
-        <div v-for="key in clientKeys" :key="key.id"
-          class="bg-ls-card rounded-lg border border-ls-border p-5 flex items-center justify-between hover:border-ls-dim/50 transition-all neon-glow"
-          :class="{ 'opacity-50': key.status !== 'active' }">
-          <div class="flex items-center gap-4 flex-1 min-w-0">
-            <Avatar :text="key.name" accent />
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <p class="font-medium text-sm text-ls-text truncate">{{ key.name }}</p>
-                <StatusBadge :active="key.status === 'active'" active-text="启用" inactive-text="禁用" />
-              </div>
-              <div class="flex items-center gap-2 mt-0.5">
-                <span class="text-xs font-mono text-ls-dim cursor-pointer hover:text-ls-text transition-colors"
-                  @click="showFullKey = { show: true, key: key.key_value }">
-                  {{ key.key_value_masked }}
-                </span>
-              </div>
-              <div class="flex items-center gap-3 mt-2 text-xs text-ls-muted">
-                <span>创建于 {{ fmtTime(key.created_at) }}</span>
-                <span v-if="key.description" class="text-ls-dim truncate">{{ key.description }}</span>
-              </div>
-              <div class="flex items-center gap-4 mt-2 text-xs">
-                <span class="flex items-center gap-1">
-                  <span class="text-ls-muted">今日调用</span>
-                  <span class="text-ls-text font-mono">{{ key.today_requests || 0 }}</span>
-                </span>
-                <TokenStack :input="key.today_input_tokens || 0" :output="key.today_output_tokens || 0" compact />
-              </div>
-            </div>
-          </div>
-          <div class="flex items-center gap-4 flex-shrink-0">
-            <CCheckbox :model-value="key.status === 'active'" @update:modelValue="(val) => toggleKey(val, key)" />
-            <div class="flex items-center gap-1">
-              <IconButton icon="file" title="调用日志" tone="accent" padded @click="openDetailTab(key, 'logs')" />
-              <IconButton icon="chart" title="使用统计" tone="accent" padded @click="openDetailTab(key, 'stats')" />
-              <IconButton icon="book" title="对接文档" tone="accent" padded @click="openDetailTab(key, 'docs')" />
-            </div>
-            <span class="text-ls-border">|</span>
-            <IconButton icon="edit" title="编辑" @click="openEdit(key)" />
-            <IconButton icon="trash" title="删除" tone="danger" @click="openDeleteConfirm(key)" />
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══════════════════════════════════════════
-           视图 2：网格卡片
-           ═══════════════════════════════════════════ -->
-      <div v-else-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div v-for="key in clientKeys" :key="key.id"
-          class="bg-ls-card rounded-lg border border-ls-border p-5 hover:border-ls-dim/50 transition-all flex flex-col gap-3 neon-glow"
-          :class="{ 'opacity-50': key.status !== 'active' }">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3 min-w-0">
-              <Avatar :text="key.name" accent />
-              <div class="min-w-0">
-                <p class="font-medium text-sm text-ls-text truncate">{{ key.name }}</p>
-                <p class="text-[11px] text-ls-muted mt-0.5 truncate font-mono">{{ key.key_value_masked }}</p>
-              </div>
-            </div>
-            <StatusBadge :active="key.status === 'active'" active-text="启用" inactive-text="禁用" />
-          </div>
-
-          <div class="flex items-center gap-3 text-xs text-ls-muted">
-            <span>创建于 {{ fmtTime(key.created_at) }}</span>
-            <span v-if="key.description" class="text-ls-dim truncate">{{ key.description }}</span>
-          </div>
-
-          <div class="flex items-center gap-4 text-xs">
-            <span class="flex items-center gap-1">
-              <span class="text-ls-muted">调用</span>
-              <span class="text-ls-text font-mono">{{ key.today_requests || 0 }}</span>
-            </span>
-            <TokenStack :input="key.today_input_tokens || 0" :output="key.today_output_tokens || 0" compact />
-          </div>
-
-          <div class="flex items-center justify-between pt-3 border-t border-ls-border">
-            <CCheckbox :model-value="key.status === 'active'" @update:modelValue="(val) => toggleKey(val, key)" />
-            <div class="flex items-center gap-1">
-              <IconButton icon="file" title="调用日志" tone="accent" padded @click="openDetailTab(key, 'logs')" />
-              <IconButton icon="chart" title="使用统计" tone="accent" padded @click="openDetailTab(key, 'stats')" />
-              <IconButton icon="book" title="对接文档" tone="accent" padded @click="openDetailTab(key, 'docs')" />
-              <span class="text-ls-border mx-1">|</span>
-              <IconButton icon="edit" title="编辑" padded @click="openEdit(key)" />
-              <IconButton icon="trash" title="删除" tone="danger" padded @click="openDeleteConfirm(key)" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══════════════════════════════════════════
-           视图 3：表格
-           ═══════════════════════════════════════════ -->
-      <CTable v-else-if="viewMode === 'table'">
+      <CTable>
         <thead>
           <tr>
             <th class="text-left">名称</th>
             <th class="text-left">状态</th>
             <th class="text-left">Key</th>
+            <th class="text-center">日志</th>
+            <th class="text-center">用量</th>
+            <th class="text-center">对接指南</th>
             <th class="text-left">创建时间</th>
-            <th class="text-right">今日调用</th>
-            <th class="text-right">Token</th>
             <th class="text-right">操作</th>
           </tr>
         </thead>
@@ -141,24 +46,31 @@
               @click="showFullKey = { show: true, key: key.key_value }">
               {{ key.key_value_masked }}
             </td>
-            <td class="text-xs text-ls-dim">{{ fmtTime(key.created_at) }}</td>
-            <td class="text-xs text-ls-text font-mono text-right">{{ key.today_requests || 0 }}</td>
-            <td class="text-right">
-              <TokenStack :input="key.today_input_tokens || 0" :output="key.today_output_tokens || 0" compact />
+            <td class="text-center">
+              <button @click="openDetailTab(key, 'logs')" class="transition-colors p-1 text-ls-accent hover:text-ls-text" title="调用日志">
+                <CIcon name="file" />
+              </button>
             </td>
+            <td class="text-center">
+              <button @click="openDetailTab(key, 'stats')" class="transition-colors p-1 text-ls-accent hover:text-ls-text" title="使用统计">
+                <CIcon name="chart" />
+              </button>
+            </td>
+            <td class="text-center">
+              <button @click="openDetailTab(key, 'docs')" class="transition-colors p-1 text-ls-accent hover:text-ls-text" title="对接文档">
+                <CIcon name="book" />
+              </button>
+            </td>
+            <td class="text-xs text-ls-dim">{{ fmtTime(key.created_at) }}</td>
             <td>
               <div class="flex items-center justify-end gap-1">
-                <IconButton icon="file" title="调用日志" tone="accent" padded @click="openDetailTab(key, 'logs')" />
-                <IconButton icon="chart" title="使用统计" tone="accent" padded @click="openDetailTab(key, 'stats')" />
-                <IconButton icon="book" title="对接文档" tone="accent" padded @click="openDetailTab(key, 'docs')" />
-                <span class="text-ls-border mx-1">|</span>
                 <IconButton icon="edit" title="编辑" padded @click="openEdit(key)" />
                 <IconButton icon="trash" title="删除" tone="danger" padded @click="openDeleteConfirm(key)" />
               </div>
             </td>
           </tr>
           <tr v-if="clientKeys.length === 0">
-            <td colspan="7" class="py-8 text-center text-ls-muted">暂无 API Key，点击上方按钮生成第一个 Key</td>
+            <td colspan="9" class="py-8 text-center text-ls-muted">暂无 API Key，点击上方按钮生成第一个 Key</td>
           </tr>
         </tbody>
       </CTable>
@@ -240,7 +152,7 @@
     />
 
     <!-- Detail Panel -->
-    <KeyDetailPanel :api-key="selectedKeyForDetail" :initial-tab="detailInitialTab" @close="closeDetail" />
+    <KeyDetailPanel :api-key="selectedKeyForDetail" :section="detailSection" @close="closeDetail" />
   </div>
 </template>
 
@@ -257,11 +169,8 @@ import IconButton from '@/components/IconButton.vue'
 import CIcon from '@/components/CIcon.vue'
 import FormField from '@/components/FormField.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import TokenStack from '@/components/TokenStack.vue'
 import CCheckbox from '@/components/CCheckbox.vue'
-import ViewToggle from '@/components/ViewToggle.vue'
 import KeyDetailPanel from './KeyDetailPanel.vue'
-import { useViewPreference } from '@/composables/useViewPreference'
 import { formatTime } from '@/utils/format'
 import {
   getClientKeys,
@@ -272,8 +181,6 @@ import {
 
 const toast = inject('$toast')
 
-// ── 视图切换（持久化到 localStorage） ──
-const viewMode = useViewPreference('apikeys_view_mode', 'row')
 
 // State
 const loading = ref(true)
@@ -302,7 +209,7 @@ const showFullKey = ref({ show: false, key: '' })
 
 // Detail panel
 const selectedKeyForDetail = ref(null)
-const detailInitialTab = ref('logs')
+const detailSection = ref('logs')
 
 // Helpers
 const fmtTime = (ts) => formatTime(ts)
@@ -428,8 +335,8 @@ const confirmDelete = async () => {
 }
 
 // Detail panel
-const openDetailTab = (key, tab = 'logs') => {
-  detailInitialTab.value = tab
+const openDetailTab = (key, section = 'logs') => {
+  detailSection.value = section
   selectedKeyForDetail.value = key
 }
 

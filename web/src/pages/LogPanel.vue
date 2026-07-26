@@ -18,15 +18,16 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const DAYS_OPTIONS = [
-  { label: '近 7 天', value: 7 },
-  { label: '近 30 天', value: 30 },
-  { label: '近 90 天', value: 90 },
+  { label: '今天', value: 0 },
+  { label: '7天', value: 7 },
+  { label: '30天', value: 30 },
+  { label: '90天', value: 90 },
 ]
 
 const loading = ref(false)
 const error = ref(null)
 const data = ref(null)
-const days = ref(7)
+const days = ref(0)
 
 const usage = computed(() => data.value?.usage || null)
 
@@ -79,7 +80,7 @@ const close = () => emit('update:modelValue', false)
         <div><span class="text-ls-muted">输入 Token</span><span class="block mt-1 text-base font-mono text-ls-text">{{ fmt(usage.input_tokens) }}</span></div>
         <div><span class="text-ls-muted">输出 Token</span><span class="block mt-1 text-base font-mono text-ls-text">{{ fmt(usage.output_tokens) }}</span></div>
         <div>
-          <span class="text-ls-muted">Cache 命中</span>
+          <span class="text-ls-muted">缓存命中</span>
           <span class="block mt-1 text-base font-mono text-ls-text">
             {{ fmt(usage.cache_tokens) }} <span class="text-[10px] text-ls-muted">({{ usage.cache_hit_rate }}%)</span>
           </span>
@@ -94,7 +95,7 @@ const close = () => emit('update:modelValue', false)
             <th class="text-left">实际模型</th>
             <th class="text-right">请求</th>
             <th class="text-right">输入</th>
-            <th class="text-right">Cache 命中</th>
+            <th class="text-right">缓存命中</th>
             <th class="text-right">输出</th>
             <th class="text-right">错误</th>
           </tr>

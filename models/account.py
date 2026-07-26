@@ -9,6 +9,7 @@ class ModelScopeAccount:
     account_id: str
     api_key: str
     base_url: str
+    provider_type: str = "modelscope"
     name: str = ""
     quota_limit: int = 0
     quota_remaining: int = 0

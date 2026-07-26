@@ -4,17 +4,11 @@
     <p class="px-3 mb-2 text-[10px] font-medium text-ls-muted uppercase tracking-[0.15em]">Overview</p>
     <router-link to="/" class="nav-item" @click="$emit('select')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-        <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+        <rect x="2" y="3" width="20" height="14" rx="2"/>
+        <line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+        <polyline points="6 13 9.5 9.5 13 11.5 17.5 7.5"/>
       </svg>
-      仪表盘
-    </router-link>
-    <router-link to="/mappings" class="nav-item" @click="$emit('select')">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M10 13a5 5 0 0 0 7.54 .54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-      </svg>
-      虚拟模型
+      用量分析
     </router-link>
     <router-link to="/logs" class="nav-item" @click="$emit('select')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -22,13 +16,6 @@
         <path d="M14 2v6h6"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
       </svg>
       请求日志
-    </router-link>
-    <router-link to="/alerts" class="nav-item" @click="$emit('select')">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-      </svg>
-      告警历史
     </router-link>
     <router-link to="/test" class="nav-item" @click="$emit('select')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -38,8 +25,8 @@
     </router-link>
     <router-link to="/guide" class="nav-item" @click="$emit('select')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14"/>
-        <path d="M9 12h6"/><path d="M9 16h4"/>
+        <circle cx="12" cy="12" r="10"/>
+        <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
       </svg>
       使用指南
     </router-link>
@@ -52,6 +39,20 @@
         <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
       </svg>
       供应商管理
+    </router-link>
+    <router-link to="/provider-types" class="nav-item nav-item-fuchsia" @click="$emit('select')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+        <polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>
+      </svg>
+      供应商类型
+    </router-link>
+    <router-link to="/mappings" class="nav-item" @click="$emit('select')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10 13a5 5 0 0 0 7.54 .54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+      </svg>
+      虚拟模型
     </router-link>
     <router-link to="/keys" class="nav-item" @click="$emit('select')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -85,6 +86,6 @@ defineEmits(['select'])
   @apply text-ls-fuchsia bg-ls-fuchsia/5;
 }
 .router-link-active {
-  @apply bg-ls-accent/10 text-ls-accent;
+  @apply bg-ls-accent/15 text-ls-accent;
 }
 </style>

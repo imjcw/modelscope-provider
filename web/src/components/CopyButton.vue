@@ -13,7 +13,7 @@ const props = defineProps({
   text: { type: String, default: '' },
   size: { type: [Number, String], default: 14 },
   toastText: { type: String, default: '已复制到剪贴板' },
-  colorClass: { type: String, default: 'text-gray-500 hover:text-white' },
+  colorClass: { type: String, default: 'text-ls-muted hover:bg-ls-accent/10 hover:text-ls-accent' },
 })
 
 const emit = defineEmits(['copied'])

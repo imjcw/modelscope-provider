@@ -23,7 +23,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.page
 
 const set = (p) => emit('update:page', p)
 
-const BTN = 'text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-md hover:bg-ls-card disabled:opacity-30'
+const BTN = 'text-xs text-gray-400 hover:text-ls-accent px-2 py-1.5 rounded-md hover:bg-ls-accent/10 disabled:opacity-30'
 </script>
 
 <template>

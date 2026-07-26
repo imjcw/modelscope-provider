@@ -14,6 +14,8 @@ from services.alias_router import AliasRouter
 from services.load_balancer import LoadBalancer
 from services.response_converter import ResponseConverter
 from services.quota_updater import QuotaUpdater
+from services.providers import create_strategy, build_rate_limit_strategies
+from repositories.provider_type_repository import ProviderTypeRepository
 from core.migrations import Migrator
 
 
@@ -72,18 +74,45 @@ class ServiceInitializer:
             config_repo=config_repo,
         )
 
+        # Per-provider rate-limit strategies — driven by provider_types table so
+        # that 供应商类型管理 can configure strategy + params per type.
+        # 先保证硬编码的内置类型始终可用（不依赖迁移），再叠加 DB 配置。
+        rate_limit_strategies = {
+            "modelscope": create_strategy(
+                "header_based",
+                quota_updater=quota_updater,
+                quota_repository=quota_repository,
+            ),
+            "sensetime": create_strategy(
+                "fixed_window", db=database,
+            ),
+        }
+        # 从 DB 加载自定义类型，覆盖或补充硬编码策略
+        try:
+            provider_type_repo = ProviderTypeRepository(database)
+            db_types = provider_type_repo.find_all()
+            if db_types:
+                db_strategies = build_rate_limit_strategies(
+                    db_types, database, quota_updater, quota_repository
+                )
+                rate_limit_strategies.update(db_strategies)
+        except Exception:
+            pass
+
         services = {
             "database": database,
             "http_client": http_client,
             "quota_repository": quota_repository,
             "mapping_repository": mapping_repository,
             "supplier_model_repo": supplier_model_repo,
+            "provider_type_repo": provider_type_repo,
             "load_balancer": load_balancer,
             "response_converter": response_converter,
             "quota_updater": quota_updater,
             "alias_resolver": alias_resolver,
             "alias_router": alias_router,
             "accounts": accounts,
+            "rate_limit_strategies": rate_limit_strategies,
         }
 
         return services
