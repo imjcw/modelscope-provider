@@ -1,0 +1,128 @@
+"""Performance tests for optimized API routes."""
+import pytest
+from unittest.mock import Mock, patch
+from provider.api.routes import get_services, refresh_load_balancer
+
+
+def test_get_services_returns_services_without_rebuilding_load_balancer():
+    """Test that get_services doesn't rebuild LoadBalancer on every call.
+
+    Before optimization, get_services() queried the database and rebuilt
+    the LoadBalancer on every request. This test verifies the LoadBalancer
+    is returned as-is from app state.
+    """
+    # 创建模拟的 AccountRepository 返回一个真实账户
+    mock_account = {
+        "account_id": "acc-test",
+        "name": "Test Supplier",
+        "api_key": "key-test",
+        "base_url": "https://api.test.com",
+        "provider_type": "modelscope",
+    }
+
+    mock_load_balancer = Mock()
+    mock_load_balancer.accounts = [mock_account]
+    mock_services = {
+        "database": Mock(),
+        "supplier_model_repo": Mock(),  # 非 None — 旧代码会触发重建
+        "load_balancer": mock_load_balancer,
+    }
+
+    # 创建模拟的 request
+    mock_request = Mock()
+    mock_request.app.state.services = mock_services
+
+    # 调用 get_services
+    services = get_services(mock_request)
+
+    # 验证：返回的 services 与传入的相同
+    assert services is mock_services
+
+    # 验证：LoadBalancer 没有被替换（优化后不应重建）
+    assert services["load_balancer"] is mock_load_balancer
+
+
+def test_refresh_load_balancer_replaces_load_balancer():
+    """Test that refresh_load_balancer rebuilds LoadBalancer from DB."""
+    # 创建模拟账户数据
+    mock_db_accounts = [
+        {
+            "account_id": "acc-1",
+            "name": "Supplier 1",
+            "api_key": "key1",
+            "base_url": "https://api.test1.com",
+            "provider_type": "modelscope",
+        },
+        {
+            "account_id": "acc-2",
+            "name": "Supplier 2",
+            "api_key": "key2",
+            "base_url": "https://api.test2.com",
+            "provider_type": "modelscope",
+        },
+    ]
+
+    old_load_balancer = Mock()
+    mock_services = {
+        "database": Mock(),
+        "supplier_model_repo": Mock(),
+        "load_balancer": old_load_balancer,
+    }
+
+    mock_request = Mock()
+    mock_request.app.state.services = mock_services
+
+    # 模拟 AccountRepository
+    with patch("repositories.account_repository.AccountRepository") as MockAccountRepo:
+        mock_repo_instance = Mock()
+        mock_repo_instance.find_active.return_value = mock_db_accounts
+        MockAccountRepo.return_value = mock_repo_instance
+
+        # 调用 refresh_load_balancer
+        refresh_load_balancer(mock_request)
+
+        # 验证：LoadBalancer 被替换为新实例
+        new_lb = mock_services["load_balancer"]
+        assert new_lb is not old_load_balancer
+        assert new_lb.__class__.__name__ == "LoadBalancer"
+        assert len(new_lb.accounts) == 2
+        assert new_lb.accounts[0].account_id == "acc-1"
+        assert new_lb.accounts[1].account_id == "acc-2"
+
+
+def test_refresh_load_balancer_handles_errors_gracefully():
+    """Test that refresh_load_balancer doesn't crash on errors."""
+    mock_services = {
+        "database": Mock(),
+        "supplier_model_repo": Mock(),
+        "load_balancer": Mock(),
+    }
+
+    mock_request = Mock()
+    mock_request.app.state.services = mock_services
+
+    # 模拟 AccountRepository 抛出异常
+    with patch("repositories.account_repository.AccountRepository") as MockAccountRepo:
+        mock_repo_instance = Mock()
+        mock_repo_instance.find_active.side_effect = Exception("DB error")
+        MockAccountRepo.return_value = mock_repo_instance
+
+        old_lb = mock_services["load_balancer"]
+
+        # 不应抛出异常
+        refresh_load_balancer(mock_request)
+
+        # LoadBalancer 不应被替换
+        assert mock_services["load_balancer"] is old_lb
+
+
+def test_get_services_raises_503_when_services_none():
+    """Test that get_services raises 503 when services is None."""
+    from fastapi import HTTPException
+
+    mock_request = Mock()
+    mock_request.app.state.services = None
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_services(mock_request)
+    assert exc_info.value.status_code == 503
