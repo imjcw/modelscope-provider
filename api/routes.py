@@ -72,17 +72,32 @@ def _extract_cache_usage(usage) -> tuple:
         return 0, 0
 
 
-def _safe_read_response_body(response, max_len: int = 2000) -> str:
+async def _safe_read_response_body(response, max_len: int = 2000) -> str:
     """安全读取上游 HTTP 响应的 body 文本，失败时返回空字符串。
     body 超过 max_len 时截断并标注。
+
+    兼容流式响应（stream=True 时 body 未预读，直接访问 .text 会抛
+    ResponseNotRead）：先尝试 .text，失败时 aread() 把 body 读进内存再取。
     """
     try:
-        text = response.text
+        try:
+            text = response.text
+        except Exception:
+            await response.aread()
+            text = response.text
         if text and len(text) > max_len:
             return text[:max_len] + "...(truncated)"
         return text or ""
     except Exception:
         return ""
+
+
+async def _safe_aclose(response) -> None:
+    """安全关闭上游流式响应，避免错误路径上的连接泄露。"""
+    try:
+        await response.aclose()
+    except Exception:
+        pass
 
 
 def _log_error_request(
@@ -496,8 +511,13 @@ async def _try_candidate(
     if request.parallel_tool_calls is not None:
         request_body["parallel_tool_calls"] = request.parallel_tool_calls
 
-    # Pre-request rate-limit check (SenseTime: atomic check-and-increment)
-    if strategy and not strategy.check_rate_limit(selected_account.account_id, request.model):
+    # Pre-request rate-limit check (SenseTime: atomic check-and-increment).
+    # 用 actual_model_id 而非 request.model 作为窗口计数 key，与
+    # record_request/record_usage 保持一致。否则当存在 alias 映射时，
+    # account_rate_windows 会按客户端原始名计数，而管理后台按
+    # supplier_models.model_name（真实模型 ID）匹配不上，导致“按模型”
+    # 窗口的使用数始终显示为满额 (max/max)。
+    if strategy and not strategy.check_rate_limit(selected_account.account_id, actual_model_id):
         _log_error_request(
             admin_service, request.model, actual_model_id,
             selected_account, client_key_name,
@@ -532,11 +552,14 @@ async def _try_candidate(
         else:
             request_body["stream_options"] = {"include_usage": True}
         url = f"{selected_account.base_url}/chat/completions"
+        # stream=True 是流式生效的关键：否则 httpx 会先缓冲整个上游响应体，
+        # SSE 内容会在结尾一次性返回给客户端（表现为“非流式”）。
         response = await http_client.request(
             selected_account,
             "POST",
             url,
-            json=request_body
+            json=request_body,
+            stream=True,
         )
         first_response = datetime.now(timezone.utc).isoformat()
 
@@ -556,12 +579,14 @@ async def _try_candidate(
                     response.status_code,
                     strategy,
                 )
+            _upstream_429_body = await _safe_read_response_body(response)
+            await _safe_aclose(response)
             _log_error_request(
                 admin_service, request.model, actual_model_id,
                 selected_account, client_key_name,
                 429, f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
                 request_body, request_start, first_response,
-                raw_response=_safe_read_response_body(response),
+                raw_response=_upstream_429_body,
                 is_stream=True,
             )
             raise HTTPException(
@@ -580,7 +605,8 @@ async def _try_candidate(
         # 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 500+ (Server Error)
         # are all candidates for fallback to next supplier
         if response.status_code >= 400:
-            _upstream_err_body = _safe_read_response_body(response, max_len=2000)
+            _upstream_err_body = await _safe_read_response_body(response, max_len=2000)
+            await _safe_aclose(response)
             logger.warning(
                 "Upstream error: %s/%s → %s body=%s",
                 selected_account.account_id,
@@ -669,7 +695,7 @@ async def _try_candidate(
             selected_account, client_key_name,
             429, f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
             request_body, request_start, first_response,
-            raw_response=_safe_read_response_body(response),
+            raw_response=await _safe_read_response_body(response),
             is_stream=False,
         )
         raise HTTPException(
@@ -688,7 +714,7 @@ async def _try_candidate(
     # 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 500+ (Server Error)
     # are all candidates for fallback to next supplier
     if response.status_code >= 400:
-        _upstream_err_body = _safe_read_response_body(response, max_len=2000)
+        _upstream_err_body = await _safe_read_response_body(response, max_len=2000)
         logger.warning(
             "Upstream error: %s/%s → %s body=%s",
             selected_account.account_id,

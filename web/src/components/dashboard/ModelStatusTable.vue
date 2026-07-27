@@ -46,6 +46,14 @@ const rows = computed(() => {
       successRate: st ? st.success_rate : null,
       usedPct,
       status: q.is_unavailable ? 'down' : (usedPct !== null && usedPct >= 90 ? 'cooldown' : 'ok'),
+      // 按模型窗口策略
+      strategy_type: q.strategy_type || null,
+      window_seconds: q.window_seconds || null,
+      max_requests: q.max_requests ?? null,
+      window_quota_remaining: q.window_quota_remaining ?? null,
+      window_quota_limit: q.window_quota_limit ?? null,
+      has_custom_window: !!q.has_custom_window,
+      window_override: q.window_override || null,
     })
   }
   // 窗口内有调用但没有配额记录的模型
@@ -70,6 +78,31 @@ const barClass = (pct) =>
   pct < 50 ? 'bg-green-400' : pct < 90 ? 'bg-yellow-400' : 'bg-red-400'
 const pctLabelClass = (pct) =>
   pct < 50 ? 'text-ls-muted' : pct < 90 ? 'text-yellow-400' : 'text-red-400'
+
+const fmtWindow = (r) => {
+  const st = r.strategy_type
+  if (!st) return { label: '被动', sub: 'header 驱动', badge: 'muted', custom: false }
+  const secs = r.window_seconds || 0
+  const val = secs >= 3600 ? (secs / 3600) : (secs / 60)
+  const unit = secs >= 3600 ? 'h' : 'm'
+  const max = r.max_requests ?? r.window_quota_limit ?? null
+  const rem = r.window_quota_remaining
+  // 展示“已用/上限”（使用数），而不是“剩余/上限”，避免把剩余数误认为已用数。
+  const used = max != null && rem != null ? Math.max(0, max - rem) : null
+  const sub =
+    used != null ? `已用 ${used}/${max} 每窗`
+    : max != null ? `${max} 每窗`
+    : ''
+  if (st === 'fixed_window_per_model')
+    return { label: `按模型 ${val}${unit}`, sub, badge: 'accent', custom: !!r.has_custom_window }
+  if (st === 'fixed_window' || st === 'sensetime')
+    return { label: `固定窗口 ${val}${unit}`, sub, badge: 'accent', custom: false }
+  return { label: '被动', sub: 'header 驱动', badge: 'muted', custom: false }
+}
+const WINDOW_BADGE = {
+  accent: 'bg-ls-accent/10 text-ls-accent border-ls-accent/20',
+  muted: 'bg-ls-muted/10 text-ls-muted border-ls-border',
+}
 </script>
 
 <template>
@@ -95,9 +128,9 @@ const pctLabelClass = (pct) =>
             <th class="text-left hidden md:table-cell">分组</th>
             <th class="text-left hidden sm:table-cell">平台</th>
             <th class="text-center">状态</th>
+            <th class="text-center">限流</th>
             <th class="text-right hidden sm:table-cell">调用次数</th>
             <th class="text-right hidden md:table-cell">成功率</th>
-            <th class="text-center">限流</th>
           </tr>
         </thead>
         <tbody>
@@ -126,11 +159,17 @@ const pctLabelClass = (pct) =>
               </span>
             </td>
             <td class="text-center">
+              <div class="flex items-center justify-center gap-1.5 mb-1">
+                <span class="text-xs px-2 py-0.5 rounded-full border font-medium"
+                      :class="WINDOW_BADGE[fmtWindow(row).badge]">
+                  {{ fmtWindow(row).label }}
+                </span>
+              </div>
+              <div v-if="fmtWindow(row).sub" class="text-[10px] text-ls-muted mb-1">{{ fmtWindow(row).sub }}</div>
               <div v-if="row.usedPct !== null" class="w-20 mx-auto">
                 <ProgressBar :pct="row.usedPct" width="w-20" height="h-1.5" :bar-class="barClass(row.usedPct)" />
                 <span class="text-xs mt-1 inline-block" :class="pctLabelClass(row.usedPct)">{{ row.usedPct }}%</span>
               </div>
-              <span v-else class="text-xs text-ls-muted">—</span>
             </td>
           </tr>
           <tr v-if="!rows.length">

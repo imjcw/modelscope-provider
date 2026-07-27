@@ -45,15 +45,29 @@ class HttpClient:
         account,
         method: str,
         url: str,
+        stream: bool = False,
         **kwargs
     ):
-        """Make HTTP request to ModelScope API."""
+        """Make HTTP request to ModelScope API.
+
+        When ``stream=True`` the response body is NOT pre-read: the caller
+        gets an httpx.Response whose body must be consumed via
+        ``aiter_lines()/aiter_bytes()`` and finally ``aclose()``-d. This is
+        required for SSE — otherwise httpx buffers the whole body before
+        returning, and the client receives everything at once at the end.
+        """
         client = await self.create_client()
 
         headers = {
             "Authorization": f"Bearer {account.api_key}",
             "Content-Type": "application/json"
         }
+
+        if stream:
+            # httpx.AsyncClient.request() does not support streaming; use
+            # build_request + send(stream=True) so the body stays unread.
+            req = client.build_request(method, url, headers=headers, **kwargs)
+            return await client.send(req, stream=True)
 
         response = await client.request(
             method,

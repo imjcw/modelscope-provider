@@ -33,6 +33,7 @@ State machine
         └── success ──── Half-Open (试探)
 """
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -105,8 +106,9 @@ class CircuitState:
 class CircuitBreaker:
     """Circuit breaker for upstream API failures.
 
-    Designed for single-threaded async contexts (FastAPI event loop).
-    Thread safety is not guaranteed.
+    Designed for single-threaded async contexts (FastAPI event loop) but guarded
+    with a ``threading.Lock`` around the in-memory ``_states`` dict so it can also
+    be shared safely across threads (e.g. when deployed with a threaded worker).
 
     Usage
     -----
@@ -135,6 +137,9 @@ class CircuitBreaker:
         self.backoff_schedule = list(_BACKOFF_SCHEDULE)
         self.failure_threshold = _CONSECUTIVE_FAILURE_THRESHOLD
 
+        # Guards all access to the shared ``_states`` dict.
+        self._lock = threading.Lock()
+
     # ----- public API ------------------------------------------------------
 
     def check(self, account_id: str, model_name: str) -> bool:
@@ -144,24 +149,25 @@ class CircuitBreaker:
         expires the circuit enters *half-open* state — the next call returns
         ``True`` so a probe request is allowed.
         """
-        state = self._states.get((account_id, model_name))
-        if state is None:
+        with self._lock:
+            state = self._states.get((account_id, model_name))
+            if state is None:
+                return True
+
+            if state.escalated:
+                return False
+
+            if time.time() < state.frozen_until:
+                return False
+
+            # Freeze expired → half-open: allow probe
+            if state.consecutive_failures > 0:
+                logger.info(
+                    "Circuit breaker half-open for %s/%s: "
+                    "freeze expired, allowing probe request",
+                    account_id, model_name,
+                )
             return True
-
-        if state.escalated:
-            return False
-
-        if time.time() < state.frozen_until:
-            return False
-
-        # Freeze expired → half-open: allow probe
-        if state.consecutive_failures > 0:
-            logger.info(
-                "Circuit breaker half-open for %s/%s: "
-                "freeze expired, allowing probe request",
-                account_id, model_name,
-            )
-        return True
 
     def record_failure(
         self,
@@ -185,43 +191,44 @@ class CircuitBreaker:
             Optional ``RateLimitStrategy`` that will be notified when the
             failure threshold is reached.
         """
-        key = (account_id, model_name)
-        state = self._states.get(key)
-        if state is None:
-            state = CircuitState(account_id=account_id, model_name=model_name)
-            self._states[key] = state
+        with self._lock:
+            key = (account_id, model_name)
+            state = self._states.get(key)
+            if state is None:
+                state = CircuitState(account_id=account_id, model_name=model_name)
+                self._states[key] = state
 
-        state.consecutive_failures += 1
-        state.last_failure_time = time.time()
-        state.error_type = self._classify_error(status_code)
+            state.consecutive_failures += 1
+            state.last_failure_time = time.time()
+            state.error_type = self._classify_error(status_code)
 
-        # ----- Escalation check -----
-        if (
-            state.consecutive_failures >= self.failure_threshold
-            and not state.escalated
-        ):
-            state.escalated = True
-            logger.warning(
-                "Circuit breaker: %s/%s reached %d consecutive failures, "
-                "escalating to supplier strategy",
-                account_id, model_name, state.consecutive_failures,
+            # ----- Escalation check -----
+            if (
+                state.consecutive_failures >= self.failure_threshold
+                and not state.escalated
+            ):
+                state.escalated = True
+                logger.warning(
+                    "Circuit breaker: %s/%s reached %d consecutive failures, "
+                    "escalating to supplier strategy",
+                    account_id, model_name, state.consecutive_failures,
+                )
+                self._escalate(strategy, account_id, model_name, state.error_type)
+                return
+
+            # ----- Freeze -----
+            freeze_seconds = self._get_freeze_seconds(
+                state.error_type, state.consecutive_failures,
             )
-            self._escalate(strategy, account_id, model_name, state.error_type)
-            return
+            state.frozen_until = time.time() + freeze_seconds
 
-        # ----- Freeze -----
-        freeze_seconds = self._get_freeze_seconds(
-            state.error_type, state.consecutive_failures,
-        )
-        state.frozen_until = time.time() + freeze_seconds
-
-        logger.warning(
-            "Circuit breaker: %s/%s failed (status=%s, type=%s, "
-            "failures=%d), freezing for %.0fs",
-            account_id, model_name,
-            status_code, state.error_type,
-            state.consecutive_failures, freeze_seconds,
-        )
+            logger.warning(
+                "Circuit breaker: %s/%s failed (status=%s, type=%s, "
+                "failures=%d), freezing for %.0fs",
+                account_id, model_name,
+                status_code, state.error_type,
+                state.consecutive_failures, freeze_seconds,
+            )
 
     def record_success(self, account_id: str, model_name: str) -> None:
         """Record a successful request and reset the circuit.
@@ -229,42 +236,46 @@ class CircuitBreaker:
         Only has an effect when the circuit was in a failure state
         (half-open probe).  If the circuit is healthy this is a no-op.
         """
-        key = (account_id, model_name)
-        state = self._states.get(key)
-        if state is None or state.consecutive_failures == 0:
-            return
+        with self._lock:
+            key = (account_id, model_name)
+            state = self._states.get(key)
+            if state is None or state.consecutive_failures == 0:
+                return
 
-        logger.info(
-            "Circuit breaker: %s/%s recovered after %d failures, resetting state",
-            account_id, model_name, state.consecutive_failures,
-        )
-        del self._states[key]
+            logger.info(
+                "Circuit breaker: %s/%s recovered after %d failures, resetting state",
+                account_id, model_name, state.consecutive_failures,
+            )
+            del self._states[key]
 
     # ----- introspection ---------------------------------------------------
 
     def get_state(self, account_id: str, model_name: str) -> Optional[CircuitState]:
         """Return the current ``CircuitState`` (or ``None``)."""
-        return self._states.get((account_id, model_name))
+        with self._lock:
+            return self._states.get((account_id, model_name))
 
     def get_all_states(self) -> List[Dict[str, Any]]:
         """Return a list of all tracked states (for admin display)."""
-        return [
-            {
-                "account_id": s.account_id,
-                "model_name": s.model_name,
-                "consecutive_failures": s.consecutive_failures,
-                "error_type": s.error_type,
-                "frozen_until": s.frozen_until,
-                "frozen_remaining": max(0.0, s.frozen_until - time.time()),
-                "escalated": s.escalated,
-                "last_failure_time": s.last_failure_time,
-            }
-            for s in self._states.values()
-        ]
+        with self._lock:
+            return [
+                {
+                    "account_id": s.account_id,
+                    "model_name": s.model_name,
+                    "consecutive_failures": s.consecutive_failures,
+                    "error_type": s.error_type,
+                    "frozen_until": s.frozen_until,
+                    "frozen_remaining": max(0.0, s.frozen_until - time.time()),
+                    "escalated": s.escalated,
+                    "last_failure_time": s.last_failure_time,
+                }
+                for s in self._states.values()
+            ]
 
     def clear(self) -> None:
         """Reset all circuit states."""
-        self._states.clear()
+        with self._lock:
+            self._states.clear()
 
     # ----- internals -------------------------------------------------------
 

@@ -1,5 +1,6 @@
 """Admin service for the management panel."""
 import datetime
+import logging
 import uuid
 
 from core.timezone import TZ, today, today_range, now as _tz_now
@@ -14,6 +15,8 @@ from repositories.provider_type_repository import ProviderTypeRepository
 from repositories.quota_repository import QuotaRepository
 from repositories.supplier_model_repository import SupplierModelRepository
 from services.providers import build_rate_limit_strategies, create_strategy
+
+logger = logging.getLogger(__name__)
 
 
 class AdminService:
@@ -420,8 +423,6 @@ class AdminService:
         Reads ``log_retention_hours`` from system_config (default 1 hour).
         Runs inline — designed to be called periodically from a background task.
         """
-        import datetime
-
         raw = self.config_repo.get("log_retention_hours") or "1"
         try:
             hours = float(raw)
@@ -431,6 +432,11 @@ class AdminService:
         if hours <= 0:
             hours = 1.0
 
+        # IMPORTANT: request_logs.timestamp is stored as UTC (DB column default
+        # CURRENT_TIMESTAMP), and routes.py writes request_start/end_time in UTC
+        # too. The cutoff MUST therefore be computed in UTC to match. Using the
+        # project timezone (Asia/Shanghai) here would shift the cutoff +8h and
+        # wrongly delete all logs from the last 8 hours.
         cutoff = (
             datetime.datetime.now(datetime.timezone.utc)
             - datetime.timedelta(hours=hours)
@@ -442,6 +448,14 @@ class AdminService:
                 "Cleaned up %d log entries older than %s (retention=%sh)",
                 deleted, cutoff, raw,
             )
+            # SQLite DELETE 只把页标记为空闲，文件不会变小；
+            # 删除后执行 VACUUM 才能真正回收磁盘空间。
+            db = self.db or getattr(self.log_repo, "db", None)
+            if db is not None:
+                try:
+                    db.vacuum()
+                except Exception as exc:
+                    logger.warning("VACUUM after log cleanup failed: %s", exc)
 
     # ── Mapping usage ────────────────────────────────────────────────────
 
@@ -782,6 +796,28 @@ class AdminService:
 
     # ── Model Quotas ──
 
+    def _get_account_rate_windows(self, account_id: str) -> dict:
+        """Read raw (model_name -> (window_start, request_count)) counters.
+
+        Returns the authoritative window counters for an account straight from
+        ``account_rate_windows``. Going through this table (instead of the
+        strategy object) is intentional: at request time SenseTime counts under
+        an aliased model name, and the admin strategy instance can differ from
+        the request-time one — both would make the strategy methods unreliable.
+        """
+        if self.db is None:
+            return {}
+        try:
+            with self.db.get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT model_name, window_start, request_count "
+                    "FROM account_rate_windows WHERE account_id = ?",
+                    (account_id,),
+                ).fetchall()
+            return {r["model_name"]: (r["window_start"], r["request_count"]) for r in rows}
+        except Exception:
+            return {}
+
     def get_model_quotas(self):
         """Get model-level quota info by supplier + model.
 
@@ -794,6 +830,12 @@ class AdminService:
         - quota_remaining, quota_limit (from model_quotas table)
         - today_input_tokens, today_output_tokens (from model_quotas or request_logs)
         - is_unavailable
+        - strategy_type, window_seconds, max_requests
+          (the "按模型窗口" policy; from the fixed-window strategy counters.
+           max_requests == window_quota_limit == the window's request cap)
+        - window_quota_remaining, window_quota_limit (live remaining requests)
+        - has_custom_window, window_override
+          (whether this model has a per-model override in provider_types.config)
         """
         if self.quota_repo is None or self.supplier_model_repo is None:
             return []
@@ -819,11 +861,52 @@ class AdminService:
                 "unavailable_models": unavailable,
             }
 
+        # Build provider-type → window-strategy map once, so the per-model
+        # window config (provider_types.config["models"]) can be reflected onto
+        # each model row. Without this, the "按模型窗口" policy lives only in the
+        # strategy internals / provider-type config and never shows on the model.
+        pt_map = {}
+        if self.provider_type_repo is not None:
+            # Skip only the offending provider-type row rather than discarding
+            # the whole map — otherwise a single malformed row would silently
+            # downgrade every supplier to "被动" (no window strategy shown).
+            for pt in self.provider_type_repo.find_all():
+                try:
+                    cfg = pt.get("config") or {}
+                    pt_map[pt["type_key"]] = {
+                        "strategy_type": pt.get("strategy_type"),
+                        "models": cfg.get("models", {}) or {},
+                        "window_seconds": cfg.get("window_seconds"),
+                        "max_requests": cfg.get("max_requests"),
+                    }
+                except Exception:
+                    continue
+
         result = []
         for sup in suppliers:
             sid = sup["id"]
             account_id = sup["account_id"]
             sup_name = sup.get("name", "")
+
+            # Resolve this supplier's window strategy + per-model overrides
+            provider_type = sup.get("provider_type", "modelscope")
+            pt_info = pt_map.get(provider_type, {})
+            strategy = self.rate_limit_strategies.get(provider_type)
+            strategy_type = pt_info.get("strategy_type")
+            model_overrides = pt_info.get("models", {}) or {}
+
+            # Infer strategy type when not declared via the provider-type table
+            # (e.g. the built-in "sensetime" fallback strategy).
+            if strategy is not None and strategy_type is None:
+                try:
+                    from services.providers.per_model import PerModelFixedWindowStrategy
+                    from services.providers.sensetime import SenseTimeStrategy
+                    if isinstance(strategy, PerModelFixedWindowStrategy):
+                        strategy_type = "fixed_window_per_model"
+                    elif isinstance(strategy, SenseTimeStrategy):
+                        strategy_type = "fixed_window"
+                except Exception:
+                    pass
 
             # Get model-level quotas for this supplier
             model_quotas = self.quota_repo.get_model_quotas(account_id)
@@ -831,6 +914,16 @@ class AdminService:
 
             # Get all models for this supplier
             models = self.supplier_model_repo.find_by_supplier(sid)
+
+            # Pre-fetch raw window counters for this account directly from
+            # account_rate_windows — the authoritative source of truth. We read
+            # the table ourselves instead of via the strategy object because:
+            #  (1) at request time SenseTime counts under an aliased model name
+            #      (e.g. "sense"), so a per-configured-model lookup would miss it;
+            #  (2) the admin strategy instance can differ from the request-time
+            #      one, so get_quota_info()/get_model_quota_info() are fragile.
+            # Reading the DB directly is robust to both.
+            raw_windows = self._get_account_rate_windows(account_id)
 
             for m in models:
                 model_name = m.get("model_name", "")
@@ -842,12 +935,73 @@ class AdminService:
                 quota_limit = mq.get("quota_limit", 0)
                 today_input = mq.get("total_input_tokens", 0) or 0
                 today_output = mq.get("total_output_tokens", 0) or 0
+                today_cached = mq.get("total_cached_tokens", 0) or 0
 
                 # Fallback: if no model quota entry yet, derive from request_logs
                 if quota_limit == 0 and today_input == 0 and today_output == 0:
-                    today_input, today_output = self._get_today_token_usage(account_id, model_name)
+                    today_input, today_output, today_cached = self._get_today_token_usage(account_id, model_name)
 
                 is_unavailable = model_name in supplier_quota_map.get(account_id, {}).get("unavailable_models", set())
+
+                # Per-model window strategy info (from the fixed-window counters in
+                # account_rate_windows, NOT the header-driven model_quotas table).
+                # This is what surfaces the "按模型窗口" policy on the model row.
+                #  - genuine per-model strategy: counter keyed by the configured model name
+                #  - SenseTime aliases every model to one underlying name, so if no row
+                #    matches the configured name we fall back to the single account row
+                #    (supplier-wide counter).
+                win = {}
+                if strategy_type in ("fixed_window", "fixed_window_per_model", "sensetime"):
+                    # window config: per-model override > provider-type default > built-in
+                    win_cfg = model_overrides.get(model_name) or {}
+                    window_seconds = win_cfg.get("window_seconds") or pt_info.get("window_seconds") or 18000
+                    max_requests = win_cfg.get("max_requests") or pt_info.get("max_requests") or 1500
+                    # 计数 key 以真实模型 ID (actual_model_id) 写入（见 routes.py
+                    # check_rate_limit），此处 model_name 是模型目录名，往往是
+                    # mapping 的 alias，两者可能不同。优先直接匹配，否则尝试把
+                    # model_name 解析为 actual_model_id 再匹配，避免“按模型”窗口
+                    # 因名字不一致而始终显示满额。
+                    match_keys = [model_name]
+                    if self.mapping_repo is not None and model_name:
+                        _mrows = self.mapping_repo.find_by_alias(model_name)
+                        if _mrows:
+                            match_keys.append(_mrows[0].get("actual_model_id"))
+                    cnt_model = next((k for k in match_keys if k in raw_windows), None)
+                    if cnt_model is None and len(raw_windows) == 1:
+                        cnt_model = next(iter(raw_windows))  # supplier-wide (e.g. "sense"/"__global__")
+                    if cnt_model is not None:
+                        window_start, request_count = raw_windows[cnt_model]
+                        try:
+                            # flush 写入的 window_start 为 UTC（gmtime）但不带时区后缀；
+                            # 按 UTC 解析，否则 aware - naive 抛 TypeError 被吞、elapsed
+                            # 恒为 0，窗口永不过期。
+                            _dt = datetime.datetime.fromisoformat(window_start)
+                            if _dt.tzinfo is None:
+                                _dt = _dt.replace(tzinfo=datetime.timezone.utc)
+                            elapsed = (
+                                datetime.datetime.now(datetime.timezone.utc) - _dt
+                            ).total_seconds()
+                        except Exception:
+                            elapsed = 0
+                        remaining = (
+                            max_requests if elapsed > window_seconds
+                            else max(0, max_requests - request_count)
+                        )
+                        win = {
+                            "window_seconds": window_seconds,
+                            "quota_limit": max_requests,
+                            "quota_remaining": remaining,
+                        }
+                    else:
+                        # window configured but no requests counted yet -> full quota
+                        win = {
+                            "window_seconds": window_seconds,
+                            "quota_limit": max_requests,
+                            "quota_remaining": max_requests,
+                        }
+
+                has_custom_window = model_name in model_overrides
+                window_override = model_overrides.get(model_name)
 
                 result.append({
                     "supplier_id": sid,
@@ -859,7 +1013,19 @@ class AdminService:
                     "quota_limit": quota_limit,
                     "today_input_tokens": today_input,
                     "today_output_tokens": today_output,
+                    "today_cached_tokens": today_cached,
                     "is_unavailable": is_unavailable,
+                    # ── 按模型窗口策略透出 ──
+                    "strategy_type": strategy_type,
+                    "window_seconds": win.get("window_seconds"),
+                    # Window request limit. The strategy methods don't expose a
+                    # separate "max_requests" key, so surface the window limit
+                    # (== quota_limit) directly instead of an always-None lookup.
+                    "max_requests": win.get("quota_limit"),
+                    "window_quota_remaining": win.get("quota_remaining"),
+                    "window_quota_limit": win.get("quota_limit"),
+                    "has_custom_window": has_custom_window,
+                    "window_override": window_override,
                 })
 
         return result
@@ -871,7 +1037,7 @@ class AdminService:
         start_of_day, end_of_day = today_range()
         return self.log_repo.query_stats_today_token_usage(
             account_id, model_name, start_of_day, end_of_day,
-        )
+        )  # -> (input_tokens, output_tokens, cached_tokens)
 
     # ── Stats ──
 

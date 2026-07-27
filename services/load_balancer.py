@@ -5,7 +5,19 @@ logger = logging.getLogger(__name__)
 
 
 class LoadBalancer:
-    """Load balancer for selecting ModelScope accounts."""
+    """Legacy/fallback account selector.
+
+    ``select_account`` implements simple **round-robin** over the accounts that
+    declare support for ``model_name`` (via ``supplier_model_repo``) and are not
+    currently frozen for that model.
+
+    NOTE: The production request path uses
+    :class:`services.alias_router.AliasRouter` for candidate selection, which
+    supports richer strategies (``round_robin`` / ``random`` / ``least_conn``)
+    configured via ``load_balancer_strategy``. This ``LoadBalancer`` is retained
+    for backward compatibility and as a final fallback when no alias mappings
+    exist.
+    """
 
     def __init__(
         self,

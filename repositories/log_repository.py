@@ -581,21 +581,24 @@ class LogRepository:
     def query_stats_today_token_usage(
         self, account_id: str, model: str, start_of_day: str, end_of_day: str,
     ) -> tuple:
-        """按 account_id + model 聚合今日的 input/output tokens（stats 表）。
+        """按 account_id + model 聚合今日的 input/output/cached tokens（stats 表）。
 
-        Returns ``(input_tokens, output_tokens)``.
+        Returns ``(input_tokens, output_tokens, cached_tokens)``. ``cached_tokens``
+        is surfaced separately so callers like ``get_model_quotas`` can show the
+        cache-hit column in the supplier model-usage panel.
         """
         s, e = self._floor_minute(start_of_day), self._floor_minute(end_of_day)
         with self.db.get_connection() as conn:
             row = conn.execute(
                 """SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                          COALESCE(SUM(output_tokens), 0) AS output_tokens
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
                    FROM request_stats_minute
                    WHERE bucket >= ? AND bucket <= ?
                      AND account_id = ? AND model = ?""",
                 (s, e, account_id, model),
             ).fetchone()
-            return (row["input_tokens"], row["output_tokens"])
+            return (row["input_tokens"], row["output_tokens"], row["cached_tokens"])
 
     # ── (removed dead legacy methods) ──────────────────────────────────
     # aggregate_window, summarize_window, status_code_breakdown, and

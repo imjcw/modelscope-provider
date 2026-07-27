@@ -192,7 +192,7 @@
       </div>
 
       <!-- KPI 卡片 -->
-      <div v-if="modelInfoRows.length > 0" class="bg-ls-card rounded-lg border border-ls-border px-4 py-3 grid grid-cols-4 gap-4 text-xs mb-4 neon-glow">
+      <div v-if="modelInfoRows.length > 0" class="bg-ls-card rounded-lg border border-ls-border px-4 py-3 grid grid-cols-5 gap-4 text-xs mb-4 neon-glow">
         <div>
           <span class="text-ls-muted">输入 Token</span>
           <span class="block mt-1 text-base font-mono text-ls-text">{{ fmt(modelInfoTotalInput) }}</span>
@@ -204,6 +204,10 @@
         <div>
           <span class="text-ls-muted">总 Token</span>
           <span class="block mt-1 text-base font-mono text-ls-text">{{ fmt(modelInfoTotalTokens) }}</span>
+        </div>
+        <div>
+          <span class="text-ls-muted">缓存命中</span>
+          <span class="block mt-1 text-base font-mono" :class="(modelInfoTotalCached || 0) > 0 ? 'text-green-400' : 'text-ls-muted'">{{ fmt(modelInfoTotalCached) }}</span>
         </div>
         <div>
           <span class="text-ls-muted">可用模型</span>
@@ -220,6 +224,7 @@
             <th class="text-right">输入</th>
             <th class="text-right">缓存命中</th>
             <th class="text-right">输出</th>
+            <th class="text-left">窗口</th>
             <th class="text-center">状态</th>
           </tr>
         </thead>
@@ -239,8 +244,15 @@
               <span v-else class="text-ls-muted">—</span>
             </td>
             <td class="text-right text-xs font-mono text-ls-dim">{{ (m.today_input_tokens || 0).toLocaleString() }}</td>
-            <td class="text-right text-xs font-mono text-ls-muted">0</td>
+            <td class="text-right text-xs font-mono" :class="(m.today_cached_tokens || 0) > 0 ? 'text-green-400' : 'text-ls-muted'">{{ (m.today_cached_tokens || 0).toLocaleString() }}</td>
             <td class="text-right text-xs font-mono text-ls-dim">{{ (m.today_output_tokens || 0).toLocaleString() }}</td>
+            <td class="text-xs">
+              <span v-if="windowLabel(m)" class="text-ls-dim">
+                <span :class="m.window_quota_remaining > 0 ? 'text-ls-text' : 'text-ls-muted'">{{ windowLabel(m).head }}</span>
+                <span v-if="windowLabel(m).sub" class="text-ls-muted"> · {{ windowLabel(m).sub }}</span>
+              </span>
+              <span v-else class="text-ls-muted">—</span>
+            </td>
             <td class="text-center">
               <span v-if="m.is_unavailable" class="tag tag-danger">不可用</span>
               <span v-else class="tag tag-success">正常</span>
@@ -323,7 +335,12 @@ const modelInfoRows = computed(() => {
       quota_limit: q.quota_limit || 0,
       today_input_tokens: q.today_input_tokens || 0,
       today_output_tokens: q.today_output_tokens || 0,
+      today_cached_tokens: q.today_cached_tokens || 0,
       is_unavailable: q.is_unavailable || false,
+      strategy_type: q.strategy_type || '',
+      window_seconds: q.window_seconds || 0,
+      window_quota_remaining: q.window_quota_remaining || 0,
+      window_quota_limit: q.window_quota_limit || 0,
     }
   })
 })
@@ -334,6 +351,19 @@ const MODEL_INFO_DAYS_OPTIONS = [
   { label: '30天', value: 30 },
   { label: '90天', value: 90 },
 ]
+
+// 模型用量抽屉的「窗口」列：展示按模型/固定窗口策略的剩余与上限
+const windowLabel = (m) => {
+  if (!m.strategy_type) return null
+  const isPerModel = m.strategy_type === 'fixed_window_per_model'
+  const secs = m.window_seconds || 0
+  const val = secs >= 3600 ? `${secs / 3600}h` : `${secs / 60}m`
+  const head = isPerModel ? `按模型 ${val}` : `固定窗口 ${val}`
+  const rem = m.window_quota_remaining
+  const max = m.window_quota_limit
+  const sub = rem != null && max != null ? `${rem}/${max}` : (max != null ? `${max}` : '')
+  return { head, sub }
+}
 const modelInfoDays = ref(0)
 const fmt = (n) => (n || 0).toLocaleString()
 
@@ -344,6 +374,9 @@ const modelInfoTotalOutput = computed(() =>
   modelInfoRows.value.reduce((s, m) => s + (m.today_output_tokens || 0), 0)
 )
 const modelInfoTotalTokens = computed(() => modelInfoTotalInput.value + modelInfoTotalOutput.value)
+const modelInfoTotalCached = computed(() =>
+  modelInfoRows.value.reduce((s, m) => s + (m.today_cached_tokens || 0), 0)
+)
 const modelInfoAvailable = computed(() =>
   modelInfoRows.value.filter(m => !m.is_unavailable).length
 )

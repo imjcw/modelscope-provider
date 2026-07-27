@@ -178,19 +178,26 @@ onBeforeUnmount(() => {
   width: 100%;
   font-size: 12px;
 }
-.md-content :deep(th), .md-content :deep(td) {
-  padding: 0.45em 0.7em;
-  border: 1px solid var(--border);
+/* 表头：仅底边线（对齐 ApiKeys 对接指南的错误码表风格） */
+.md-content :deep(thead th) {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 0.5em 0.8em;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+}
+/* 单元格：无边框、靠行分隔线区分（divide-y divide-ls-border） */
+.md-content :deep(tbody td) {
+  border: none;
+  padding: 0.5em 0.8em;
   text-align: left;
   vertical-align: top;
+  color: var(--text-dim);
 }
-.md-content :deep(th) {
-  background: var(--surface-2);
-  font-weight: 600;
-  color: #fff;
-}
-.md-content :deep(tr:nth-child(even) td) {
-  background: rgba(255, 255, 255, 0.015);
+.md-content :deep(tbody tr + tr) {
+  border-top: 1px solid var(--border);
 }
 
 .md-content :deep(img) {

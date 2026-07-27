@@ -64,6 +64,30 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def vacuum(self):
+        """Reclaim disk space by rebuilding the database file.
+
+        SQLite ``DELETE`` only marks pages as free — the .db file never
+        shrinks on its own. Call this after bulk deletions (e.g. log
+        cleanup) to actually return the space to the OS.
+
+        ``VACUUM`` cannot run inside a transaction, so a dedicated
+        autocommit connection (``isolation_level=None``) is used instead of
+        ``get_connection()`` (which wraps everything in a transaction).
+        A WAL checkpoint (TRUNCATE) afterwards also shrinks the -wal file.
+        """
+        conn = sqlite3.connect(
+            self.db_url, check_same_thread=False, isolation_level=None
+        )
+        try:
+            # Wait for concurrent writers instead of failing immediately.
+            conn.execute("PRAGMA busy_timeout = 10000")
+            conn.execute("VACUUM")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            logger.info("Database VACUUM completed — free pages reclaimed")
+        finally:
+            conn.close()
+
     def initialize_tables(self):
         """Create all tables and indexes at the latest baseline schema.
 

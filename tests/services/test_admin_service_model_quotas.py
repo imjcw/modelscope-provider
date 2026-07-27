@@ -1,0 +1,119 @@
+"""Tests for AdminService.get_model_quotas (per-model window strategy surfacing).
+
+These lock in the behavior added so that the "按模型窗口" policy is reflected
+on the model: each model row carries its window strategy type, effective
+window/max-requests, live remaining/limit, and whether it has a per-model
+override configured on the provider type.
+"""
+import pytest
+
+from provider.repositories.account_repository import AccountRepository
+from provider.repositories.config_repository import ConfigRepository
+from provider.repositories.log_repository import LogRepository
+from provider.repositories.mapping_repository import MappingRepository
+from provider.repositories.quota_repository import QuotaRepository
+from provider.repositories.supplier_model_repository import SupplierModelRepository
+from provider.repositories.provider_type_repository import ProviderTypeRepository
+from provider.services.admin_service import AdminService
+from provider.services.providers.per_model import PerModelFixedWindowStrategy
+
+# Defaults from services/providers/per_model.py: 5h / 1500
+_DEFAULT_WINDOW_SECONDS = 5 * 3600
+_DEFAULT_MAX_REQUESTS = 1500
+
+
+@pytest.fixture
+def svc(database):
+    account_repo = AccountRepository(database)
+    mapping_repo = MappingRepository(database)
+    config_repo = ConfigRepository(database)
+    log_repo = LogRepository(database)
+    quota_repo = QuotaRepository(database)
+    supplier_model_repo = SupplierModelRepository(database)
+    provider_type_repo = ProviderTypeRepository(database)
+
+    # Provider type that uses the per-model window strategy, with an explicit
+    # override for model "m1".
+    provider_type_repo.create(
+        type_key="pt-per-model",
+        name="Per-model PT",
+        strategy_type="fixed_window_per_model",
+        config={"models": {"m1": {"window_seconds": 600, "max_requests": 5}}},
+    )
+
+    acc = account_repo.create(
+        name="Supplier A",
+        api_key="k",
+        base_url="http://x",
+        provider_type="pt-per-model",
+    )
+    sid = acc["id"]
+    aid = acc["account_id"]
+
+    supplier_model_repo.create(sid, "m1", "text", 8000)
+    supplier_model_repo.create(sid, "m2", "text", 8000)
+
+    # header-driven (modelscope-style) quota rows, independent of the window
+    quota_repo.update_model_quota(aid, "m1", quota_remaining=80, quota_limit=100)
+    quota_repo.update_model_quota(aid, "m2", quota_remaining=40, quota_limit=100)
+
+    strategy = PerModelFixedWindowStrategy(
+        database, model_configs={"m1": {"window_seconds": 600, "max_requests": 5}}
+    )
+    rate_limit_strategies = {"pt-per-model": strategy}
+
+    return AdminService(
+        account_repo,
+        mapping_repo,
+        config_repo,
+        log_repo,
+        quota_repo=quota_repo,
+        supplier_model_repo=supplier_model_repo,
+        provider_type_repo=provider_type_repo,
+        rate_limit_strategies=rate_limit_strategies,
+    )
+
+
+def test_per_model_window_surfaced_on_models(svc):
+    rows = svc.get_model_quotas()
+    by_model = {r["model_name"]: r for r in rows}
+    assert set(by_model) == {"m1", "m2"}
+
+    # Model with a per-model override -> custom window reflected.
+    m1 = by_model["m1"]
+    assert m1["strategy_type"] == "fixed_window_per_model"
+    assert m1["window_seconds"] == 600
+    assert m1["max_requests"] == 5
+    assert m1["window_quota_limit"] == 5
+    assert m1["window_quota_remaining"] == 5
+    assert m1["has_custom_window"] is True
+    # header-driven quota is still surfaced alongside the window info.
+    assert m1["quota_remaining"] == 80 and m1["quota_limit"] == 100
+
+    # Model without an override -> falls back to the strategy defaults.
+    m2 = by_model["m2"]
+    assert m2["strategy_type"] == "fixed_window_per_model"
+    assert m2["window_seconds"] == _DEFAULT_WINDOW_SECONDS
+    assert m2["max_requests"] == _DEFAULT_MAX_REQUESTS
+    assert m2["has_custom_window"] is False
+
+
+def test_no_strategy_instance_yields_none_window_fields(svc, database):
+    # A second account whose provider_type has no strategy instance registered.
+    account_repo = AccountRepository(database)
+    supplier_model_repo = SupplierModelRepository(database)
+    acc = account_repo.create(
+        name="Supplier B",
+        api_key="k2",
+        base_url="http://y",
+        provider_type="modelscope",
+    )
+    supplier_model_repo.create(acc["id"], "m3", "text", 8000)
+
+    m3 = next(r for r in svc.get_model_quotas() if r["model_name"] == "m3")
+    # "modelscope" is a built-in provider type backed by the header-based
+    # strategy, which has no fixed window -> window fields are None.
+    assert m3["strategy_type"] == "header_based"
+    assert m3["window_seconds"] is None
+    assert m3["window_quota_remaining"] is None
+    assert m3["has_custom_window"] is False
