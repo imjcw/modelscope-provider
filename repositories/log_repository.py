@@ -223,14 +223,18 @@ class LogRepository:
     def query_stats_summarize(self, start: str, end: str) -> dict:
         """Aggregated stats over a time range (replaces ``summarize_window``).
 
-        Returns ``{total, success, total_tokens, avg_latency_ms}``.
+        Returns ``{total, success, total_tokens, input_tokens, output_tokens,
+        cached_tokens, avg_latency_ms}``.
         """
         s, e = self._floor_minute(start), self._floor_minute(end)
         with self.db.get_connection() as conn:
             row = conn.execute(
                 """SELECT COALESCE(SUM(requests), 0) AS total,
                           COALESCE(SUM(success), 0) AS success,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
                           COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
                           CASE WHEN SUM(latency_count) > 0
                                THEN CAST(SUM(latency_sum) AS REAL) / SUM(latency_count)
                                ELSE NULL END AS avg_latency_ms
@@ -245,15 +249,30 @@ class LogRepository:
     ) -> List[dict]:
         """Bucketed stats over a time range (replaces ``aggregate_window``).
 
-        Returns ``[{bucket_start, total, success, total_tokens, avg_latency_ms}]``.
+        Returns ``[{bucket_start, total, success, total_tokens, input_tokens,
+        output_tokens, cached_tokens, avg_latency_ms}]``.
         """
         s, e = self._floor_minute(start), self._floor_minute(end)
+        # bucket 列存储的是上海本地时间字符串。日级（>=86400s）分桶若用 strftime('%s', bucket)
+        # 会把上海时间当成 UTC，导致桶界与前端/Python 按上海时区对齐的网格错开 8 小时，
+        # by_epoch 映射全部落空 —— 7 天 / 30 天窗口 series 全为 0，图表空白。
+        # 因此日级桶直接按上海本地日历截断到当天 00:00，子级桶沿用原 epoch 整除（其粒度均整除
+        # 8h，上海界与 UTC 界一致，无需调整）。
+        if bucket_seconds >= 86400:
+            bucket_expr = "strftime('%Y-%m-%d 00:00:00', bucket)"
+            params = (s, e)
+        else:
+            bucket_expr = ("strftime('%Y-%m-%d %H:%M:%S',"
+                           " (strftime('%s', bucket) / ?) * ?, 'unixepoch')")
+            params = (bucket_seconds, bucket_seconds, s, e)
         with self.db.get_connection() as conn:
             rows = conn.execute(
-                "SELECT strftime('%Y-%m-%d %H:%M:%S',"
-                "              (strftime('%s', bucket) / ?) * ?, 'unixepoch') AS bucket_start,"
+                f"SELECT {bucket_expr} AS bucket_start,"
                 "              COALESCE(SUM(requests), 0) AS total,"
                 "              COALESCE(SUM(success), 0) AS success,"
+                "              COALESCE(SUM(input_tokens), 0) AS input_tokens,"
+                "              COALESCE(SUM(output_tokens), 0) AS output_tokens,"
+                "              COALESCE(SUM(cached_tokens), 0) AS cached_tokens,"
                 "              COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,"
                 "              CASE WHEN SUM(latency_count) > 0"
                 "                   THEN CAST(SUM(latency_sum) AS REAL) / SUM(latency_count)"
@@ -261,7 +280,7 @@ class LogRepository:
                 " FROM request_stats_minute"
                 " WHERE bucket >= ? AND bucket <= ?"
                 " GROUP BY bucket_start ORDER BY bucket_start",
-                (bucket_seconds, bucket_seconds, s, e),
+                params,
             )
             return [dict(r) for r in rows.fetchall()]
 
@@ -271,7 +290,8 @@ class LogRepository:
         Grouped by ``(model, account_id)`` so that the same model name bound to
         different suppliers is reported separately, ordered by total desc.
 
-        Returns ``[{model, account_id, total, success}]``.
+        Returns ``[{model, account_id, total, success, input_tokens,
+        output_tokens, cached_tokens}]``.
         """
         s, e = self._floor_minute(start), self._floor_minute(end)
         with self.db.get_connection() as conn:
@@ -279,10 +299,13 @@ class LogRepository:
                 """SELECT model,
                           account_id,
                           COALESCE(SUM(requests), 0) AS total,
-                          COALESCE(SUM(success), 0) AS success
+                          COALESCE(SUM(success), 0) AS success,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
                    FROM request_stats_minute
                    WHERE bucket >= ? AND bucket <= ?
-                   GROUP BY model, account_id ORDER BY total DESC""",
+                   GROUP BY model, account_id ORDER BY (SUM(input_tokens) + SUM(output_tokens)) DESC""",
                 (s, e),
             )
             return [dict(r) for r in rows.fetchall()]

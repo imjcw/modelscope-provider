@@ -24,6 +24,8 @@ wheels/
 venv/
 ENV/
 env/
+.venv/
+.codebuddy/
 
 # Database
 *.db
@@ -51,3 +53,5 @@ web/node_modules/
 web/dist/
 .worktrees/
 .zcode/
+.superpowers/
+docs/superpowers/

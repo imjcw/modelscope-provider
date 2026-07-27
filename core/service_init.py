@@ -21,6 +21,20 @@ from repositories.provider_type_repository import ProviderTypeRepository
 from core.migrations import Migrator
 
 
+def _resolve_read_timeout(config_repo) -> float:
+    """Read ``request_timeout_ms`` and convert to seconds for httpx read timeout.
+
+    Falls back to 1 hour (3600s) if the key is missing or not a valid number.
+    """
+    raw = config_repo.get("request_timeout_ms")
+    if raw is None:
+        return 3600.0
+    try:
+        return max(0.0, float(raw) / 1000.0)
+    except (ValueError, TypeError):
+        return 3600.0
+
+
 class ServiceInitializer:
     """Initialize all services."""
 
@@ -52,8 +66,12 @@ class ServiceInitializer:
             self.config.db = database
             accounts = self.config.load_accounts(migrate_from_env=True)
 
-        # Initialize HTTP client
-        http_client = HttpClient()
+        # Initialize repositories (config first — needed to configure HTTP timeouts)
+        config_repo = ConfigRepository(database)
+
+        # Initialize HTTP client — read_timeout is driven by request_timeout_ms
+        # (default 1 hour) so slow upstream model responses don't raise ReadTimeout.
+        http_client = HttpClient(read_timeout=_resolve_read_timeout(config_repo))
 
         # Initialize repositories
         quota_repository = QuotaRepository(database)
@@ -61,7 +79,6 @@ class ServiceInitializer:
         supplier_model_repo = SupplierModelRepository(database)
         mapping_model_repo = MappingModelRepository(database)
         account_repo = AccountRepository(database)
-        config_repo = ConfigRepository(database)
 
         # Initialize in-memory caches
         config_cache = ConfigCache(config_repo)

@@ -31,6 +31,9 @@ def _insert_log(ts, status_code=200, model="m1", actual=None, input_tokens=0, ou
     db = DatabaseManager(os.environ["DATABASE_URL"])
     repo = LogRepository(db)
     rid = f"apws-{uuid.uuid4().hex[:12]}"
+    # DB timestamps are naive Shanghai-local strings; convert before formatting.
+    if ts.tzinfo is not None:
+        ts = ts.astimezone(datetime.timezone(datetime.timedelta(hours=8)))
     ts_str = ts.strftime(FMT)
     repo.create(request_id=rid, model=model, actual_model_id=actual,
                 status_code=status_code, latency_ms=120,
@@ -66,13 +69,17 @@ def test_window_stats_shape(client):
     assert 30 <= len(data["series"]) <= 31
 
     kpi = data["kpi"]
-    assert set(kpi.keys()) == {"total", "success", "failed", "total_tokens", "success_rate",
+    assert set(kpi.keys()) == {"total", "success", "failed", "total_tokens",
+                               "input_tokens", "output_tokens", "cached_tokens",
+                               "success_rate", "cache_hit_rate",
                                "qps", "avg_latency_ms", "delta"}
-    assert set(kpi["delta"].keys()) == {"total_pct", "total_tokens_pct", "success_rate_pp", "avg_latency_pct"}
+    assert set(kpi["delta"].keys()) == {"total_pct", "total_tokens_pct", "success_rate_pp",
+                                        "avg_latency_pct", "cached_tokens_pct", "cache_hit_rate_pp"}
 
     cell = data["series"][0]
-    assert set(cell.keys()) == {"t", "total", "success", "total_tokens", "qps",
-                                "success_rate", "avg_latency_ms"}
+    assert set(cell.keys()) == {"t", "total", "success", "total_tokens",
+                                "input_tokens", "output_tokens", "cached_tokens",
+                                "qps", "success_rate", "avg_latency_ms"}
 
 
 def test_window_bucket_mapping(client):

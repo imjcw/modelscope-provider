@@ -50,6 +50,87 @@ class ErrorResponse(BaseModel):
     error: dict
 
 
+def _extract_cache_usage(usage) -> tuple:
+    """从上游 usage 提取 (cached_tokens, prompt_partial_cached)。
+
+    兼容 OpenAI 风格 prompt_tokens_details.cached_tokens /
+    prompt_partial_cached_tokens，以及 DeepSeek 风格顶层
+    prompt_cache_hit_tokens。
+    """
+    if not isinstance(usage, dict):
+        return 0, 0
+    details = usage.get("prompt_tokens_details")
+    if not isinstance(details, dict):
+        details = {}
+    cached = details.get("cached_tokens")
+    if not cached:
+        cached = usage.get("prompt_cache_hit_tokens", 0)
+    partial = details.get("prompt_partial_cached_tokens", 0) or 0
+    try:
+        return int(cached or 0), int(partial)
+    except (TypeError, ValueError):
+        return 0, 0
+
+
+def _safe_read_response_body(response, max_len: int = 2000) -> str:
+    """安全读取上游 HTTP 响应的 body 文本，失败时返回空字符串。
+    body 超过 max_len 时截断并标注。
+    """
+    try:
+        text = response.text
+        if text and len(text) > max_len:
+            return text[:max_len] + "...(truncated)"
+        return text or ""
+    except Exception:
+        return ""
+
+
+def _log_error_request(
+    admin_service,
+    request_model: str,
+    actual_model_id: str,
+    selected_account,
+    client_key_name: str,
+    status_code: int,
+    error_message: str,
+    request_body: dict,
+    request_start: str,
+    first_response: str = None,
+    raw_response: str = None,
+    is_stream: bool = False,
+):
+    """记录失败请求到数据库，确保错误路径也有日志可查。
+
+    在所有 raise HTTPException 之前调用，写入 request_logs +
+    request_stats_minute，方便在管理面板的请求日志中查看失败原因。
+    """
+    if not admin_service:
+        return
+    end_time = datetime.now(timezone.utc).isoformat()
+    try:
+        admin_service.log_request(
+            model=request_model,
+            actual_model_id=actual_model_id,
+            account_id=selected_account.account_id,
+            account_name=selected_account.name,
+            status_code=status_code,
+            input_tokens=0,
+            output_tokens=0,
+            is_stream=is_stream,
+            error_message=error_message,
+            raw_request=json.dumps(request_body, ensure_ascii=False),
+            raw_response=raw_response or "",
+            request_start=request_start,
+            first_response=first_response,
+            end_time=end_time,
+            cached_tokens=0,
+            prompt_partial_cached=0,
+            client_key_name=client_key_name,
+        )
+    except Exception as le:
+        logger.error(f"Failed to log error request: {le}", exc_info=True)
+
+
 def get_admin_service(request: Request):
     """Get admin service from app state."""
     try:
@@ -250,6 +331,8 @@ async def stream_response_with_logging(
     """
     output_tokens = 0
     input_tokens = 0
+    cached_tokens = 0
+    prompt_partial_cached = 0
     response_headers = {}
     raw_chunks = []
     first_response = None
@@ -289,6 +372,9 @@ async def stream_response_with_logging(
                 # Only take the latest usage (last chunk has final counts)
                 input_tokens = usage.get("prompt_tokens", 0) or input_tokens
                 output_tokens = usage.get("completion_tokens", 0) or output_tokens
+                _cached, _partial = _extract_cache_usage(usage)
+                cached_tokens = _cached or cached_tokens
+                prompt_partial_cached = _partial or prompt_partial_cached
         except Exception:
             pass
 
@@ -312,6 +398,8 @@ async def stream_response_with_logging(
                 request_start=request_start,
                 first_response=first_response,
                 end_time=end_time,
+                cached_tokens=cached_tokens,
+                prompt_partial_cached=prompt_partial_cached,
                 client_key_name=client_key_name,
                 response_headers=json.dumps(response_headers, ensure_ascii=False) if response_headers else None,
             )
@@ -359,32 +447,20 @@ async def _try_candidate(
     如果请求失败，抛出 HTTPException 供调用方 fallback 到下一个候选。
     流式请求仅在发送前检查失败时 fallback，一旦开始流式传输则不再重试。
     """
+    # 记录请求开始时间（必须在所有路径之前，包括 rate-limit 检查失败路径）
+    request_start = datetime.now(timezone.utc).isoformat()
+    first_response = None
+
     # Resolve per-provider rate-limit strategy
     strategies = services.get("rate_limit_strategies", {})
     strategy = strategies.get(selected_account.provider_type)
     circuit_breaker = services.get("circuit_breaker")
 
-    # Pre-request rate-limit check (SenseTime: atomic check-and-increment)
-    if strategy and not strategy.check_rate_limit(selected_account.account_id, request.model):
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "error": {
-                    "message": f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
-                    "type": "rate_limit_exceeded",
-                    "param": None,
-                    "code": "rate_limit_exceeded",
-                }
-            },
-        )
-
-    # Prepare request body (forward all OpenAI-compatible parameters)
+    # Build request body early so error logging has full context
     request_body = {
         "model": actual_model_id,
         "messages": request.messages,
     }
-
-    # Forward optional parameters
     if request.temperature is not None:
         request_body["temperature"] = request.temperature
     if request.max_tokens is not None:
@@ -420,6 +496,27 @@ async def _try_candidate(
     if request.parallel_tool_calls is not None:
         request_body["parallel_tool_calls"] = request.parallel_tool_calls
 
+    # Pre-request rate-limit check (SenseTime: atomic check-and-increment)
+    if strategy and not strategy.check_rate_limit(selected_account.account_id, request.model):
+        _log_error_request(
+            admin_service, request.model, actual_model_id,
+            selected_account, client_key_name,
+            429, f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
+            request_body, request_start, first_response,
+            is_stream=request.stream,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": {
+                    "message": f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
+                    "type": "rate_limit_exceeded",
+                    "param": None,
+                    "code": "rate_limit_exceeded",
+                }
+            },
+        )
+
     # Handle streaming request
     if request.stream:
         request_body["stream"] = True
@@ -434,7 +531,6 @@ async def _try_candidate(
             request_body["stream_options"] = existing
         else:
             request_body["stream_options"] = {"include_usage": True}
-        request_start = datetime.now(timezone.utc).isoformat()
         url = f"{selected_account.base_url}/chat/completions"
         response = await http_client.request(
             selected_account,
@@ -460,6 +556,14 @@ async def _try_candidate(
                     response.status_code,
                     strategy,
                 )
+            _log_error_request(
+                admin_service, request.model, actual_model_id,
+                selected_account, client_key_name,
+                429, f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
+                request_body, request_start, first_response,
+                raw_response=_safe_read_response_body(response),
+                is_stream=True,
+            )
             raise HTTPException(
                 status_code=429,
                 detail={
@@ -476,6 +580,14 @@ async def _try_candidate(
         # 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 500+ (Server Error)
         # are all candidates for fallback to next supplier
         if response.status_code >= 400:
+            _upstream_err_body = _safe_read_response_body(response, max_len=2000)
+            logger.warning(
+                "Upstream error: %s/%s → %s body=%s",
+                selected_account.account_id,
+                actual_model_id or request.model,
+                response.status_code,
+                _upstream_err_body or "(empty)",
+            )
             if circuit_breaker:
                 circuit_breaker.record_failure(
                     selected_account.account_id,
@@ -483,6 +595,15 @@ async def _try_candidate(
                     response.status_code,
                     strategy,
                 )
+            _log_error_request(
+                admin_service, request.model, actual_model_id,
+                selected_account, client_key_name,
+                response.status_code,
+                f"供应商 {selected_account.name or selected_account.account_id} 返回错误：{response.status_code}",
+                request_body, request_start, first_response,
+                raw_response=_upstream_err_body,
+                is_stream=True,
+            )
             raise HTTPException(
                 status_code=response.status_code,
                 detail={
@@ -518,7 +639,6 @@ async def _try_candidate(
         )
 
     # Non-streaming request
-    request_start = datetime.now(timezone.utc).isoformat()
     url = f"{selected_account.base_url}/chat/completions"
     response = await http_client.request(
         selected_account,
@@ -544,6 +664,14 @@ async def _try_candidate(
                 response.status_code,
                 strategy,
             )
+        _log_error_request(
+            admin_service, request.model, actual_model_id,
+            selected_account, client_key_name,
+            429, f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
+            request_body, request_start, first_response,
+            raw_response=_safe_read_response_body(response),
+            is_stream=False,
+        )
         raise HTTPException(
             status_code=429,
             detail={
@@ -560,6 +688,14 @@ async def _try_candidate(
     # 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 500+ (Server Error)
     # are all candidates for fallback to next supplier
     if response.status_code >= 400:
+        _upstream_err_body = _safe_read_response_body(response, max_len=2000)
+        logger.warning(
+            "Upstream error: %s/%s → %s body=%s",
+            selected_account.account_id,
+            actual_model_id or request.model,
+            response.status_code,
+            _upstream_err_body or "(empty)",
+        )
         if circuit_breaker:
             circuit_breaker.record_failure(
                 selected_account.account_id,
@@ -567,6 +703,15 @@ async def _try_candidate(
                 response.status_code,
                 strategy,
             )
+        _log_error_request(
+            admin_service, request.model, actual_model_id,
+            selected_account, client_key_name,
+            response.status_code,
+            f"供应商 {selected_account.name or selected_account.account_id} 返回错误：{response.status_code}",
+            request_body, request_start, first_response,
+            raw_response=_upstream_err_body,
+            is_stream=False,
+        )
         raise HTTPException(
             status_code=response.status_code,
             detail={
@@ -600,18 +745,62 @@ async def _try_candidate(
         if last_valid is not None:
             ms_response = last_valid
         else:
-            raise ValueError("Could not parse SSE response")
+            _log_error_request(
+                admin_service, request.model, actual_model_id,
+                selected_account, client_key_name,
+                502, "Could not parse SSE response",
+                request_body, request_start, first_response,
+                raw_response=response_text,
+                is_stream=False,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": {
+                        "message": "Could not parse SSE response",
+                        "type": "parse_error",
+                        "param": None,
+                        "code": "sse_parse_error"
+                    }
+                }
+            )
     else:
         try:
             ms_response, _ = decoder.raw_decode(response_text)
         except json.JSONDecodeError:
-            raise ValueError(f"Could not parse response")
+            _log_error_request(
+                admin_service, request.model, actual_model_id,
+                selected_account, client_key_name,
+                502, "Could not parse response JSON",
+                request_body, request_start, first_response,
+                raw_response=response_text,
+                is_stream=False,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": {
+                        "message": "Could not parse response",
+                        "type": "parse_error",
+                        "param": None,
+                        "code": "json_parse_error"
+                    }
+                }
+            )
 
     # Convert and return response
     try:
         openai_response = response_converter.convert_to_openai(ms_response)
     except Exception as conv_err:
         logger.error(f"Response conversion failed: {conv_err}", exc_info=True)
+        _log_error_request(
+            admin_service, request.model, actual_model_id,
+            selected_account, client_key_name,
+            502, f"Response conversion failed: {conv_err}",
+            request_body, request_start, first_response,
+            raw_response=response_text,
+            is_stream=False,
+        )
         raise HTTPException(
             status_code=502,
             detail={
@@ -658,12 +847,7 @@ async def _try_candidate(
     if admin_service:
         try:
             ms_usage = ms_response.get("usage", {}) or {}
-            cached_tokens = 0
-            prompt_partial_cached = 0
-            pt_details = ms_usage.get("prompt_tokens_details", {}) or {}
-            if pt_details:
-                cached_tokens = pt_details.get("cached_tokens", pt_details.get("prompt_cache_hit_tokens", 0)) or 0
-                prompt_partial_cached = pt_details.get("prompt_partial_cached_tokens", 0) or 0
+            cached_tokens, prompt_partial_cached = _extract_cache_usage(ms_usage)
 
             resp_hdrs = {}
             for k in ["x-ratelimit-remaining", "x-ratelimit-limit", "modelscope-ratelimit-requests-remaining", "modelscope-ratelimit-requests-limit"]:
@@ -745,6 +929,16 @@ async def chat_completions(
                         f"Skipping frozen candidate {candidate_idx + 1}/{len(candidates)}: "
                         f"account {selected_account.account_id} model {actual_model_id}"
                     )
+                    # Build minimal request body for error logging
+                    _cb_req_body = {"model": actual_model_id, "messages": request.messages}
+                    _now = datetime.now(timezone.utc).isoformat()
+                    _log_error_request(
+                        admin_service, request.model, actual_model_id,
+                        selected_account, client_key_name,
+                        503, f"供应商 {selected_account.name or selected_account.account_id} 的 {actual_model_id} 模型已被冻结(熔断)",
+                        _cb_req_body, _now, None,
+                        is_stream=request.stream,
+                    )
                     last_error = last_error or HTTPException(
                         status_code=503,
                         detail={
@@ -812,6 +1006,31 @@ async def chat_completions(
         raise
     except ValueError as e:
         logger.error(f"ModelScope API error: {e}")
+        # 记录到请求日志模块，确保管理面板可查
+        if admin_service:
+            try:
+                _now = datetime.now(timezone.utc).isoformat()
+                admin_service.log_request(
+                    model=request.model,
+                    actual_model_id=request.model,
+                    account_id="unknown",
+                    account_name="unknown",
+                    status_code=500,
+                    input_tokens=0,
+                    output_tokens=0,
+                    is_stream=request.stream,
+                    error_message=f"ValueError: {e}",
+                    raw_request=json.dumps(request.model_dump(), ensure_ascii=False),
+                    raw_response="",
+                    request_start=_now,
+                    first_response=None,
+                    end_time=_now,
+                    cached_tokens=0,
+                    prompt_partial_cached=0,
+                    client_key_name=client_key_name,
+                )
+            except Exception as le:
+                logger.error(f"Failed to log error request: {le}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={
@@ -824,7 +1043,37 @@ async def chat_completions(
             }
         )
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        # 非 HTTP 异常（如 httpx.ReadTimeout、连接错误等），记录完整 traceback 以便排障
+        error_type = type(e).__name__
+        logger.error(
+            f"Non-HTTP error ({error_type}) during request for model={request.model}: {e}",
+            exc_info=True,
+        )
+        # 记录到请求日志模块，确保管理面板可查
+        if admin_service:
+            try:
+                _now = datetime.now(timezone.utc).isoformat()
+                admin_service.log_request(
+                    model=request.model,
+                    actual_model_id=request.model,
+                    account_id="unknown",
+                    account_name="unknown",
+                    status_code=500,
+                    input_tokens=0,
+                    output_tokens=0,
+                    is_stream=request.stream,
+                    error_message=f"Non-HTTP error ({error_type}): {e}",
+                    raw_request=json.dumps(request.model_dump(), ensure_ascii=False),
+                    raw_response="",
+                    request_start=_now,
+                    first_response=None,
+                    end_time=_now,
+                    cached_tokens=0,
+                    prompt_partial_cached=0,
+                    client_key_name=client_key_name,
+                )
+            except Exception as le:
+                logger.error(f"Failed to log error request: {le}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={

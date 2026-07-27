@@ -600,8 +600,8 @@ class AdminService:
             raw_response=raw_response,
             request_start=request_start, first_response=first_response, end_time=end_time,
             cached_tokens=cached_tokens, prompt_partial_cached=prompt_partial_cached,
-client_key_name=client_key_name,
-                response_headers=response_headers,
+            client_key_name=client_key_name,
+            response_headers=response_headers,
             )
 
         # Update minute-level aggregated stats (independent of raw log retention)
@@ -984,7 +984,7 @@ client_key_name=client_key_name,
         import time
         from datetime import datetime, timedelta, timezone
 
-        seconds = max(60, min(int(seconds or 300), 86400))
+        seconds = max(60, min(int(seconds or 300), 2592000))
         bucket = self._WINDOW_BUCKET_MAP.get(seconds, max(1, seconds // 30))
 
         fmt = "%Y-%m-%d %H:%M:%S"
@@ -1001,13 +1001,20 @@ client_key_name=client_key_name,
         total = cur["total"] or 0
         success = cur["success"] or 0
         total_tokens = cur["total_tokens"] or 0
+        input_tokens = cur["input_tokens"] or 0
+        output_tokens = cur["output_tokens"] or 0
+        cached_tokens = cur["cached_tokens"] or 0
         avg_latency = cur["avg_latency_ms"]
         success_rate = round(success / total * 100, 1) if total else None
+        cache_hit_rate = round(cached_tokens / input_tokens * 100, 1) if input_tokens else 0.0
 
         prev_total = prev["total"] or 0
         prev_tokens = prev["total_tokens"] or 0
+        prev_cached = prev["cached_tokens"] or 0
+        prev_input = prev["input_tokens"] or 0
         prev_rate = round((prev["success"] or 0) / prev_total * 100, 1) if prev_total else None
         prev_avg = prev["avg_latency_ms"]
+        prev_hit_rate = round(prev_cached / prev_input * 100, 1) if prev_input else 0.0
 
         def pct_delta(cur_v, prev_v):
             if cur_v is None or not prev_v:
@@ -1022,14 +1029,27 @@ client_key_name=client_key_name,
                 if success_rate is not None and prev_rate is not None else None
             ),
             "avg_latency_pct": pct_delta(avg_latency, prev_avg),
+            "cached_tokens_pct": pct_delta(cached_tokens, prev_cached),
+            "cache_hit_rate_pp": (
+                round(cache_hit_rate - prev_hit_rate, 1)
+                if prev_input else None
+            ),
         }
 
         # Bucketed series: SQL returns only non-empty epoch-aligned buckets;
         # fill the full grid so the chart always renders a continuous axis.
+        # 日级（>=86400s）桶按上海本地日历对齐到当天 00:00，与 repos 内
+        # strftime('%Y-%m-%d 00:00:00', bucket) 的截断保持一致；子级桶用 epoch 整除即可
+        # （粒度均整除 8h，上海界与 UTC 界重合）。
         start_epoch = int(start_dt.timestamp())
         end_epoch = int(now.timestamp())
-        first_epoch = (start_epoch // bucket) * bucket
-        n_buckets = (end_epoch // bucket - start_epoch // bucket) + 1
+        if bucket >= 86400:
+            first_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            first_epoch = int(first_dt.timestamp())
+            n_buckets = (end_epoch - first_epoch) // bucket + 1
+        else:
+            first_epoch = (start_epoch // bucket) * bucket
+            n_buckets = (end_epoch // bucket - start_epoch // bucket) + 1
 
         series = []
         for i in range(n_buckets):
@@ -1040,6 +1060,9 @@ client_key_name=client_key_name,
                 "total": 0,
                 "success": 0,
                 "total_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cached_tokens": 0,
                 "avg_latency_ms": None,
             })
         by_epoch = {cell["_epoch"]: cell for cell in series}
@@ -1051,6 +1074,9 @@ client_key_name=client_key_name,
                 cell["total"] = row["total"] or 0
                 cell["success"] = row["success"] or 0
                 cell["total_tokens"] = row["total_tokens"] or 0
+                cell["input_tokens"] = row["input_tokens"] or 0
+                cell["output_tokens"] = row["output_tokens"] or 0
+                cell["cached_tokens"] = row["cached_tokens"] or 0
                 cell["avg_latency_ms"] = row["avg_latency_ms"]
 
         for cell in series:
@@ -1077,12 +1103,20 @@ client_key_name=client_key_name,
         for row in self.log_repo.query_stats_per_model(start, end):
             m_total = row["total"] or 0
             m_success = row["success"] or 0
+            m_input = row["input_tokens"] or 0
+            m_output = row["output_tokens"] or 0
+            m_cached = row["cached_tokens"] or 0
             models.append({
                 "model": row["model"],
                 "account_id": row.get("account_id"),
                 "total": m_total,
                 "success": m_success,
                 "success_rate": round(m_success / m_total * 100, 1) if m_total else None,
+                "total_tokens": m_input + m_output,
+                "input_tokens": m_input,
+                "output_tokens": m_output,
+                "cached_tokens": m_cached,
+                "cache_hit_rate": round(m_cached / m_input * 100, 1) if m_input else 0.0,
             })
 
         return {
@@ -1095,7 +1129,11 @@ client_key_name=client_key_name,
                 "success": success,
                 "failed": total - success,
                 "total_tokens": total_tokens,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cached_tokens": cached_tokens,
                 "success_rate": success_rate,
+                "cache_hit_rate": cache_hit_rate,
                 "qps": round(total / seconds, 1),
                 "avg_latency_ms": round(avg_latency) if avg_latency is not None else None,
                 "delta": delta,

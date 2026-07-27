@@ -80,9 +80,11 @@
         </FormField>
         <FormField label="API Key">
           <div class="relative">
-            <input :type="showNewApiKey ? 'text' : 'password'" v-model="newSupplier.api_key"
+            <input type="text" v-model="newSupplier.api_key"
               placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              class="form-input pr-10 font-mono" @keyup.enter="addSupplier" autocomplete="new-password">
+              class="form-input pr-10 font-mono" @keyup.enter="addSupplier"
+              autocomplete="off"
+              :style="showNewApiKey ? null : { '-webkit-text-security': 'disc', 'text-security': 'disc' }">
             <button type="button" @click="showNewApiKey = !showNewApiKey"
               class="absolute right-3 top-1/2 -translate-y-1/2 text-ls-muted hover:text-ls-text p-1" title="显示/隐藏">
               <CIcon v-if="showNewApiKey" name="eye" />
@@ -119,9 +121,11 @@
         </FormField>
         <FormField label="API Key">
           <div class="relative">
-            <input :type="showApiKey ? 'text' : 'password'" v-model="editingSupplier.api_key"
+            <input type="text" v-model="editingSupplier.api_key"
               placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              class="form-input pr-10 font-mono" @keyup.enter="saveEdit" autocomplete="new-password">
+              class="form-input pr-10 font-mono" @keyup.enter="saveEdit"
+              autocomplete="off"
+              :style="showApiKey ? null : { '-webkit-text-security': 'disc', 'text-security': 'disc' }">
             <button type="button" @click="showApiKey = !showApiKey"
               class="absolute right-3 top-1/2 -translate-y-1/2 text-ls-muted hover:text-ls-text p-1" title="显示/隐藏">
               <CIcon v-if="showApiKey" name="eye" />

@@ -72,7 +72,8 @@ def test_empty_database_returns_flat_grid(database):
     assert kpi["total"] == 0 and kpi["failed"] == 0 and kpi["total_tokens"] == 0
     assert kpi["success_rate"] is None and kpi["avg_latency_ms"] is None
     assert kpi["delta"] == {"total_pct": None, "total_tokens_pct": None, "success_rate_pp": None,
-                            "avg_latency_pct": None}
+                            "avg_latency_pct": None, "cached_tokens_pct": None,
+                            "cache_hit_rate_pp": None}
     assert out["status_codes"] == {}
     assert out["models"] == []
 
@@ -161,14 +162,38 @@ def test_window_and_bucket_clamping(database):
     svc = _make_service(database)
 
     assert svc.get_window_stats(10)["window_seconds"] == 60
-    assert svc.get_window_stats(10 ** 6)["window_seconds"] == 86400
+    assert svc.get_window_stats(10 ** 8)["window_seconds"] == 2592000
     assert svc.get_window_stats(300)["bucket_seconds"] == 10
     assert svc.get_window_stats(3600)["bucket_seconds"] == 120
     assert svc.get_window_stats(86400)["bucket_seconds"] == 3600
+    assert svc.get_window_stats(604800)["bucket_seconds"] == 86400
+    assert svc.get_window_stats(2592000)["bucket_seconds"] == 86400
 
     out = svc.get_window_stats(3600)
     n = len(out["series"])
     assert 30 <= n <= 31  # 3600 / 120
+
+
+def test_daily_bucket_aligns_to_shanghai_midnight(database):
+    """Regression for the 7d/30d blank-chart bug: day-level buckets must align
+    to Shanghai-local midnight (not UTC midnight shifted 8h). Otherwise the
+    by_epoch mapping finds no grid cell and the whole series is zero."""
+    svc = _make_service(database)
+    now = datetime.now(TZ).replace(microsecond=0)
+    ts = (now - timedelta(days=3)).replace(hour=14, minute=35, second=0,
+                                           microsecond=0)
+    _insert(database, ts, input_tokens=400, output_tokens=100)
+
+    out = svc.get_window_stats(604800)  # 7-day window -> daily bucket
+    assert out["bucket_seconds"] == 86400
+
+    # Row must land in the series cell whose 't' is the Shanghai midnight of ts.
+    expected_t = ts.replace(hour=0, minute=0, second=0, microsecond=0).strftime(FMT)
+    cell = next((c for c in out["series"] if c["t"] == expected_t), None)
+    assert cell is not None, f"expected day bucket {expected_t} in series"
+    assert cell["total"] == 1
+    assert cell["total_tokens"] == 500
+    assert sum(1 for c in out["series"] if c["total"] > 0) == 1
 
 
 def test_models_grouped_by_actual_model(database):

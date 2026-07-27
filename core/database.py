@@ -337,7 +337,7 @@ class DatabaseManager:
         defaults = [
             ("log_level", "INFO", "日志级别: DEBUG/INFO/WARNING/ERROR"),
             ("load_balancer_strategy", "round_robin", "负载均衡策略: round_robin/least_conn/random"),
-            ("request_timeout_ms", "30000", "请求超时毫秒数"),
+            ("request_timeout_ms", "3600000", "读取超时(ReadTimeout)毫秒数：等待上游开始响应的最长时限"),
             ("retry_count", "0", "失败重试次数"),
             ("auto_disable_on_quota", "true", "配额耗尽时自动禁用供应商"),
             ("auto_reset_daily", "true", "每日自动重置配额"),
@@ -354,6 +354,13 @@ class DatabaseManager:
                         "INSERT INTO system_config (key, value, description) VALUES (?, ?, ?)",
                         (key, value, desc),
                     )
+            # One-time upgrade: the legacy default read timeout was 30000 ms (30s),
+            # which is too short for upstream model generation. Bump any row still
+            # carrying that legacy default to 1 hour (3600000 ms).
+            cursor.execute(
+                "UPDATE system_config SET value = ? WHERE key = ? AND value = ?",
+                ("3600000", "request_timeout_ms", "30000"),
+            )
             logger.info(f"Seeded {len(defaults) - len(existing)} default config values")
 
     def get_today_date(self) -> str:

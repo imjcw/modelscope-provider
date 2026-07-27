@@ -575,7 +575,7 @@ def get_stats(days: int = 30, service=Depends(get_admin_service)):
 
 @router.get("/stats/window")
 def get_window_stats(seconds: int = 300, service=Depends(get_admin_service)):
-    """Windowed stats for the dashboard live panel. seconds ∈ [60, 86400] (clamped)."""
+    """Windowed stats for the dashboard live panel. seconds ∈ [60, 2592000] (clamped)."""
     return service.get_window_stats(seconds)
 
 

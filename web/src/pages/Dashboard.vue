@@ -69,7 +69,19 @@
           </StatCard>
         </div>
 
-        <!-- ── 图表行：QPS 趋势 + 请求结果分布 ── -->
+        <!-- 图表行 1：Token 堆叠柱状图（Japanese Fresh · 日系清新）+ 缓存命中率环形图 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <TokenTrendBarChart class="lg:col-span-2 self-start"
+            :series="series" :window-seconds="windowSeconds" :window-label="windowLabel" />
+
+          <CacheHitRateDonut
+            :input-tokens="kpi.input_tokens || 0"
+            :cached-tokens="kpi.cached_tokens || 0"
+            :output-tokens="kpi.output_tokens || 0"
+          />
+        </div>
+
+        <!-- ── 图表行 2：QPS 趋势 + 请求结果分布 ── -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div class="lg:col-span-2 self-start bg-ls-card rounded-lg border border-ls-border p-5 neon-glow">
             <div class="flex items-center justify-between mb-4">
@@ -113,6 +125,8 @@ import ProgressBar from '@/components/ProgressBar.vue'
 import KpiSparkline from '@/components/dashboard/KpiSparkline.vue'
 import QpsTrendChart from '@/components/dashboard/QpsTrendChart.vue'
 import StatusDonut from '@/components/dashboard/StatusDonut.vue'
+import TokenTrendBarChart from '@/components/dashboard/TokenTrendBarChart.vue'
+import CacheHitRateDonut from '@/components/dashboard/CacheHitRateDonut.vue'
 import ModelStatusTable from '@/components/dashboard/ModelStatusTable.vue'
 import RateLimitCard from '@/components/dashboard/RateLimitCard.vue'
 import RecentAlerts from '@/components/dashboard/RecentAlerts.vue'
