@@ -24,7 +24,7 @@
               </svg>
             </template>
             <template #footer>
-              <KpiSparkline :values="series.map(s => s.total)" stroke="#00ffff" />
+              <KpiSparkline :values="series.map(s => s.total)" stroke="var(--chart-cyan)" />
             </template>
           </StatCard>
 
@@ -51,7 +51,7 @@
               </svg>
             </template>
             <template #footer>
-              <KpiSparkline :values="series.map(s => s.total_tokens || 0)" stroke="#eab308" />
+              <KpiSparkline :values="series.map(s => s.total_tokens || 0)" stroke="var(--chart-yellow)" />
             </template>
           </StatCard>
 
@@ -64,7 +64,7 @@
               </svg>
             </template>
             <template #footer>
-              <KpiSparkline :values="series.map(s => s.avg_latency_ms)" stroke="#3b82f6" />
+              <KpiSparkline :values="series.map(s => s.avg_latency_ms)" stroke="var(--chart-blue)" />
             </template>
           </StatCard>
         </div>

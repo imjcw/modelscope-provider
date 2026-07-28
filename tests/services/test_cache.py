@@ -1,4 +1,5 @@
 """Tests for the in-memory cache layer (ConfigCache + RateLimitCache)."""
+import json
 import time
 from unittest.mock import MagicMock, Mock, patch
 
@@ -11,6 +12,7 @@ def _mock_db():
     """Create a mock DatabaseManager with a working context manager chain."""
     db = Mock()
     conn_mock = MagicMock()  # MagicMock supports __enter__ / __exit__
+    conn_mock.__enter__.return_value = conn_mock  # `with` yields the same mock
     conn_mock.execute.return_value.fetchall.return_value = []
     db.get_connection.return_value = conn_mock
     return db
@@ -76,34 +78,49 @@ class TestConfigCache:
 
 
 class TestRateLimitWindow:
-    """RateLimitWindow tracks the per-window state."""
+    """RateLimitWindow tracks the per-sliding-window state."""
 
-    def test_is_expired_when_window_elapsed(self):
-        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5,
-                            window_start=time.time() - 20, request_count=3)
-        assert w.is_expired is True
-
-    def test_not_expired_within_window(self):
-        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5,
-                            window_start=time.time() - 5, request_count=3)
-        assert w.is_expired is False
-
-    def test_is_exhausted_when_at_limit(self):
-        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5,
-                            window_start=time.time(), request_count=5)
-        assert w.is_exhausted is True
-
-    def test_not_exhausted_below_limit(self):
-        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5,
-                            window_start=time.time(), request_count=3)
+    def test_count_reflects_timestamps_within_window(self):
+        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5)
+        now = time.time()
+        w.timestamps.append(now - 1)
+        w.timestamps.append(now - 2)
+        assert w.count == 2
         assert w.is_exhausted is False
 
-    def test_reset_clears_count(self):
-        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5,
-                            window_start=time.time() - 20, request_count=5)
-        w.reset()
-        assert w.request_count == 0
-        assert w.is_expired is False
+    def test_purge_drops_old_timestamps(self):
+        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5)
+        now = time.time()
+        w.timestamps.append(now - 100)  # outside 10s window
+        w.timestamps.append(now - 1)    # inside
+        assert w.count == 1
+        # only the in-window timestamp remains
+        assert len(w.timestamps) == 1
+
+    def test_is_exhausted_when_at_limit(self):
+        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5)
+        now = time.time()
+        for _ in range(5):
+            w.timestamps.append(now)
+        assert w.is_exhausted is True
+        assert w.count == 5
+
+    def test_not_exhausted_below_limit(self):
+        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5)
+        now = time.time()
+        w.timestamps.append(now)
+        assert w.is_exhausted is False
+
+    def test_add_records_request_and_returns_count(self):
+        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=5)
+        n = w.add()
+        assert n == 1
+        assert w.count == 1
+
+    def test_window_start_is_now_minus_window_seconds(self):
+        w = RateLimitWindow("a", "m", window_seconds=600, max_requests=5)
+        # window_start should be ~600s before now
+        assert abs((time.time() - w.window_start) - 600) < 2
 
 
 class TestRateLimitCacheCheck:
@@ -123,7 +140,7 @@ class TestRateLimitCacheCheck:
         cache.check("acc-1", "model-1", 3600, 100)
         assert cache.check("acc-1", "model-1", 3600, 100) is True
         w = cache._windows[("acc-1", "model-1")]
-        assert w.request_count == 2
+        assert w.count == 2
 
     def test_quota_exhausted_returns_false(self):
         db = _mock_db()
@@ -135,17 +152,27 @@ class TestRateLimitCacheCheck:
         assert cache.check("acc-1", "m1", 3600, 3) is True
         assert cache.check("acc-1", "m1", 3600, 3) is False
 
-    def test_expired_window_resets(self):
+    def test_stale_timestamps_are_purged(self):
+        w = RateLimitWindow("a", "m", window_seconds=10, max_requests=100)
+        now = time.time()
+        # A stale timestamp at the head, plus a recent one at the tail.
+        w.timestamps.append(now - 100)  # outside the 10s window
+        w.timestamps.append(now - 1)    # inside
+        assert w.count == 1
+        assert len(w.timestamps) == 1
+
+    def test_check_allows_when_only_stale_timestamps_present(self):
         db = _mock_db()
         db.get_connection.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
         cache = RateLimitCache(db)
-        # Create a window, then manually expire it
-        cache.check("acc-1", "m1", 1, 100)  # 1-second window
+        cache.check("acc-1", "m1", 1, 100)
         w = cache._windows[("acc-1", "m1")]
-        w.window_start = time.time() - 10  # expired
-        # Should reset and allow
+        # Replace the in-window timestamp with only a stale one at the front.
+        w.timestamps.clear()
+        w.timestamps.append(time.time() - 100)
+        # The stale entry is purged on the next check; the new request is allowed.
         assert cache.check("acc-1", "m1", 1, 100) is True
-        assert w.request_count == 1  # reset to 1 (counts the new request)
+        assert w.count == 1
 
     def test_different_accounts_independent(self):
         db = _mock_db()
@@ -215,6 +242,7 @@ class TestRateLimitCacheGetQuotaInfo:
         info = cache.get_quota_info("acc-1", "m1")
         assert info["quota_remaining"] == 0  # No window, no max_requests known
         assert info["quota_limit"] == 0
+        assert info["request_count"] is None  # no in-memory window -> fall back to DB
 
     def test_existing_window_returns_remaining(self):
         db = _mock_db()
@@ -234,12 +262,14 @@ class TestRateLimitCacheLoadAll:
         db = _mock_db()
         fake_rows = [
             {"account_id": "acc-1", "model_name": "m1",
-             "window_start": "2026-07-26T10:00:00", "request_count": 5},
+             "window_start": "2026-07-26T10:00:00", "request_count": 5,
+             "timestamps": json.dumps([time.time()] * 5)},
             {"account_id": "acc-2", "model_name": "m2",
-             "window_start": "2026-07-26T10:00:00", "request_count": 3},
+             "window_start": "2026-07-26T10:00:00", "request_count": 3,
+             "timestamps": json.dumps([time.time()] * 3)},
         ]
         db.get_connection.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = fake_rows
         cache = RateLimitCache(db)
         assert len(cache._windows) == 2
-        assert cache._windows[("acc-1", "m1")].request_count == 5
-        assert cache._windows[("acc-2", "m2")].request_count == 3
+        assert cache._windows[("acc-1", "m1")].count == 5
+        assert cache._windows[("acc-2", "m2")].count == 3

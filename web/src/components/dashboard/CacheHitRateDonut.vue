@@ -56,12 +56,12 @@ function fmtToken(v) {
           <circle cx="60" cy="60" r="48" fill="none" stroke="var(--ls-elevated)" stroke-width="14" />
           <!-- 未命中弧（暗淡蓝） -->
           <circle v-if="missLen > 0"
-            cx="60" cy="60" r="48" fill="none" stroke="#60a5fa" stroke-width="14"
+            cx="60" cy="60" r="48" fill="none" :style="{ stroke: 'var(--chart-blue)' }" stroke-width="14"
             :stroke-dasharray="`${missLen.toFixed(1)} ${CIRCUMFERENCE}`" stroke-dashoffset="0"
             transform="rotate(-90 60 60)" stroke-linecap="butt" stroke-opacity="0.35" />
           <!-- 缓存命中弧（绿色，覆盖在 top） -->
           <circle v-if="hitLen > 0"
-            cx="60" cy="60" r="48" fill="none" stroke="#22c55e" stroke-width="14"
+            cx="60" cy="60" r="48" fill="none" :style="{ stroke: 'var(--chart-green)' }" stroke-width="14"
             :stroke-dasharray="`${hitLen.toFixed(1)} ${CIRCUMFERENCE}`"
             :stroke-dashoffset="String(-CIRCUMFERENCE + hitLen.value)"
             transform="rotate(-90 60 60)" stroke-linecap="round" />
@@ -84,14 +84,14 @@ function fmtToken(v) {
       </div>
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded bg-blue-400 opacity-35"></span>
+          <span class="w-2.5 h-2.5 rounded" :style="{ background: 'var(--chart-blue)', opacity: 0.35 }"></span>
           <span class="text-xs text-ls-dim">未命中</span>
         </div>
         <span class="text-sm font-mono text-ls-text">{{ fmtToken(missTokens) }}</span>
       </div>
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded" style="background:#eab308"></span>
+          <span class="w-2.5 h-2.5 rounded" :style="{ background: 'var(--chart-amber)' }"></span>
           <span class="text-xs text-ls-dim">输出 Token</span>
         </div>
         <span class="text-sm font-mono text-ls-text">{{ fmtToken(outputTokens) }}</span>

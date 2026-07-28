@@ -53,6 +53,54 @@ def test_admin_quota_endpoint_present(client):
     assert "quota_status" in data
 
 
+def test_list_models_endpoint_present(client, monkeypatch):
+    """OpenAI-compatible /api/v1/models returns a list object."""
+    from provider.api import routes as routes_mod
+
+    fake_repo = Mock()
+    fake_repo.find_all.return_value = [
+        {"alias_name": "hy3", "actual_model_id": "hy3-actual", "description": "", "status": "active"},
+        {"alias_name": "qwen2.5", "actual_model_id": "qwen-actual", "description": "", "status": "active"},
+        {"alias_name": "disabled-model", "actual_model_id": "x", "description": "", "status": "disabled"},
+    ]
+    fake_admin = Mock()
+    fake_admin.mapping_repo = fake_repo
+    monkeypatch.setattr(routes_mod, "get_admin_service", lambda req: fake_admin)
+
+    response = client.get("/api/v1/models")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["object"] == "list"
+    assert isinstance(data["data"], list)
+    for model in data["data"]:
+        assert "id" in model
+        assert model["object"] == "model"
+        assert model["owned_by"] == "provider"
+
+
+def test_list_models_returns_configured_aliases(client, monkeypatch):
+    """Listed model ids correspond to configured mapping aliases (dicts)."""
+    from provider.api import routes as routes_mod
+
+    fake_repo = Mock()
+    fake_repo.find_all.return_value = [
+        {"alias_name": "hy3", "actual_model_id": "hy3-actual", "description": "", "status": "active"},
+        {"alias_name": "qwen2.5", "actual_model_id": "qwen-actual", "description": "", "status": "active"},
+        {"alias_name": "disabled-model", "actual_model_id": "x", "description": "", "status": "disabled"},
+    ]
+    fake_admin = Mock()
+    fake_admin.mapping_repo = fake_repo
+    monkeypatch.setattr(routes_mod, "get_admin_service", lambda req: fake_admin)
+
+    response = client.get("/api/v1/models")
+    assert response.status_code == 200
+    models = response.json()["data"]
+    ids = [m["id"] for m in models]
+    # disabled models must be excluded; active aliases are listed
+    assert ids == ["hy3", "qwen2.5"]
+    assert all(isinstance(i, str) and i for i in ids)
+
+
 # ---------------------------------------------------------------------------
 # _extract_cache_usage unit tests
 # ---------------------------------------------------------------------------

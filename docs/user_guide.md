@@ -162,7 +162,43 @@ for chunk in client.chat.completions.create(
         print(chunk.choices[0].delta.content, end="")
 ```
 
-### 2.2 请求流程说明
+### 2.2 模型列表
+
+**端点**：`GET /api/v1/models`
+
+返回当前代理支持的所有模型别名（即管理后台中配置的 `model_mappings` 映射项），格式兼容 OpenAI `/v1/models`。
+
+**使用示例（curl）**：
+
+```bash
+curl http://127.0.0.1:8000/api/v1/models
+```
+
+**响应示例**：
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "hy3",
+      "object": "model",
+      "created": 1753670400,
+      "owned_by": "provider"
+    },
+    {
+      "id": "qwen2.5",
+      "object": "model",
+      "created": 1753670400,
+      "owned_by": "provider"
+    }
+  ]
+}
+```
+
+> **说明**：返回的 `id` 即为可在 `POST /api/v1/chat/completions` 中作为 `model` 字段使用的别名。该接口同样支持客户端 API Key 鉴权（`Authorization: Bearer <CLIENT_API_KEY>` 或 `X-API-Key`），未携带 Key 时按向后兼容逻辑放行。
+
+### 2.3 请求流程说明
 
 ```
 客户端请求 → 负载均衡选择供应商 → 别名解析 → 转发到 ModelScope → 响应转 OpenAI 格式 → 更新配额

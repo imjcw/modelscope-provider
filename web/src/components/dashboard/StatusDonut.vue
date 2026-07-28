@@ -52,10 +52,10 @@ const chips = computed(() => {
       <div class="relative">
         <svg class="w-32 h-32" viewBox="0 0 120 120">
           <circle cx="60" cy="60" r="48" fill="none" stroke="var(--ls-elevated)" stroke-width="14" />
-          <circle v-if="success > 0" cx="60" cy="60" r="48" fill="none" stroke="#22c55e" stroke-width="14"
+          <circle v-if="success > 0" cx="60" cy="60" r="48" fill="none" :style="{ stroke: 'var(--chart-green)' }" stroke-width="14"
             :stroke-dasharray="`${succLen} ${C}`" stroke-dashoffset="0"
             transform="rotate(-90 60 60)" stroke-linecap="round" />
-          <circle v-if="failed > 0" cx="60" cy="60" r="48" fill="none" stroke="#ef4444" stroke-width="14"
+          <circle v-if="failed > 0" cx="60" cy="60" r="48" fill="none" :style="{ stroke: 'var(--chart-red)' }" stroke-width="14"
             :stroke-dasharray="`${failLen} ${C}`" :stroke-dashoffset="String(-succLen)"
             transform="rotate(-90 60 60)" stroke-linecap="round" />
         </svg>

@@ -20,7 +20,7 @@ class TestFreshInstall:
         migrator.run()
 
         status = migrator.status()
-        assert len(status) == 14
+        assert len(status) == 15
         assert all(s["applied"] for s in status)
 
     def test_idempotent_on_fresh_install(self, db):
@@ -30,7 +30,7 @@ class TestFreshInstall:
         migrator.run()  # second run no-op
 
         status = migrator.status()
-        assert len(status) == 14
+        assert len(status) == 15
         assert all(s["applied"] for s in status)
 
 
@@ -92,7 +92,7 @@ class TestOldDatabaseUpgrade:
         migrator.run()
 
         status = migrator.status()
-        assert len(status) == 14
+        assert len(status) == 15
         assert all(s["applied"] for s in status)
 
         # Verify the schema was actually upgraded
@@ -113,6 +113,6 @@ class TestOldDatabaseUpgrade:
 class TestMigrationCount:
     def test_thirteen_plus_one_migrations_registered(self):
         migrations = get_all_migrations()
-        assert len(migrations) == 14
+        assert len(migrations) == 15
         versions = [m.version for m in migrations]
-        assert versions == list(range(1, 15))
+        assert versions == list(range(1, 16))

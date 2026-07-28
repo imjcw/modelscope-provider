@@ -34,8 +34,11 @@ const rows = computed(() => {
     if (!q.model_name || seen.has(key)) continue
     seen.add(key)
     const st = statsByModel.get(key)
-    const limit = q.quota_limit || 0
-    const remaining = q.quota_remaining || 0
+    // 限流列优先用“按模型窗口”计数（window_quota_*）；非窗口策略退回 token 配额（quota_*）
+    const winLimit = q.window_quota_limit
+    const winRem = q.window_quota_remaining
+    const limit = (winLimit != null ? winLimit : q.quota_limit) || 0
+    const remaining = (winLimit != null ? winRem : q.quota_remaining) || 0
     const usedPct = limit > 0 ? Math.round(((limit - remaining) / limit) * 100) : null
     out.push({
       model: q.model_name,
@@ -90,13 +93,13 @@ const fmtWindow = (r) => {
   // 展示“已用/上限”（使用数），而不是“剩余/上限”，避免把剩余数误认为已用数。
   const used = max != null && rem != null ? Math.max(0, max - rem) : null
   const sub =
-    used != null ? `已用 ${used}/${max} 每窗`
-    : max != null ? `${max} 每窗`
+    used != null ? `已用 ${used}/${max} 滑窗`
+    : max != null ? `${max} 滑窗`
     : ''
   if (st === 'fixed_window_per_model')
     return { label: `按模型 ${val}${unit}`, sub, badge: 'accent', custom: !!r.has_custom_window }
   if (st === 'fixed_window' || st === 'sensetime')
-    return { label: `固定窗口 ${val}${unit}`, sub, badge: 'accent', custom: false }
+    return { label: `滑动窗口 ${val}${unit}`, sub, badge: 'accent', custom: false }
   return { label: '被动', sub: 'header 驱动', badge: 'muted', custom: false }
 }
 const WINDOW_BADGE = {
@@ -150,14 +153,6 @@ const WINDOW_BADGE = {
                 {{ STATUS[row.status].label }}
               </span>
             </td>
-            <td class="text-right hidden sm:table-cell">
-              <span class="text-sm font-mono text-ls-text">{{ row.calls.toLocaleString() }}</span>
-            </td>
-            <td class="text-right hidden md:table-cell">
-              <span class="text-sm font-mono" :class="rateClass(row.successRate)">
-                {{ row.successRate === null || row.successRate === undefined ? '—' : row.successRate + '%' }}
-              </span>
-            </td>
             <td class="text-center">
               <div class="flex items-center justify-center gap-1.5 mb-1">
                 <span class="text-xs px-2 py-0.5 rounded-full border font-medium"
@@ -170,6 +165,14 @@ const WINDOW_BADGE = {
                 <ProgressBar :pct="row.usedPct" width="w-20" height="h-1.5" :bar-class="barClass(row.usedPct)" />
                 <span class="text-xs mt-1 inline-block" :class="pctLabelClass(row.usedPct)">{{ row.usedPct }}%</span>
               </div>
+            </td>
+            <td class="text-right hidden sm:table-cell">
+              <span class="text-sm font-mono text-ls-text">{{ row.calls.toLocaleString() }}</span>
+            </td>
+            <td class="text-right hidden md:table-cell">
+              <span class="text-sm font-mono" :class="rateClass(row.successRate)">
+                {{ row.successRate === null || row.successRate === undefined ? '—' : row.successRate + '%' }}
+              </span>
             </td>
           </tr>
           <tr v-if="!rows.length">

@@ -10,25 +10,48 @@ html, body, #app {
 
 /* ── Design tokens — Cyberpunk Neon (Dark default) ──
    精确对齐 demo/cyberpunk-dark.html 的 :root 变量。
-   Tailwind 的 ls-* 颜色在 tailwind.config.js 里通过 color-mix
-   引用这些变量，alpha 修饰符（border-ls-border/50 等）自动生效。 */
+   Tailwind 的 ls-* 颜色在 tailwind.config.js 里通过 rgb(var(--x-rgb)/<alpha>)
+   引用这些 RGB 三元组，alpha 修饰符（border-ls-border/50 等）自动生效。 */
 :root {
+  /* RGB 三元组（Tailwind ls-* 颜色的单一数据源，供 rgb(var()/alpha) 使用） */
+  --ls-bg-rgb: 10 10 15;          /* #0a0a0f */
+  --ls-shell-rgb: 8 8 16;         /* #080810 */
+  --ls-card-rgb: 19 19 26;        /* #13131a */
+  --ls-elevated-rgb: 13 13 26;    /* #0d0d1a */
+  --ls-border-rgb: 31 31 46;      /* #1f1f2e */
+  --ls-borderLight-rgb: 42 42 62; /* #2a2a3e */
+  --ls-accent-rgb: 0 255 255;     /* #00ffff */
+  --ls-accentHover-rgb: 0 180 216;/* #00b4d8 */
+  --ls-fuchsia-rgb: 255 0 255;    /* #ff00ff */
+  --text-rgb: 196 196 212;        /* #c4c4d4 */
+  --text-dim-rgb: 138 138 166;    /* #8a8aa6 */
+  --text-muted-rgb: 90 90 114;    /* #5a5a72 */
   /* 背景层级：demo body #0a0a0f，sidebar/顶栏 #080810（--ls-shell） */
-  --ls-bg: #0a0a0f;
-  --ls-shell: #080810;
-  --ls-card: #13131a;
-  --ls-elevated: #0d0d1a;
+  --ls-bg: rgb(var(--ls-bg-rgb));
+  --ls-shell: rgb(var(--ls-shell-rgb));
+  --ls-card: rgb(var(--ls-card-rgb));
+  --ls-elevated: rgb(var(--ls-elevated-rgb));
   /* 边框：--ls-borderLight 对应 demo 的 --border-light */
-  --ls-border: #1f1f2e;
-  --ls-borderLight: #2a2a3e;
+  --ls-border: rgb(var(--ls-border-rgb));
+  --ls-borderLight: rgb(var(--ls-borderLight-rgb));
   /* 霓虹强调 */
-  --ls-accent: #00ffff;
-  --ls-accentHover: #00b4d8;
-  --ls-fuchsia: #ff00ff;
+  --ls-accent: rgb(var(--ls-accent-rgb));
+  --ls-accentHover: rgb(var(--ls-accentHover-rgb));
+  --ls-fuchsia: rgb(var(--ls-fuchsia-rgb));
+  /* 图表系列色（随主题切换，深浅两套） */
+  --chart-cyan: #2dd4d4;
+  --chart-blue: #60a5fa;
+  --chart-green: #3ecf75;
+  --chart-yellow: #facc15;
+  --chart-amber: #fbbf24;
+  --chart-red: #f38ba8;
   /* 文字层级 */
-  --text: #e0e0e0;
-  --text-dim: #8888aa;
-  --text-muted: #555577;
+  /* 暗色下 --text 取柔和浅灰而非纯白：浅色主题里整页文字本是黑灰
+     (#1a1a2e)，切到暗色若用纯白会整体“发白刺眼”。改为浅灰后，
+     原本的黑灰字在暗色下保持“灰”的层次，而非变成白色。 */
+  --text: rgb(var(--text-rgb));
+  --text-dim: rgb(var(--text-dim-rgb));
+  --text-muted: rgb(var(--text-muted-rgb));
   /* 旧 token 名（main.css 旧代码引用） */
   --bg: #0a0a0f;
   --surface: #13131a;
@@ -48,18 +71,38 @@ html, body, #app {
 
 /* ── 浅色：精确对齐 demo/cyberpunk-light.html ── */
 [data-theme="light"] {
-  --ls-bg: #ffffff;
-  --ls-shell: #ffffff;
-  --ls-card: #ffffff;
-  --ls-elevated: #f5f5f8;
-  --ls-border: #d0d0e0;
-  --ls-borderLight: #e0e0ea;
-  --ls-accent: #00b4d8;
-  --ls-accentHover: #0090a8;
-  --ls-fuchsia: #d600d6;
-  --text: #1a1a2e;
-  --text-dim: #5a5a7a;
-  --text-muted: #8888aa;
+  /* RGB 三元组（浅色主题） */
+  --ls-bg-rgb: 255 255 255;        /* #ffffff */
+  --ls-shell-rgb: 255 255 255;     /* #ffffff */
+  --ls-card-rgb: 255 255 255;      /* #ffffff */
+  --ls-elevated-rgb: 245 245 248;  /* #f5f5f8 */
+  --ls-border-rgb: 208 208 224;    /* #d0d0e0 */
+  --ls-borderLight-rgb: 224 224 234;/* #e0e0ea */
+  --ls-accent-rgb: 0 180 216;      /* #00b4d8 */
+  --ls-accentHover-rgb: 0 144 168; /* #0090a8 */
+  --ls-fuchsia-rgb: 214 0 214;     /* #d600d6 */
+  --text-rgb: 26 26 46;            /* #1a1a2e */
+  --text-dim-rgb: 90 90 122;       /* #5a5a7a */
+  --text-muted-rgb: 136 136 170;   /* #8888aa */
+  --ls-bg: rgb(var(--ls-bg-rgb));
+  --ls-shell: rgb(var(--ls-shell-rgb));
+  --ls-card: rgb(var(--ls-card-rgb));
+  --ls-elevated: rgb(var(--ls-elevated-rgb));
+  --ls-border: rgb(var(--ls-border-rgb));
+  --ls-borderLight: rgb(var(--ls-borderLight-rgb));
+  --ls-accent: rgb(var(--ls-accent-rgb));
+  --ls-accentHover: rgb(var(--ls-accentHover-rgb));
+  --ls-fuchsia: rgb(var(--ls-fuchsia-rgb));
+  /* 图表系列色（浅色下取较暗档，保证白底对比度） */
+  --chart-cyan: #0891b2;
+  --chart-blue: #2563eb;
+  --chart-green: #16a34a;
+  --chart-yellow: #ca8a04;
+  --chart-amber: #d97706;
+  --chart-red: #dc2626;
+  --text: rgb(var(--text-rgb));
+  --text-dim: rgb(var(--text-dim-rgb));
+  --text-muted: rgb(var(--text-muted-rgb));
   --bg: #ffffff;
   --surface: #ffffff;
   --surface-2: #f5f5f8;
@@ -168,6 +211,8 @@ html:not([data-theme="light"]) body::after {
 /* 悬停反馈（无阴影，仅边框提亮；全局唯一定义，组件不再各自 scoped） */
 .neon-glow { transition: border-color 0.3s; }
 .neon-glow:hover {
+  /* 旧内核兜底（不支持 color-mix 时生效）；新内核用下一行的精确混色 */
+  border-color: rgb(var(--ls-accent-rgb) / 0.45);
   border-color: color-mix(in srgb, var(--ls-accent) 35%, var(--ls-border));
 }
 [data-theme="light"] .neon-glow:hover {
@@ -229,7 +274,7 @@ html:not([data-theme="light"]) body::after {
   border-color: var(--ls-border);
 }
 [data-theme="light"] .seg-neon button.active {
-  background: color-mix(in srgb, var(--ls-accent) 10%, transparent);
+  background: rgb(var(--ls-accent-rgb) / 0.1);
   color: var(--ls-accent);
 }
 
@@ -521,7 +566,7 @@ select.form-input option {
 .c-table.dense td { padding-top: 10px; padding-bottom: 10px; }
 .c-table.head-dense th { padding-top: 10px; padding-bottom: 10px; }
 .c-table tbody tr {
-  border-bottom: 1px solid color-mix(in srgb, var(--ls-border) 50%, transparent);
+  border-bottom: 1px solid rgb(var(--ls-border-rgb) / 0.5);
   transition: color .15s cubic-bezier(.4,0,.2,1),
               background-color .15s cubic-bezier(.4,0,.2,1),
               border-color .15s cubic-bezier(.4,0,.2,1);

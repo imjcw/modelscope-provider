@@ -1113,6 +1113,47 @@ async def chat_completions(
         )
 
 
+@router.get("/v1/models")
+async def list_models(
+    fastapi_request: Request,
+    services=Depends(get_services)
+):
+    """List available models — OpenAI-compatible `/v1/models` endpoint."""
+    admin_service = get_admin_service(fastapi_request)
+
+    # Authenticate client API key (consistent with /v1/chat/completions)
+    _authenticate_client_key(fastapi_request)
+
+    data = []
+    try:
+        mappings = admin_service.mapping_repo.find_all()
+        created = int(datetime.now(timezone.utc).timestamp())
+        for m in mappings:
+            if m.get("status", "active") != "active":
+                continue
+            data.append({
+                "id": m["alias_name"],
+                "object": "model",
+                "created": created,
+                "owned_by": "provider",
+            })
+    except Exception as e:
+        logger.error(f"Failed to list models: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "message": "Failed to list models",
+                    "type": "internal_error",
+                    "param": None,
+                    "code": "internal_error"
+                }
+            }
+        )
+
+    return {"object": "list", "data": data}
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint."""

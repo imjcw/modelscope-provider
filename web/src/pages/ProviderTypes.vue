@@ -26,7 +26,7 @@
             <tr v-for="pt in providerTypes" :key="pt.id">
               <td>
                 <span class="inline-flex items-center gap-2">
-                  <span class="w-3 h-3 rounded-full" :style="{ background: pt.color || '#89b4fa' }"></span>
+                  <span class="w-3 h-3 rounded-full" :style="{ background: pt.color || 'var(--chart-blue)' }"></span>
                   <span class="font-mono text-ls-accent font-semibold">{{ pt.type_key }}</span>
                 </span>
               </td>
@@ -178,7 +178,7 @@ const form = reactive({
   description: '',
   strategy_type: 'header_based',
   config: { window_seconds: 18000, max_requests: 1500 },
-  color: '#89b4fa',
+  color: 'var(--chart-blue)',
 })
 
 const showDeleteModal = ref(false)
@@ -253,7 +253,7 @@ const openCreate = () => {
   form.description = ''
   form.strategy_type = 'header_based'
   form.config = { window_seconds: 18000, max_requests: 1500 }
-  form.color = '#89b4fa'
+  form.color = 'var(--chart-blue)'
   modelOverrides.value = []
   showDrawer.value = true
 }
@@ -269,7 +269,7 @@ const openEdit = (pt) => {
   } else {
     form.config = { ...(pt.config || {}), window_seconds: pt.config?.window_seconds || 18000, max_requests: pt.config?.max_requests || 1500 }
   }
-  form.color = pt.color || '#89b4fa'
+  form.color = pt.color || 'var(--chart-blue)'
   // Convert config.models object to array for editing
   const models = pt.config?.models || {}
   modelOverrides.value = Object.entries(models).map(([name, cfg]) => ({

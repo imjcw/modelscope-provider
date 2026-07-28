@@ -39,9 +39,9 @@
         <!-- ═══ 堆叠柱：底段圆底角 4 / 中段方角 / 顶段圆顶角 4，barThickness 15 ═══ -->
         <g>
           <template v-for="b in bars" :key="'b' + b.i">
-            <path v-if="b.inputH > 0" :d="b.inputPath" :fill="COLORS.input" />
-            <path v-if="b.cacheH > 0" :d="b.cachePath" :fill="COLORS.cached" />
-            <path v-if="b.outputH > 0" :d="b.outputPath" :fill="COLORS.output" />
+            <path v-if="b.inputH > 0" :d="b.inputPath" :style="{ fill: COLORS.input }" />
+            <path v-if="b.cacheH > 0" :d="b.cachePath" :style="{ fill: COLORS.cached }" />
+            <path v-if="b.outputH > 0" :d="b.outputPath" :style="{ fill: COLORS.output }" />
           </template>
         </g>
 
@@ -93,9 +93,9 @@ const containerRef = ref(null)
 
 // 主题状态色（与全站 green/blue/yellow 状态色一致；红色保留给错误态，本图 3 个系列未用）
 const COLORS = {
-  input: '#00b4d8',   // 输入
-  cached: '#3ecf75',  // 主题暗色绿（green-400 调暗档）—— 命中
-  output: '#facc15',  // yellow-400 —— 输出
+  input: 'var(--chart-cyan)',   // 输入
+  cached: 'var(--chart-green)',  // 命中
+  output: 'var(--chart-yellow)', // 输出
 }
 
 const fmtK = v => {

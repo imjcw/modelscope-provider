@@ -183,6 +183,15 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
+    # Flush any in-memory rate-limit counters before exiting so a restart
+    # (including uvicorn --reload) does not lose the current window counts.
+    rl_cache = services.get("rate_limit_cache")
+    if rl_cache:
+        try:
+            rl_cache.flush()
+        except Exception:
+            logger.warning("Rate-limit flush on shutdown failed", exc_info=True)
+
     # Close HTTP client
     http_client = services.get("http_client")
     if http_client:

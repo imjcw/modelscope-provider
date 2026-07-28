@@ -8,29 +8,28 @@ export default {
     extend: {
       colors: {
         // Linear style tokens (CSS variable references for theme support).
-        // 用 color-mix() 包装，使 Tailwind 的 alpha 修饰符
-        // （border-ls-border/50、bg-ls-accent/10、hover:bg-ls-elevated/30 等）
-        // 对 CSS 变量颜色生效。
+        // 用标准的 rgb(var(--x-rgb) / <alpha-value>) 模式，使 Tailwind 的
+        // alpha 修饰符（border-ls-border/50、bg-ls-accent/10 等）对 CSS 变量颜色生效。
         //
-        // 关键：color-mix 的百分比参数必须是 <percentage>（带 % 或 0–1 的 <number>
-        // 在某些引擎下被当作无效而整条声明被丢弃）。Tailwind 注入的 <alpha-value>
-        // 在无修饰符时是裸 `1`、有修饰符时是 `0.5` 这类**无单位**值，Chrome 会判定
-        // 为非法百分比 → 整条 color-mix 失效 → border-color 回落到 preflight 默认
-        // 的 #e5e7eb（深色背景上的「白边」），bg/text 回落到黑/透明。
-        // 用 calc(<alpha-value> * 100%) 强制转成合法百分比，无修饰符=100%、/50=50%。
+        // 注意：不要用 color-mix() 实现——color-mix 需要 Chrome 111+ 内核，
+        // 且 calc() 百分比在部分内核有解析怪癖；一旦声明被判非法丢弃，
+        // 文字会回落为继承色（body 的 text-white → var(--text) 亮灰），
+        // 表现为暗色主题下 dim/muted 文字全部“显示成亮色”。
+        // rgb(var() / alpha) 语法 Chrome 65+ 即支持，兼容性远好于 color-mix。
+        // --x-rgb 三元组在 main.css 两套主题里定义，hex 变量由三元组派生，单一数据源。
         'ls': {
-          bg: 'color-mix(in srgb, var(--ls-bg) calc(<alpha-value> * 100%), transparent)',
-          shell: 'color-mix(in srgb, var(--ls-shell) calc(<alpha-value> * 100%), transparent)',
-          card: 'color-mix(in srgb, var(--ls-card) calc(<alpha-value> * 100%), transparent)',
-          elevated: 'color-mix(in srgb, var(--ls-elevated) calc(<alpha-value> * 100%), transparent)',
-          accent: 'color-mix(in srgb, var(--ls-accent) calc(<alpha-value> * 100%), transparent)',
-          accentHover: 'color-mix(in srgb, var(--ls-accentHover) calc(<alpha-value> * 100%), transparent)',
-          fuchsia: 'color-mix(in srgb, var(--ls-fuchsia) calc(<alpha-value> * 100%), transparent)',
-          border: 'color-mix(in srgb, var(--ls-border) calc(<alpha-value> * 100%), transparent)',
-          borderLight: 'color-mix(in srgb, var(--ls-borderLight) calc(<alpha-value> * 100%), transparent)',
-          text: 'color-mix(in srgb, var(--text) calc(<alpha-value> * 100%), transparent)',
-          dim: 'color-mix(in srgb, var(--text-dim) calc(<alpha-value> * 100%), transparent)',
-          muted: 'color-mix(in srgb, var(--text-muted) calc(<alpha-value> * 100%), transparent)',
+          bg: 'rgb(var(--ls-bg-rgb) / <alpha-value>)',
+          shell: 'rgb(var(--ls-shell-rgb) / <alpha-value>)',
+          card: 'rgb(var(--ls-card-rgb) / <alpha-value>)',
+          elevated: 'rgb(var(--ls-elevated-rgb) / <alpha-value>)',
+          accent: 'rgb(var(--ls-accent-rgb) / <alpha-value>)',
+          accentHover: 'rgb(var(--ls-accentHover-rgb) / <alpha-value>)',
+          fuchsia: 'rgb(var(--ls-fuchsia-rgb) / <alpha-value>)',
+          border: 'rgb(var(--ls-border-rgb) / <alpha-value>)',
+          borderLight: 'rgb(var(--ls-borderLight-rgb) / <alpha-value>)',
+          text: 'rgb(var(--text-rgb) / <alpha-value>)',
+          dim: 'rgb(var(--text-dim-rgb) / <alpha-value>)',
+          muted: 'rgb(var(--text-muted-rgb) / <alpha-value>)',
         },
       },
       fontFamily: {

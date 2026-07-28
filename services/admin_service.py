@@ -164,6 +164,7 @@ class AdminService:
             ),
             "sensetime": create_strategy(
                 "fixed_window", db=self.db,
+                rate_limit_cache=self.rate_limit_cache,
             ),
         }
         self.rate_limit_strategies.clear()
@@ -175,6 +176,7 @@ class AdminService:
                 if db_types:
                     db_strategies = build_rate_limit_strategies(
                         db_types, self.db, self.quota_updater, self.quota_repo,
+                        rate_limit_cache=self.rate_limit_cache,
                     )
                     self.rate_limit_strategies.update(db_strategies)
             except Exception:
@@ -925,6 +927,29 @@ class AdminService:
             # Reading the DB directly is robust to both.
             raw_windows = self._get_account_rate_windows(account_id)
 
+            # 反向别名映射：目录模型名 -> 请求时使用的客户端别名（virtual_model）。
+            # 这样即使窗口曾以别名（如 "sense"）计数，也能正确关联回目录模型行。
+            model_to_alias = {}
+            try:
+                with self.db.get_connection() as _conn:
+                    _arows = _conn.execute(
+                        "SELECT DISTINCT model, virtual_model FROM request_stats_minute "
+                        "WHERE account_id = ? AND virtual_model IS NOT NULL AND virtual_model != ''",
+                        (account_id,),
+                    ).fetchall()
+                    for _r in _arows:
+                        model_to_alias.setdefault(_r["model"], set()).add(_r["virtual_model"])
+            except Exception:
+                model_to_alias = {}
+
+            # 本供应商目录内的全部模型名 + 它们的全部别名。用于判断某个窗口
+            # key 是否"属于某个具体模型"——若是，则绝不能作为供应商级共用
+            # 计数器回退给其他模型（否则 A 模型的计数会串到 B 模型的行上）。
+            _catalog_names = {mm.get("model_name") for mm in models if mm.get("model_name")}
+            _all_alias_keys = set()
+            for _aliases in model_to_alias.values():
+                _all_alias_keys.update(_aliases)
+
             for m in models:
                 model_name = m.get("model_name", "")
                 model_type = m.get("model_type", "text")
@@ -966,39 +991,54 @@ class AdminService:
                         _mrows = self.mapping_repo.find_by_alias(model_name)
                         if _mrows:
                             match_keys.append(_mrows[0].get("actual_model_id"))
-                    cnt_model = next((k for k in match_keys if k in raw_windows), None)
-                    if cnt_model is None and len(raw_windows) == 1:
-                        cnt_model = next(iter(raw_windows))  # supplier-wide (e.g. "sense"/"__global__")
-                    if cnt_model is not None:
-                        window_start, request_count = raw_windows[cnt_model]
-                        try:
-                            # flush 写入的 window_start 为 UTC（gmtime）但不带时区后缀；
-                            # 按 UTC 解析，否则 aware - naive 抛 TypeError 被吞、elapsed
-                            # 恒为 0，窗口永不过期。
-                            _dt = datetime.datetime.fromisoformat(window_start)
-                            if _dt.tzinfo is None:
-                                _dt = _dt.replace(tzinfo=datetime.timezone.utc)
-                            elapsed = (
-                                datetime.datetime.now(datetime.timezone.utc) - _dt
-                            ).total_seconds()
-                        except Exception:
-                            elapsed = 0
-                        remaining = (
-                            max_requests if elapsed > window_seconds
-                            else max(0, max_requests - request_count)
-                        )
-                        win = {
-                            "window_seconds": window_seconds,
-                            "quota_limit": max_requests,
-                            "quota_remaining": remaining,
-                        }
-                    else:
-                        # window configured but no requests counted yet -> full quota
-                        win = {
-                            "window_seconds": window_seconds,
-                            "quota_limit": max_requests,
-                            "quota_remaining": max_requests,
-                        }
+                    # 也尝试该目录模型在 stats 中记录过的客户端别名（如 "sense"）
+                    for _alias in model_to_alias.get(model_name, set()):
+                        if _alias and _alias not in match_keys:
+                            match_keys.append(_alias)
+
+                    # 滑动窗口「已用」= 当前时刻往前 window_seconds 内的请求数。
+                    # 优先从内存 RateLimitCache 取实时滑动计数（与拦截同源、实时）；
+                    # 若内存中无该窗口（如刚重启且尚未有请求），回退到 DB 快照。
+                    sliding_count = None
+                    if self.rate_limit_cache is not None:
+                        _counts = []
+                        for _k in match_keys:
+                            try:
+                                _info = self.rate_limit_cache.get_quota_info(
+                                    account_id, _k, window_seconds, max_requests
+                                )
+                            except Exception:
+                                _info = None
+                            if _info and _info.get("request_count") is not None:
+                                _counts.append(_info["request_count"])
+                        if _counts:
+                            sliding_count = max(_counts)
+
+                    if sliding_count is None:
+                        cnt_model = next((k for k in match_keys if k in raw_windows), None)
+                        if cnt_model is None and len(raw_windows) == 1:
+                            # Supplier-wide fallback (e.g. SenseTime aliases all
+                            # models to one "sense"/"__global__" counter). Only fall
+                            # back when the single window key is NOT itself another
+                            # specific model in this catalog — otherwise model A's
+                            # counter would bleed onto model B's row.
+                            _only_key = next(iter(raw_windows))
+                            _belongs_to_other = (
+                                _only_key in _catalog_names and _only_key != model_name
+                            )
+                            if not _belongs_to_other:
+                                cnt_model = _only_key
+                        if cnt_model is not None:
+                            sliding_count = raw_windows[cnt_model][1]
+                        else:
+                            sliding_count = 0
+
+                    remaining = max(0, max_requests - sliding_count)
+                    win = {
+                        "window_seconds": window_seconds,
+                        "quota_limit": max_requests,
+                        "quota_remaining": remaining,
+                    }
 
                 has_custom_window = model_name in model_overrides
                 window_override = model_overrides.get(model_name)

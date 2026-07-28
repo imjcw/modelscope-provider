@@ -182,7 +182,7 @@
     />
 
     <!-- ── 模型用量详情 抽屉 ── -->
-    <Drawer v-model="showModelInfoDrawer" :title="`${modelInfoSupplier?.name || ''} · 模型用量`" width="880px">
+    <Drawer v-model="showModelInfoDrawer" :title="`${modelInfoSupplier?.name || ''} · 模型用量`" width="1080px">
       <!-- 时间范围 -->
       <div class="flex items-center justify-between mb-4">
         <span class="text-xs text-ls-muted">
@@ -220,11 +220,10 @@
           <tr>
             <th class="text-left">模型</th>
             <th class="text-left">类型</th>
-            <th class="text-left">配额</th>
+            <th class="text-center">配额</th>
             <th class="text-right">输入</th>
             <th class="text-right">缓存命中</th>
             <th class="text-right">输出</th>
-            <th class="text-left">窗口</th>
             <th class="text-center">状态</th>
           </tr>
         </thead>
@@ -237,22 +236,23 @@
                 <span class="text-xs text-ls-dim">{{ modelTypeLabel(m.model_type) }}</span>
               </span>
             </td>
-            <td class="text-xs">
-              <span v-if="m.quota_limit > 0" class="text-ls-dim">
-                <span class="text-ls-text font-medium">{{ m.quota_remaining }}</span> / {{ m.quota_limit }}
-              </span>
-              <span v-else class="text-ls-muted">—</span>
+            <td class="text-center">
+              <div class="flex items-center justify-center gap-1.5 mb-1">
+                <span class="text-xs px-2 py-0.5 rounded-full border font-medium"
+                      :class="WINDOW_BADGE[fmtWindowRow(m).badge]">
+                  {{ fmtWindowRow(m).label }}
+                </span>
+              </div>
+              <div v-if="fmtWindowRow(m).sub" class="text-[10px] text-ls-muted mb-1">{{ fmtWindowRow(m).sub }}</div>
+              <div v-if="usedPctRow(m) !== null" class="w-20 mx-auto">
+                <ProgressBar :pct="usedPctRow(m)" width="w-20" height="h-1.5" :bar-class="barClass(usedPctRow(m))" />
+                <span class="text-xs mt-1 inline-block" :class="pctLabelClass(usedPctRow(m))">{{ usedPctRow(m) }}%</span>
+              </div>
+              <div v-else class="text-xs text-ls-muted">—</div>
             </td>
             <td class="text-right text-xs font-mono text-ls-dim">{{ (m.today_input_tokens || 0).toLocaleString() }}</td>
             <td class="text-right text-xs font-mono" :class="(m.today_cached_tokens || 0) > 0 ? 'text-green-400' : 'text-ls-muted'">{{ (m.today_cached_tokens || 0).toLocaleString() }}</td>
             <td class="text-right text-xs font-mono text-ls-dim">{{ (m.today_output_tokens || 0).toLocaleString() }}</td>
-            <td class="text-xs">
-              <span v-if="windowLabel(m)" class="text-ls-dim">
-                <span :class="m.window_quota_remaining > 0 ? 'text-ls-text' : 'text-ls-muted'">{{ windowLabel(m).head }}</span>
-                <span v-if="windowLabel(m).sub" class="text-ls-muted"> · {{ windowLabel(m).sub }}</span>
-              </span>
-              <span v-else class="text-ls-muted">—</span>
-            </td>
             <td class="text-center">
               <span v-if="m.is_unavailable" class="tag tag-danger">不可用</span>
               <span v-else class="tag tag-success">正常</span>
@@ -284,6 +284,7 @@ import ModelListEditor from '@/components/ModelListEditor.vue'
 import CCheckbox from '@/components/CCheckbox.vue'
 import CSelect from '@/components/CSelect.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
+import ProgressBar from '@/components/ProgressBar.vue'
 import { maskKey, formatContextLength } from '@/utils/format'
 import { modelTypeColor, modelTypeLabel } from '@/constants/modelType'
 import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, getModelQuotas, getProviderTypes } from '@/api'
@@ -305,7 +306,7 @@ const ptMap = computed(() =>
   Object.fromEntries(providerTypes.value.map(pt => [pt.type_key, pt]))
 )
 const providerTypeLabel = (t) => ptMap.value[t]?.name || t || '—'
-const providerTypeColor = (t) => ptMap.value[t]?.color || '#89b4fa'
+const providerTypeColor = (t) => ptMap.value[t]?.color || 'var(--chart-blue)'
 
 const loadProviderTypes = async () => {
   try {
@@ -341,6 +342,8 @@ const modelInfoRows = computed(() => {
       window_seconds: q.window_seconds || 0,
       window_quota_remaining: q.window_quota_remaining || 0,
       window_quota_limit: q.window_quota_limit || 0,
+      max_requests: q.max_requests ?? null,
+      has_custom_window: q.has_custom_window || false,
     }
   })
 })
@@ -352,17 +355,39 @@ const MODEL_INFO_DAYS_OPTIONS = [
   { label: '90天', value: 90 },
 ]
 
-// 模型用量抽屉的「窗口」列：展示按模型/固定窗口策略的剩余与上限
-const windowLabel = (m) => {
-  if (!m.strategy_type) return null
-  const isPerModel = m.strategy_type === 'fixed_window_per_model'
+// 模型用量抽屉的「配额」列：复用「用量分析」中 ModelStatusTable「限流」列样式
+// （窗口 badge + 已用/上限滑窗 + 进度条），窗口配额优先，token 配额作为兜底。
+const WINDOW_BADGE = {
+  accent: 'bg-ls-accent/10 text-ls-accent border-ls-accent/20',
+  muted: 'bg-ls-muted/10 text-ls-muted border-ls-border',
+}
+const barClass = (pct) =>
+  pct < 50 ? 'bg-green-400' : pct < 90 ? 'bg-yellow-400' : 'bg-red-400'
+const pctLabelClass = (pct) =>
+  pct < 50 ? 'text-ls-muted' : pct < 90 ? 'text-yellow-400' : 'text-red-400'
+
+const fmtWindowRow = (m) => {
+  const st = m.strategy_type
+  if (!st) return { label: '被动', sub: 'header 驱动', badge: 'muted', custom: false }
   const secs = m.window_seconds || 0
-  const val = secs >= 3600 ? `${secs / 3600}h` : `${secs / 60}m`
-  const head = isPerModel ? `按模型 ${val}` : `固定窗口 ${val}`
+  const val = secs >= 3600 ? (secs / 3600) : (secs / 60)
+  const unit = secs >= 3600 ? 'h' : 'm'
+  const max = m.max_requests ?? m.window_quota_limit ?? null
   const rem = m.window_quota_remaining
-  const max = m.window_quota_limit
-  const sub = rem != null && max != null ? `${rem}/${max}` : (max != null ? `${max}` : '')
-  return { head, sub }
+  const used = max != null && rem != null ? Math.max(0, max - rem) : null
+  const sub = used != null ? `已用 ${used}/${max} 滑窗` : max != null ? `${max} 滑窗` : ''
+  if (st === 'fixed_window_per_model')
+    return { label: `按模型 ${val}${unit}`, sub, badge: 'accent', custom: !!m.has_custom_window }
+  if (st === 'fixed_window' || st === 'sensetime')
+    return { label: `滑动窗口 ${val}${unit}`, sub, badge: 'accent', custom: false }
+  return { label: '被动', sub: 'header 驱动', badge: 'muted', custom: false }
+}
+const usedPctRow = (m) => {
+  const winLimit = m.window_quota_limit
+  const winRem = m.window_quota_remaining
+  const limit = (winLimit != null ? winLimit : m.quota_limit) || 0
+  const remaining = (winLimit != null ? winRem : m.quota_remaining) || 0
+  return limit > 0 ? Math.round(((limit - remaining) / limit) * 100) : null
 }
 const modelInfoDays = ref(0)
 const fmt = (n) => (n || 0).toLocaleString()

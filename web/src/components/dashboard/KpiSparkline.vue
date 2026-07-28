@@ -9,7 +9,7 @@ import { smoothLinePath } from '@/utils/chart'
 
 const props = defineProps({
   values: { type: Array, default: () => [] },
-  stroke: { type: String, default: '#00ffff' },
+  stroke: { type: String, default: 'var(--chart-cyan)' },
 })
 
 const pts = computed(() => {
@@ -30,6 +30,6 @@ const pts = computed(() => {
 
 <template>
   <svg class="w-full h-8" viewBox="0 0 120 32" preserveAspectRatio="none">
-    <path class="sparkline" fill="none" :stroke="stroke" opacity="0.7" :d="pts" />
+    <path class="sparkline" fill="none" :style="{ stroke }" opacity="0.7" :d="pts" />
   </svg>
 </template>

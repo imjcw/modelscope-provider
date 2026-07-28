@@ -188,7 +188,9 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
         window_seconds, max_requests = self._get_model_config(model_name)
 
         if self._cache is not None:
-            return self._cache.get_quota_info(account_id, model_name)
+            return self._cache.get_quota_info(
+                account_id, model_name, window_seconds, max_requests,
+            )
 
         # Fallback: database query
         now = datetime.now(timezone.utc)

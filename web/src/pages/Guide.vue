@@ -46,7 +46,7 @@
           <CodeBlock lang="python" :code="pythonSdkCode" />
           <div class="bg-ls-bg rounded-md border border-ls-border p-3">
             <div class="flex items-center gap-2 mb-1">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--chart-green)" stroke-width="2.5"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
               <span class="text-xs text-green-400">注意</span>
             </div>
             <p class="text-xs text-ls-dim">api_key 可以填任意字符串，代理服务不会校验。base_url 指向本服务的 `/api/v1` 路径即可。</p>

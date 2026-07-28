@@ -35,8 +35,8 @@ defineProps({
   border-radius: 50%;
   display: inline-block;
 }
-.status-badge-active { background: rgba(34,197,94,0.1); color: #22c55e; border-radius: 9999px; }
-.status-badge-active::before { background: #22c55e; }
-.status-badge-inactive { background: color-mix(in srgb, var(--ls-border) 50%, transparent); color: var(--text-dim); }
+.status-badge-active { background: rgba(34,197,94,0.1); color: var(--chart-green); border-radius: 9999px; }
+.status-badge-active::before { background: var(--chart-green); }
+.status-badge-inactive { background: rgb(var(--ls-border-rgb) / 0.5); color: var(--text-dim); }
 .status-badge-inactive::before { background: var(--text-muted); }
 </style>

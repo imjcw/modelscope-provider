@@ -135,7 +135,7 @@ onBeforeUnmount(() => {
   margin: 1em 0 0.5em;
   font-weight: 600;
   line-height: 1.35;
-  color: #fff;
+  color: var(--text);
 }
 .md-content :deep(h1) { font-size: 1.3em; }
 .md-content :deep(h2) { font-size: 1.15em; }
@@ -247,7 +247,7 @@ onBeforeUnmount(() => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #3b82f6;
+  background: var(--chart-blue);
 }
 
 .md-content :deep(.cb-copy) {
