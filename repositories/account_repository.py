@@ -3,6 +3,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from core.database import DatabaseManager
+from models.account import DEFAULT_PROVIDER_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ class AccountRepository:
             return [dict(row) for row in cursor.fetchall()]
 
     def create(self, name: str, api_key: str, base_url: str,
-               status: str = "active", provider_type: str = "modelscope") -> dict:
+               status: str = "active", provider_type: str = DEFAULT_PROVIDER_TYPE) -> dict:
         """Create a new account. account_id is auto-generated as UUID."""
         account_id = uuid.uuid4().hex
         with self.db.get_connection() as conn:

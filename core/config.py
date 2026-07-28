@@ -4,7 +4,7 @@ import os
 from typing import List, Dict, Optional
 
 from dotenv import load_dotenv
-from models.account import ModelScopeAccount
+from models.account import ModelScopeAccount, DEFAULT_PROVIDER_TYPE
 
 load_dotenv()
 
@@ -44,7 +44,7 @@ class ConfigManager:
                 name=name,
                 api_key=account_data["api_key"],
                 base_url=account_data["base_url"],
-                provider_type=account_data.get("provider_type", "modelscope"),
+                provider_type=account_data.get("provider_type", DEFAULT_PROVIDER_TYPE),
             )
             accounts_list.append(account)
 
@@ -72,7 +72,7 @@ class ConfigManager:
                 name=a.get("name", ""),
                 api_key=a["api_key"],
                 base_url=a["base_url"],
-                provider_type=a.get("provider_type", "modelscope"),
+                provider_type=a.get("provider_type", DEFAULT_PROVIDER_TYPE),
             ))
         return accounts
 

@@ -15,6 +15,7 @@ from repositories.provider_type_repository import ProviderTypeRepository
 from repositories.quota_repository import QuotaRepository
 from repositories.supplier_model_repository import SupplierModelRepository
 from services.providers import build_rate_limit_strategies, create_strategy
+from models.account import DEFAULT_PROVIDER_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class AdminService:
 
     def _enrich_quota(self, supplier: dict):
         """Enrich a supplier dict with quota info from the appropriate strategy."""
-        provider_type = supplier.get("provider_type", "modelscope")
+        provider_type = supplier.get("provider_type", DEFAULT_PROVIDER_TYPE)
         strategy = self.rate_limit_strategies.get(provider_type)
 
         if strategy:
@@ -88,7 +89,7 @@ class AdminService:
             supplier.setdefault("quota_limit", 0)
 
     def create_supplier(self, name: str, api_key: str,
-                        base_url: str, provider_type: str = "modelscope") -> dict:
+                        base_url: str, provider_type: str = DEFAULT_PROVIDER_TYPE) -> dict:
         return self.account_repo.create(name, api_key, base_url,
                                         provider_type=provider_type)
 
@@ -157,7 +158,7 @@ class AdminService:
         路由层无需重启即可使用新策略配置。先确保硬编码的内置类型始终可用。
         """
         fallback = {
-            "modelscope": create_strategy(
+            DEFAULT_PROVIDER_TYPE: create_strategy(
                 "header_based",
                 quota_updater=self.quota_updater,
                 quota_repository=self.quota_repo,
@@ -233,7 +234,7 @@ class AdminService:
                 "name": sup.get("name", ""),
                 "api_key": sup.get("api_key", ""),
                 "base_url": sup.get("base_url", ""),
-                "provider_type": sup.get("provider_type", "modelscope"),
+                "provider_type": sup.get("provider_type", DEFAULT_PROVIDER_TYPE),
                 "status": sup.get("status", "active"),
                 "models": [
                     {
@@ -279,7 +280,7 @@ class AdminService:
                     raise ValueError("缺少必填字段 name / api_key / base_url")
 
                 status = entry.get("status", "active")
-                provider_type = entry.get("provider_type", "modelscope")
+                provider_type = entry.get("provider_type", DEFAULT_PROVIDER_TYPE)
                 models = entry.get("models", [])
 
                 # ── Check for duplicate by name ──
@@ -891,7 +892,7 @@ class AdminService:
             sup_name = sup.get("name", "")
 
             # Resolve this supplier's window strategy + per-model overrides
-            provider_type = sup.get("provider_type", "modelscope")
+            provider_type = sup.get("provider_type", DEFAULT_PROVIDER_TYPE)
             pt_info = pt_map.get(provider_type, {})
             strategy = self.rate_limit_strategies.get(provider_type)
             strategy_type = pt_info.get("strategy_type")

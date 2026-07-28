@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import time
 from pathlib import Path
@@ -25,14 +26,19 @@ except ImportError:
     from api.admin_routes import router as admin_router
 import logging
 
-# Configure logging: write to file (append) + console
-log_dir = Path(__file__).parent / "logs"
+# Configure logging: write to file (append) + console.
+# Log directory / file / level are overridable via env vars (LOG_DIR, LOG_FILE,
+# LOG_LEVEL) so the process can run in read-only or containerized environments.
+log_dir = Path(os.getenv("LOG_DIR", str(Path(__file__).parent / "logs")))
 log_dir.mkdir(exist_ok=True)
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.FileHandler(log_dir / "modelscope_provider.log", encoding="utf-8"),
+        logging.FileHandler(
+            os.getenv("LOG_FILE", str(log_dir / "modelscope_provider.log")),
+            encoding="utf-8",
+        ),
         logging.StreamHandler(sys.stdout),
     ],
 )
@@ -122,8 +128,14 @@ async def lifespan(app: FastAPI):
     app.state.admin_service = _admin_service
     app.state.alias_router = _services["alias_router"]
 
-    # Start periodic log cleanup (every 5 minutes)
-    async def _periodic_log_cleanup(svc, interval: int = 300):
+    # Periodic task intervals are overridable via env vars so operators can
+    # tune them without redeploying (e.g. LOG_CLEANUP_INTERVAL=600).
+    log_cleanup_interval = int(os.getenv("LOG_CLEANUP_INTERVAL", "300"))
+    rl_flush_interval = int(os.getenv("RATE_LIMIT_FLUSH_INTERVAL", "60"))
+    config_sync_interval = int(os.getenv("CONFIG_SYNC_INTERVAL", "300"))
+
+    # Start periodic log cleanup (every 5 minutes by default)
+    async def _periodic_log_cleanup(svc, interval: int = log_cleanup_interval):
         """Periodically delete old request logs based on retention config."""
         while True:
             try:
@@ -136,8 +148,8 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.warning("Log cleanup task failed", exc_info=True)
 
-    # Start periodic rate-limit flush (every 60 seconds)
-    async def _periodic_rate_limit_flush(svc, interval: int = 60):
+    # Start periodic rate-limit flush (every 60 seconds by default)
+    async def _periodic_rate_limit_flush(svc, interval: int = rl_flush_interval):
         """Flush dirty rate-limit counters from memory to database."""
         while True:
             try:
@@ -150,8 +162,8 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.warning("Rate-limit flush task failed", exc_info=True)
 
-    # Start periodic config sync (every 5 minutes)
-    async def _periodic_config_sync(svc, interval: int = 300):
+    # Start periodic config sync (every 5 minutes by default)
+    async def _periodic_config_sync(svc, interval: int = config_sync_interval):
         """Reload config from database to catch external changes."""
         while True:
             try:
@@ -164,10 +176,13 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.warning("Config sync task failed", exc_info=True)
 
-    cleanup_task = asyncio.create_task(_periodic_log_cleanup(services))
-    rl_flush_task = asyncio.create_task(_periodic_rate_limit_flush(services))
-    config_sync_task = asyncio.create_task(_periodic_config_sync(services))
-    logger.info("Periodic tasks started: log cleanup (300s), rate-limit flush (60s), config sync (300s)")
+    cleanup_task = asyncio.create_task(_periodic_log_cleanup(services, log_cleanup_interval))
+    rl_flush_task = asyncio.create_task(_periodic_rate_limit_flush(services, rl_flush_interval))
+    config_sync_task = asyncio.create_task(_periodic_config_sync(services, config_sync_interval))
+    logger.info(
+        "Periodic tasks started: log cleanup (%ss), rate-limit flush (%ss), config sync (%ss)",
+        log_cleanup_interval, rl_flush_interval, config_sync_interval,
+    )
 
     logger.info("ModelScope Proxy started")
     yield

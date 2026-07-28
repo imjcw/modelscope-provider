@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from typing import Set
 
+# Default provider type used when an account/supplier omits one.
+# Centralized so the literal isn't duplicated as a magic string elsewhere.
+DEFAULT_PROVIDER_TYPE = "modelscope"
+
 
 @dataclass
 class ModelScopeAccount:
@@ -9,7 +13,7 @@ class ModelScopeAccount:
     account_id: str
     api_key: str
     base_url: str
-    provider_type: str = "modelscope"
+    provider_type: str = DEFAULT_PROVIDER_TYPE
     name: str = ""
     quota_limit: int = 0
     quota_remaining: int = 0

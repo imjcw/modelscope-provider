@@ -19,6 +19,7 @@ from services.quota_updater import QuotaUpdater
 from services.providers import create_strategy, build_rate_limit_strategies
 from repositories.provider_type_repository import ProviderTypeRepository
 from core.migrations import Migrator
+from models.account import DEFAULT_PROVIDER_TYPE
 
 
 def _resolve_read_timeout(config_repo) -> float:
@@ -102,7 +103,7 @@ class ServiceInitializer:
         # that 供应商类型管理 can configure strategy + params per type.
         # 先保证硬编码的内置类型始终可用（不依赖迁移），再叠加 DB 配置。
         rate_limit_strategies = {
-            "modelscope": create_strategy(
+            DEFAULT_PROVIDER_TYPE: create_strategy(
                 "header_based",
                 quota_updater=quota_updater,
                 quota_repository=quota_repository,

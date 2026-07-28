@@ -7,6 +7,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List, Literal
 
+from models.account import DEFAULT_PROVIDER_TYPE
+
 router = APIRouter()
 
 # Track app start time for uptime calculation (set during startup)
@@ -58,7 +60,7 @@ class SupplierCreate(BaseModel):
     name: str = Field(..., description="Supplier display name")
     api_key: str = Field(..., description="API key")
     base_url: str = Field(..., description="Provider base URL")
-    provider_type: str = Field(default="modelscope", description="Provider type: modelscope, sensetime")
+    provider_type: str = Field(default=DEFAULT_PROVIDER_TYPE, description="Provider type: modelscope, sensetime")
 
 
 class SupplierUpdate(BaseModel):

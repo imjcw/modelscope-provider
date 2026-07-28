@@ -247,7 +247,7 @@ def refresh_load_balancer(request: Request):
         supplier_model_repo = services.get("supplier_model_repo")
 
         if db and supplier_model_repo is not None:
-            from models.account import ModelScopeAccount
+            from models.account import ModelScopeAccount, DEFAULT_PROVIDER_TYPE
             from repositories.account_repository import AccountRepository
 
             repo = AccountRepository(db)
@@ -260,7 +260,7 @@ def refresh_load_balancer(request: Request):
                     name=a.get("name", ""),
                     api_key=a["api_key"],
                     base_url=a["base_url"],
-                    provider_type=a.get("provider_type", "modelscope"),
+                    provider_type=a.get("provider_type", DEFAULT_PROVIDER_TYPE),
                 ))
 
             from services.load_balancer import LoadBalancer

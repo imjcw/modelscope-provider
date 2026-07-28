@@ -80,13 +80,13 @@ class AliasRouter:
 
     def _to_ms_account(self, account_dict: dict) -> object:
         """将 account dict 转换为 ModelScopeAccount。"""
-        from models.account import ModelScopeAccount
+        from models.account import ModelScopeAccount, DEFAULT_PROVIDER_TYPE
         return ModelScopeAccount(
             account_id=account_dict["account_id"],
             name=account_dict.get("name", ""),
             api_key=account_dict["api_key"],
             base_url=account_dict["base_url"],
-            provider_type=account_dict.get("provider_type", "modelscope"),
+            provider_type=account_dict.get("provider_type", DEFAULT_PROVIDER_TYPE),
         )
 
     def get_candidates(self, alias: str) -> List[RoutingResult]:

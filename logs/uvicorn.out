@@ -1692,3 +1692,46 @@ INFO:     127.0.0.1:49783 - "GET /api/admin/suppliers/191/models HTTP/1.1" 200 O
 INFO:     127.0.0.1:49783 - "GET /api/admin/model-quota HTTP/1.1" 200 OK
 INFO:     127.0.0.1:49783 - "GET /api/admin/suppliers/3/models HTTP/1.1" 200 OK
 INFO:     127.0.0.1:49783 - "GET /api/admin/provider-types HTTP/1.1" 200 OK
+2026-07-28 23:14:57,874 [INFO] services.alias_router: AliasRouter: got 2 candidates for 'sense', strategy=round_robin
+2026-07-28 23:14:57,874 [INFO] api.routes: AliasRouter candidate 1/2: account f161c320ce3b4f5391f19bb763e6a837 model sensenova-6.7-flash-lite
+2026-07-28 23:14:57,874 [INFO] services.cache: RateLimit window reset for f161c320ce3b4f5391f19bb763e6a837/sense: 1/1500
+2026-07-28 23:15:03,603 [INFO] httpx: HTTP Request: POST https://token.sensenova.cn/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:54122 - "POST /api/v1/chat/completions HTTP/1.1" 200 OK
+2026-07-28 23:15:27,502 [INFO] api.routes: Streaming completed for f161c320ce3b4f5391f19bb763e6a837: status=200 input=84233 output=1993 chunks=463 admin_svc=yes
+2026-07-28 23:25:44,804 [INFO] services.alias_router: AliasRouter: got 2 candidates for 'sense', strategy=round_robin
+2026-07-28 23:25:44,804 [INFO] api.routes: AliasRouter candidate 1/2: account 294acbfbda0e404b988d87023ba25f19 model sensenova-6.7-flash-lite
+2026-07-28 23:25:44,804 [INFO] services.cache: RateLimit window reset for 294acbfbda0e404b988d87023ba25f19/sense: 1/1500
+2026-07-28 23:25:50,089 [INFO] httpx: HTTP Request: POST https://token.sensenova.cn/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:49958 - "GET /api/admin/suppliers HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49958 - "GET /api/admin/suppliers/1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49958 - "GET /api/admin/suppliers/2/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49958 - "GET /api/admin/suppliers/3/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49958 - "GET /api/admin/suppliers/190/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49958 - "GET /api/admin/suppliers/191/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49958 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56830 - "POST /api/v1/chat/completions HTTP/1.1" 200 OK
+2026-07-28 23:25:56,213 [INFO] api.routes: Streaming completed for 294acbfbda0e404b988d87023ba25f19: status=200 input=85236 output=132 chunks=37 admin_svc=yes
+INFO:     127.0.0.1:49958 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59653 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+2026-07-28 23:26:08,313 [INFO] services.alias_router: AliasRouter: got 2 candidates for 'sense', strategy=round_robin
+2026-07-28 23:26:08,313 [INFO] api.routes: AliasRouter candidate 1/2: account f161c320ce3b4f5391f19bb763e6a837 model sensenova-6.7-flash-lite
+2026-07-28 23:26:08,313 [INFO] services.cache: RateLimit window reset for f161c320ce3b4f5391f19bb763e6a837/sense: 1/1500
+2026-07-28 23:26:10,190 [INFO] httpx: HTTP Request: POST https://token.sensenova.cn/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:52409 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57714 - "POST /api/v1/chat/completions HTTP/1.1" 200 OK
+2026-07-28 23:26:20,779 [INFO] api.routes: Streaming completed for f161c320ce3b4f5391f19bb763e6a837: status=200 input=85355 output=1180 chunks=271 admin_svc=yes
+INFO:     127.0.0.1:58189 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55401 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49854 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49854 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49854 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49854 - "GET /api/admin/logs?page=0&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50796 - "GET /api/admin/stats/window?seconds=86400 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57374 - "GET /api/admin/alerts?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55144 - "GET /api/admin/model-quota HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56400 - "GET /api/admin/stats/window?seconds=86400 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56400 - "GET /api/admin/model-quota HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56400 - "GET /api/admin/alerts?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53517 - "GET /api/admin/stats/window?seconds=86400 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53517 - "GET /api/admin/alerts?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51837 - "GET /api/admin/model-quota HTTP/1.1" 200 OK
