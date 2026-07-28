@@ -56,14 +56,7 @@ class LoadBalancer:
                         f"for model {model_name}"
                     )
                     candidates = model_filtered
-                else:
-                    logger.warning(
-                        f"No active supplier declares model {model_name}; "
-                        f"falling back to all accounts"
-                    )
-                # If db_candidates is empty or model_filtered is empty,
-                # we fall through to the existing unavailable_models filter
-            else:
+            if not db_candidate_ids or not model_filtered:
                 logger.warning(
                     f"No supplier declares model {model_name}; "
                     f"falling back to all accounts"

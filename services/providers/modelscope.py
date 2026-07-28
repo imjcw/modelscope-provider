@@ -23,9 +23,12 @@ class ModelScopeStrategy(RateLimitStrategy):
         self,
         quota_updater: QuotaUpdater,
         quota_repository: QuotaRepository,
+        header_config: dict = None,
     ):
         self.quota_updater = quota_updater
         self.quota_repository = quota_repository
+        # 供应商类型可配置的响应头名称（None 表示使用默认 ModelScope 头）
+        self.header_config = header_config
 
     def check_rate_limit(self, account_id: str, model_name: str) -> bool:
         """Always allow — ModelScope quota is enforced upstream."""
@@ -45,7 +48,7 @@ class ModelScopeStrategy(RateLimitStrategy):
             base_url="",
         )
         self.quota_updater.update_quota_after_request(
-            account, response_headers, model_name
+            account, response_headers, model_name, self.header_config
         )
 
     def record_usage(

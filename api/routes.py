@@ -100,7 +100,7 @@ async def _safe_aclose(response) -> None:
         pass
 
 
-def _log_error_request(
+async def _log_error_request(
     admin_service,
     request_model: str,
     actual_model_id: str,
@@ -123,7 +123,7 @@ def _log_error_request(
         return
     end_time = datetime.now(timezone.utc).isoformat()
     try:
-        admin_service.log_request(
+        await asyncio.to_thread(admin_service.log_request,
             model=request_model,
             actual_model_id=actual_model_id,
             account_id=selected_account.account_id,
@@ -299,31 +299,37 @@ async def stream_response(
     # Skip Tencent's initial empty chunks (choices=null) which break validation
     decoder = json.JSONDecoder()
 
-    async for line in response.aiter_lines():
-        stripped = line.strip()
-        if stripped == "[DONE]":
-            yield "data: [DONE]\n\n"
-            return
+    try:
+        async for line in response.aiter_lines():
+            stripped = line.strip()
+            if stripped == "[DONE]":
+                yield "data: [DONE]\n\n"
+                return
 
-        if stripped.startswith("data:"):
-            data_str = stripped[5:].strip()
-            # Skip empty data lines
-            if not data_str:
-                continue
+            if stripped.startswith("data:"):
+                data_str = stripped[5:].strip()
+                # Skip empty data lines
+                if not data_str:
+                    continue
 
-            try:
-                chunk, _ = decoder.raw_decode(data_str)
-            except json.JSONDecodeError:
-                # Fall back to forwarding raw line
-                yield f"data: {data_str}\n\n"
-                continue
+                try:
+                    chunk, _ = decoder.raw_decode(data_str)
+                except json.JSONDecodeError:
+                    # Fall back to forwarding raw line
+                    yield f"data: {data_str}\n\n"
+                    continue
 
-            # Skip initial empty chunks from Tencent where choices is null
-            if chunk and chunk.get("choices") is None:
-                continue
+                # Skip initial empty chunks from Tencent where choices is null
+                if chunk and chunk.get("choices") is None:
+                    continue
 
-            # Forward valid chunks
-            yield f"data: {json.dumps(chunk)}\n\n"
+                # Forward valid chunks
+                yield f"data: {json.dumps(chunk)}\n\n"
+    finally:
+        # Close the upstream httpx connection so it returns to the pool.
+        # Starlette's StreamingResponse does NOT close the wrapped generator's
+        # underlying httpx response, so without this the pool is exhausted under load.
+        await _safe_aclose(response)
 
 
 async def stream_response_with_logging(
@@ -356,7 +362,7 @@ async def stream_response_with_logging(
     async for chunk_data in stream_response(
         response, _capture_headers=True
     ):
-        data_str = chunk_data.replace("data: ", "").strip()
+        data_str = chunk_data.removeprefix("data: ").strip()
         is_special_chunk = False
 
         # Strip out injected marker chunks (do NOT yield or log them)
@@ -398,7 +404,7 @@ async def stream_response_with_logging(
     logger.info(f"Streaming completed for {account.account_id}: status={stream_status_code} input={input_tokens} output={output_tokens} chunks={len(raw_chunks)} admin_svc={'yes' if admin_service else 'no'}")
     if admin_service:
         try:
-            admin_service.log_request(
+            await asyncio.to_thread(admin_service.log_request,
                 model=model_name,
                 actual_model_id=actual_model_id,
                 account_id=account.account_id,
@@ -424,12 +430,12 @@ async def stream_response_with_logging(
     # Update quota via provider strategy (or fallback to legacy quota_updater)
     if strategy:
         try:
-            strategy.record_request(
+            await asyncio.to_thread(strategy.record_request,
                 account.account_id, actual_model_id,
                 response_headers, stream_status_code,
             )
             if input_tokens > 0 or output_tokens > 0:
-                strategy.record_usage(
+                await asyncio.to_thread(strategy.record_usage,
                     account.account_id, actual_model_id,
                     input_tokens, output_tokens,
                 )
@@ -438,12 +444,12 @@ async def stream_response_with_logging(
     elif quota_updater and hasattr(account, 'api_key'):
         try:
             if input_tokens > 0 or output_tokens > 0:
-                quota_updater.update_quota_from_usage(
+                await asyncio.to_thread(quota_updater.update_quota_from_usage,
                     account, input_tokens, output_tokens, actual_model_id
                 )
             # Also update quota remaining/limit from captured response headers
             if response_headers:
-                quota_updater.update_quota_after_request(
+                await asyncio.to_thread(quota_updater.update_quota_after_request,
                     account, response_headers, actual_model_id
                 )
         except Exception as e:
@@ -566,7 +572,7 @@ async def _try_candidate(
         # Check for rate limit errors — allow fallback to next candidate
         if response.status_code == 429:
             if strategy:
-                strategy.record_request(
+                await asyncio.to_thread(strategy.record_request,
                     selected_account.account_id,
                     actual_model_id,
                     dict(response.headers),
@@ -581,7 +587,7 @@ async def _try_candidate(
                 )
             _upstream_429_body = await _safe_read_response_body(response)
             await _safe_aclose(response)
-            _log_error_request(
+            await _log_error_request(
                 admin_service, request.model, actual_model_id,
                 selected_account, client_key_name,
                 429, f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
@@ -621,7 +627,7 @@ async def _try_candidate(
                     response.status_code,
                     strategy,
                 )
-            _log_error_request(
+            await _log_error_request(
                 admin_service, request.model, actual_model_id,
                 selected_account, client_key_name,
                 response.status_code,
@@ -677,7 +683,7 @@ async def _try_candidate(
     # Check for rate limit errors — allow fallback to next candidate
     if response.status_code == 429:
         if strategy:
-            strategy.record_request(
+            await asyncio.to_thread(strategy.record_request,
                 selected_account.account_id,
                 actual_model_id,
                 dict(response.headers),
@@ -771,7 +777,7 @@ async def _try_candidate(
         if last_valid is not None:
             ms_response = last_valid
         else:
-            _log_error_request(
+            await _log_error_request(
                 admin_service, request.model, actual_model_id,
                 selected_account, client_key_name,
                 502, "Could not parse SSE response",
@@ -794,7 +800,7 @@ async def _try_candidate(
         try:
             ms_response, _ = decoder.raw_decode(response_text)
         except json.JSONDecodeError:
-            _log_error_request(
+            await _log_error_request(
                 admin_service, request.model, actual_model_id,
                 selected_account, client_key_name,
                 502, "Could not parse response JSON",
@@ -849,7 +855,7 @@ async def _try_candidate(
 # Update quota via provider strategy
     try:
         if strategy:
-            strategy.record_request(
+            await asyncio.to_thread(strategy.record_request,
                 selected_account.account_id,
                 actual_model_id,
                 dict(response.headers),
@@ -860,7 +866,7 @@ async def _try_candidate(
             inp = ms_usage.get("prompt_tokens", 0) or 0
             out = ms_usage.get("completion_tokens", 0) or 0
             if inp > 0 or out > 0:
-                strategy.record_usage(
+                await asyncio.to_thread(strategy.record_usage,
                     selected_account.account_id,
                     actual_model_id,
                     inp, out,
@@ -880,7 +886,7 @@ async def _try_candidate(
                 if k in response.headers:
                     resp_hdrs[k] = response.headers[k]
 
-            admin_service.log_request(
+            await asyncio.to_thread(admin_service.log_request,
                 model=request.model,
                 actual_model_id=actual_model_id,
                 account_id=selected_account.account_id,
@@ -902,6 +908,12 @@ async def _try_candidate(
             )
         except Exception as le:
             logger.error(f"Failed to log request: {le}", exc_info=True)
+
+    # Release the upstream httpx connection back to the pool (Starlette won't).
+    try:
+        await response.aclose()
+    except Exception:
+        pass
 
     try:
         latency_ms = int((datetime.now(timezone.utc) - datetime.fromisoformat(request_start)).total_seconds() * 1000)
@@ -958,7 +970,7 @@ async def chat_completions(
                     # Build minimal request body for error logging
                     _cb_req_body = {"model": actual_model_id, "messages": request.messages}
                     _now = datetime.now(timezone.utc).isoformat()
-                    _log_error_request(
+                    await _log_error_request(
                         admin_service, request.model, actual_model_id,
                         selected_account, client_key_name,
                         503, f"供应商 {selected_account.name or selected_account.account_id} 的 {actual_model_id} 模型已被冻结(熔断)",
@@ -1036,7 +1048,7 @@ async def chat_completions(
         if admin_service:
             try:
                 _now = datetime.now(timezone.utc).isoformat()
-                admin_service.log_request(
+                await asyncio.to_thread(admin_service.log_request,
                     model=request.model,
                     actual_model_id=request.model,
                     account_id="unknown",
@@ -1079,7 +1091,7 @@ async def chat_completions(
         if admin_service:
             try:
                 _now = datetime.now(timezone.utc).isoformat()
-                admin_service.log_request(
+                await asyncio.to_thread(admin_service.log_request,
                     model=request.model,
                     actual_model_id=request.model,
                     account_id="unknown",

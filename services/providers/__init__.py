@@ -78,9 +78,12 @@ def build_rate_limit_strategies(provider_types, db, quota_updater, quota_reposit
                 rate_limit_cache=rate_limit_cache,
             )
         else:
+            # header_based（被动限流）：响应头名称可由 provider type 的
+            # config["headers"] 覆盖，未配置时使用默认 ModelScope 头。
             strategies[type_key] = create_strategy(
                 "header_based",
                 quota_updater=quota_updater,
                 quota_repository=quota_repository,
+                header_config=cfg.get("headers") if isinstance(cfg, dict) else None,
             )
     return strategies

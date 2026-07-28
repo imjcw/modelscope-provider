@@ -4,6 +4,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from queue import Queue
 from typing import Generator, Optional
 
 logger = logging.getLogger(__name__)
@@ -34,18 +35,24 @@ class DatabaseManager:
 
         self.db_url = db_path
 
-    @contextmanager
-    def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
-        """Context manager for database connection - creates new connection each time."""
+        # Bounded connection pool: reuse a handful of sqlite3 connections
+        # instead of opening a brand-new one per query (which is expensive and
+        # caps throughput under load). Connections are checked out exclusively
+        # for the duration of a `with` block, so sharing across threads is safe.
+        self._conn_pool: "Queue[sqlite3.Connection]" = Queue(maxsize=10)
+        self._pool_max = 10
+
+    def _new_connection(self) -> sqlite3.Connection:
+        """Open a new sqlite3 connection with the project's PRAGMAs applied."""
         conn = sqlite3.connect(self.db_url, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         # Enable foreign keys
         conn.execute("PRAGMA foreign_keys = ON")
-        # Wait up to 3s for a lock instead of failing immediately. Removes the
+        # Wait up to 5s for a lock instead of failing immediately. Removes the
         # "database is locked" OperationalError when the request path opens a
         # short-lived child connection while the outer transaction is in flight
         # (e.g. SELECT inside a write block, or nested repository calls).
-        conn.execute("PRAGMA busy_timeout = 3000")
+        conn.execute("PRAGMA busy_timeout = 5000")
         # Enable WAL (Write-Ahead Logging) for better concurrent read/write
         # performance. WAL allows readers to proceed concurrently with a single
         # writer, which is critical for the proxy's read-heavy workload where
@@ -55,14 +62,36 @@ class DatabaseManager:
         conn.execute("PRAGMA synchronous = NORMAL")
         # Larger cache reduces disk I/O for the hot path (accounts, mappings).
         conn.execute("PRAGMA cache_size = -2000")  # 2MB page cache
+        return conn
+
+    @contextmanager
+    def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        """Context manager for database connections (pooled).
+
+        Reuses connections from a small pool instead of opening a new sqlite3
+        connection on every query. Each connection is exclusive to one caller
+        for the duration of the ``with`` block, so it is safe to share across
+        threads (``check_same_thread=False`` + serial use).
+        """
+        try:
+            conn = self._conn_pool.get_nowait()
+        except Exception:
+            conn = self._new_connection()
         try:
             yield conn
             conn.commit()
         except Exception:
-            conn.rollback()
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             raise
         finally:
-            conn.close()
+            # Return the connection to the bounded pool, or close it if full.
+            if self._conn_pool.qsize() < self._pool_max:
+                self._conn_pool.put(conn)
+            else:
+                conn.close()
 
     def vacuum(self):
         """Reclaim disk space by rebuilding the database file.
@@ -138,7 +167,7 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (account_id, alias_name, cache_date),
-                    FOREIGN KEY (account_id) REFERENCES account_quotas(account_id) ON DELETE CASCADE
+                    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
                 )
             """)
 

@@ -147,10 +147,18 @@ class LogRepository:
         return records, total
 
     def count_today(self) -> int:
-        """Count requests today."""
+        """Count requests today (Asia/Shanghai), consistent with dashboard stats."""
+        from core.timezone import today
+
+        today_str = today()
         with self.db.get_connection() as conn:
+            # `timestamp` is stored as UTC (CURRENT_TIMESTAMP). Shift it to
+            # Shanghai before extracting the date so "today" matches the
+            # dashboard, which floors stats by Shanghai local time.
             cursor = conn.execute(
-                "SELECT COUNT(*) FROM request_logs WHERE date(timestamp) = date('now')"
+                "SELECT COUNT(*) FROM request_logs "
+                "WHERE strftime('%Y-%m-%d', timestamp, '+8 hours') = ?",
+                (today_str,),
             )
             return cursor.fetchone()[0]
 

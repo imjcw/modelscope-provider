@@ -105,6 +105,34 @@
             </div>
           </FormField>
         </template>
+        <template v-if="form.strategy_type === 'header_based'">
+          <div class="rounded-lg border border-ls-border p-3 space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="text-xs font-semibold text-ls-dim">响应头配置（被动限流）</div>
+            </div>
+            <p class="text-xs text-ls-muted">指定上游响应头名称；留空则使用默认 ModelScope 头。可填「已用」头，剩余量将由 总数 − 已用 推导。</p>
+            <div class="grid grid-cols-2 gap-3">
+              <FormField label="供应商·总数头">
+                <input v-model="form.config.headers.supplier_total" type="text" placeholder="modelscope-ratelimit-requests-limit" class="form-input font-mono text-xs">
+              </FormField>
+              <FormField label="供应商·已用头">
+                <input v-model="form.config.headers.supplier_used" type="text" placeholder="（可选）" class="form-input font-mono text-xs">
+              </FormField>
+              <FormField label="供应商·剩余头">
+                <input v-model="form.config.headers.supplier_remaining" type="text" placeholder="modelscope-ratelimit-requests-remaining" class="form-input font-mono text-xs">
+              </FormField>
+              <FormField label="模型·总数头">
+                <input v-model="form.config.headers.model_total" type="text" placeholder="modelscope-ratelimit-model-requests-limit" class="form-input font-mono text-xs">
+              </FormField>
+              <FormField label="模型·已用头">
+                <input v-model="form.config.headers.model_used" type="text" placeholder="（可选）" class="form-input font-mono text-xs">
+              </FormField>
+              <FormField label="模型·剩余头">
+                <input v-model="form.config.headers.model_remaining" type="text" placeholder="modelscope-ratelimit-model-requests-remaining" class="form-input font-mono text-xs">
+              </FormField>
+            </div>
+          </div>
+        </template>
         <FormField label="颜色">
           <input v-model="form.color" type="color" class="h-9 w-full rounded-lg border border-ls-border bg-ls-bg cursor-pointer">
         </FormField>
@@ -145,7 +173,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, inject } from 'vue'
+import { ref, reactive, onMounted, inject, watch } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import PageState from '@/components/PageState.vue'
 import CTable from '@/components/CTable.vue'
@@ -164,6 +192,16 @@ const STRATEGY_OPTIONS = [
   { label: '固定窗口（fixed_window）', value: 'fixed_window' },
   { label: '按模型窗口（fixed_window_per_model）', value: 'fixed_window_per_model' },
 ]
+
+// 被动限流默认响应头（与后端 DEFAULT_HEADER_BASED_CONFIG 保持一致）
+const DEFAULT_HEADER_CONFIG = {
+  supplier_total: 'modelscope-ratelimit-requests-limit',
+  supplier_remaining: 'modelscope-ratelimit-requests-remaining',
+  supplier_used: '',
+  model_total: 'modelscope-ratelimit-model-requests-limit',
+  model_remaining: 'modelscope-ratelimit-model-requests-remaining',
+  model_used: '',
+}
 
 const loading = ref(true)
 const error = ref(null)
@@ -196,6 +234,14 @@ const slugify = (text) => {
     .replace(/[^\w\u4e00-\u9fff]+/g, '-')  // 非单词字符（含中文）→ 连字符
     .replace(/^-+|-+$/g, '')               // 去掉首尾连字符
     || 'untitled'
+}
+
+// 确保 form.config.headers 存在，缺失时用默认值补齐（仅被动限流需要）
+const ensureHeaders = () => {
+  if (!form.config) form.config = {}
+  if (!form.config.headers) {
+    form.config.headers = { ...DEFAULT_HEADER_CONFIG }
+  }
 }
 
 const autoGenerateKey = () => {
@@ -252,7 +298,7 @@ const openCreate = () => {
   form.name = ''
   form.description = ''
   form.strategy_type = 'header_based'
-  form.config = { window_seconds: 18000, max_requests: 1500 }
+  form.config = { window_seconds: 18000, max_requests: 1500, headers: { ...DEFAULT_HEADER_CONFIG } }
   form.color = 'var(--chart-blue)'
   modelOverrides.value = []
   showDrawer.value = true
@@ -270,6 +316,10 @@ const openEdit = (pt) => {
     form.config = { ...(pt.config || {}), window_seconds: pt.config?.window_seconds || 18000, max_requests: pt.config?.max_requests || 1500 }
   }
   form.color = pt.color || 'var(--chart-blue)'
+  // 被动限流：确保响应头配置存在（缺失则补默认值）
+  if (form.strategy_type === 'header_based') {
+    ensureHeaders()
+  }
   // Convert config.models object to array for editing
   const models = pt.config?.models || {}
   modelOverrides.value = Object.entries(models).map(([name, cfg]) => ({
@@ -319,6 +369,10 @@ const save = async () => {
     } else {
       // Ensure models field is not sent for non-per-model types
       delete payload.config.models
+      if (form.strategy_type !== 'header_based') {
+        // 仅被动限流需要响应头配置
+        delete payload.config.headers
+      }
     }
     if (editingId.value) {
       await updateProviderType(editingId.value, {
@@ -371,6 +425,11 @@ const doDelete = async () => {
     deleting.value = false
   }
 }
+
+// 切换到被动限流时，确保响应头配置存在
+watch(() => form.strategy_type, (val) => {
+  if (val === 'header_based') ensureHeaders()
+})
 
 onMounted(() => {
   load()

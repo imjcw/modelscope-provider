@@ -101,3 +101,57 @@ def test_update_quota_missing_headers():
         0,  # quota_remaining defaults to 0
         0   # quota_limit defaults to 0
     )
+
+
+def test_custom_header_names():
+    """Custom header names from header_config should be honored."""
+    mock_repo = Mock()
+    updater = QuotaUpdater(mock_repo)
+    account = Mock()
+    account.account_id = "acct"
+    header_config = {
+        "supplier_total": "x-total",
+        "supplier_remaining": "x-remaining",
+        "model_total": "x-model-total",
+        "model_remaining": "x-model-remaining",
+    }
+    headers = {
+        "x-total": "500",
+        "x-remaining": "50",
+        "x-model-total": "200",
+        "x-model-remaining": "10",
+    }
+    updater.update_quota_after_request(account, headers, "hy3", header_config)
+    mock_repo.update_quota.assert_called_once_with("acct", 50, 500)
+    mock_repo.update_model_quota.assert_called_once_with("acct", "hy3", 10, 200)
+
+
+def test_used_header_derives_remaining():
+    """A *_used header should derive remaining = total - used."""
+    mock_repo = Mock()
+    updater = QuotaUpdater(mock_repo)
+    account = Mock()
+    account.account_id = "acct"
+    header_config = {
+        "supplier_total": "x-total",
+        "supplier_used": "x-used",
+    }
+    headers = {"x-total": "500", "x-used": "120"}
+    updater.update_quota_after_request(account, headers, "hy3", header_config)
+    # remaining = 500 - 120 = 380
+    mock_repo.update_quota.assert_called_once_with("acct", 380, 500)
+
+
+def test_invalid_used_header_skips_update():
+    """An unparseable *_used header should skip the quota update."""
+    mock_repo = Mock()
+    updater = QuotaUpdater(mock_repo)
+    account = Mock()
+    account.account_id = "acct"
+    header_config = {
+        "supplier_total": "x-total",
+        "supplier_used": "x-used",
+    }
+    headers = {"x-total": "bad", "x-used": "not-a-number"}
+    updater.update_quota_after_request(account, headers, "hy3", header_config)
+    mock_repo.update_quota.assert_not_called()

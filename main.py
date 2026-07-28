@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 # When imported as a module (e.g. via uvicorn), use 'provider.' prefix;
 # when run as a script from the provider/ dir, bare imports work.
@@ -130,7 +130,7 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(interval)
                 admin = svc.get("admin_service")
                 if admin:
-                    admin.cleanup_old_logs()
+                    await asyncio.to_thread(admin.cleanup_old_logs)
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -144,7 +144,7 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(interval)
                 cache = svc.get("rate_limit_cache")
                 if cache:
-                    cache.flush()
+                    await asyncio.to_thread(cache.flush)
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -158,7 +158,7 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(interval)
                 cache = svc.get("config_cache")
                 if cache:
-                    cache.reload()
+                    await asyncio.to_thread(cache.reload)
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -220,6 +220,22 @@ def create_app():
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             response.headers["Expires"] = "0"
         return response
+
+    # Reject oversized request bodies to protect upstream accounts.
+    MAX_REQUEST_BODY = 16 * 1024 * 1024  # 16 MB
+
+    @app.middleware("http")
+    async def limit_request_body(request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > MAX_REQUEST_BODY:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "error": "Payload too large",
+                    "detail": f"Request body exceeds the {MAX_REQUEST_BODY} byte limit",
+                },
+            )
+        return await call_next(request)
 
     # Serve static frontend files (no cache in dev for hot refresh)
     dist_dir = Path(__file__).parent / "web" / "dist"
