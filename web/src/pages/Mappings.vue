@@ -1,12 +1,12 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden">
-    <PageHeader title="虚拟模型 // Mappings" subtitle="// 管理虚拟模型ID及其绑定的供应商模型">
+    <PageHeader title="智能路由 // Smart Routing" subtitle="// 管理智能路由ID及其绑定的供应商模型">
       <template #action>
         <button @click="openAdd" class="btn btn-primary">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
-          添加虚拟模型
+          添加智能路由
         </button>
       </template>
     </PageHeader>
@@ -14,12 +14,12 @@
     <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6">
       <PageState :loading="loading" :error="error">
         <!-- ═══════════════════════════════════════════
-             虚拟模型列表（表格形式）
+             智能路由列表（表格形式）
              ═══════════════════════════════════════════ -->
         <CTable v-if="mappings.length > 0">
           <thead>
             <tr>
-              <th class="text-left">虚拟模型ID</th>
+              <th class="text-left">智能路由ID</th>
               <th class="text-left">绑定模型</th>
               <th class="text-left">状态</th>
               <th class="text-left">创建时间</th>
@@ -30,7 +30,7 @@
           <tbody>
             <tr v-for="m in mappings" :key="m.alias_name"
               :class="{ 'opacity-50': m.status !== 'active' }">
-              <!-- 虚拟模型ID -->
+              <!-- 智能路由ID -->
               <td class="font-mono text-ls-accent font-semibold">{{ m.alias_name }}</td>
               <!-- 绑定模型个数 -->
               <td>
@@ -65,36 +65,36 @@
         </CTable>
 
         <!-- ── 空态 ── -->
-        <EmptyState v-if="mappings.length === 0" text="暂无虚拟模型">
+        <EmptyState v-if="mappings.length === 0" text="暂无智能路由">
           <template #icon>
             <CIcon name="link" :size="32" :stroke-width="1.5" class="text-ls-muted" />
           </template>
           <template #action>
-            <button @click="openAdd" class="text-xs text-ls-accent hover:text-ls-accentHover">添加第一个虚拟模型 →</button>
+            <button @click="openAdd" class="text-xs text-ls-accent hover:text-ls-accentHover">添加第一个智能路由 →</button>
           </template>
         </EmptyState>
         <div v-else class="mt-4 flex items-center justify-center gap-2 text-sm text-ls-muted">
-          共 {{ mappings.length }} 个虚拟模型
+          共 {{ mappings.length }} 个智能路由
         </div>
       </PageState>
     </div>
 
     <!-- ═══════════════════════════════════════════
-         添加/编辑 虚拟模型 抽屉
+         添加/编辑 智能路由 抽屉
          ═══════════════════════════════════════════ -->
-    <Drawer v-model="showFormDrawer" :title="isEditing ? '编辑虚拟模型' : '添加虚拟模型'">
+    <Drawer v-model="showFormDrawer" :title="isEditing ? '编辑智能路由' : '添加智能路由'">
       <div class="space-y-5">
-        <!-- 虚拟模型ID -->
-        <FormField label="虚拟模型ID" required>
-          <input v-model="form.alias" type="text" placeholder="my-virtual-model"
+        <!-- 智能路由ID -->
+        <FormField label="智能路由ID" required>
+          <input v-model="form.alias" type="text" placeholder="my-smart-route"
             class="form-input font-mono" :disabled="isEditing"
             @keyup.enter="submitForm" ref="formAliasInput">
-          <p v-if="isEditing" class="text-[10px] text-ls-muted mt-1">虚拟模型ID不可修改</p>
+          <p v-if="isEditing" class="text-[10px] text-ls-muted mt-1">智能路由ID不可修改</p>
         </FormField>
 
         <!-- 描述 -->
         <FormField label="描述" optional>
-          <textarea v-model="form.description" rows="2" placeholder="描述该虚拟模型的用途..."
+          <textarea v-model="form.description" rows="2" placeholder="描述该智能路由的用途..."
             class="form-input resize-none"></textarea>
         </FormField>
 
@@ -167,7 +167,7 @@
               <p class="text-[10px] text-gray-600 mt-2">拖拽行可调整负载均衡中的使用顺序</p>
             </div>
             <p v-else class="text-xs text-gray-500 text-center py-3">
-              暂无绑定模型，请求时将直接使用虚拟模型ID
+              暂无绑定模型，请求时将直接使用智能路由ID
             </p>
           </div>
         </div>
@@ -181,11 +181,11 @@
       </template>
     </Drawer>
 
-    <!-- ── 删除虚拟模型确认 弹窗 ── -->
+    <!-- ── 删除智能路由确认 弹窗 ── -->
     <ConfirmModal
       v-model="showDeleteModal"
       title="确认删除"
-      :message="`确定删除虚拟模型 <strong class='text-white'>${deletingItem?.alias_name || ''}</strong> 吗？<br><span class='text-gray-500 text-xs'>此操作不可撤销</span>`"
+      :message="`确定删除智能路由 <strong class='text-white'>${deletingItem?.alias_name || ''}</strong> 吗？<br><span class='text-gray-500 text-xs'>此操作不可撤销</span>`"
       danger
       :confirm-text="deleting ? '删除中...' : '确认删除'"
       :disabled="deleting"
@@ -249,7 +249,7 @@ const formAliasInput = ref(null)
 const isEditing = ref(false)
 const form = ref({ alias: '', description: '' })
 
-// ── Delete modal（虚拟模型） ──
+// ── Delete modal（智能路由） ──
 const showDeleteModal = ref(false)
 const deleting = ref(false)
 const deletingItem = ref(null)
@@ -360,7 +360,7 @@ const closeForm = () => {
 
 const submitForm = async () => {
   if (!form.value.alias) {
-    toast('请填写虚拟模型ID', 'error')
+    toast('请填写智能路由ID', 'error')
     return
   }
   submitting.value = true
@@ -369,7 +369,7 @@ const submitForm = async () => {
     for (const m of mappings.value) {
       allMappings[m.alias_name] = m.actual_model_id || m.alias_name
     }
-    allMappings[form.value.alias] = form.value.alias // 虚拟模型ID 自身作为 actual_model_id
+    allMappings[form.value.alias] = form.value.alias // 智能路由ID 自身作为 actual_model_id
     await apiBulkUpdate(allMappings)
 
     // 创建模式：别名创建后，持久化暂存的绑定模型
@@ -512,7 +512,7 @@ const openLog = (item) => {
   showLogPanel.value = true
 }
 
-// ── 删除虚拟模型 ──
+// ── 删除智能路由 ──
 const openDeleteConfirm = (item) => {
   deletingItem.value = item
   showDeleteModal.value = true

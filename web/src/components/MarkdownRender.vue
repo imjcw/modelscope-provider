@@ -51,7 +51,7 @@ md.use(function codeBlockPlugin(md) {
       '<button class="cb-copy" type="button" title="复制">' +
       '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
       '<rect x="9" y="9" width="13" height="13" rx="2"/>' +
-      '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>' +
+      '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> 复制</button></div>' +
       '<div class="cb-body">' + bodyHtml + '</div></div>\n'
   }
 })
@@ -215,13 +215,13 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
 }
 
-/* Fenced code blocks */
+/* Fenced code blocks — 深色底，圆角，文件名顶左，复制按钮顶右 */
 .md-content :deep(.codeblock) {
   margin: 0.8em 0;
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   border: 1px solid var(--code-border);
   overflow: hidden;
-  background: transparent;
+  background: #0a0f1d;
 }
 
 .md-content :deep(.cb-header) {
@@ -232,14 +232,15 @@ onBeforeUnmount(() => {
   padding: 0 12px;
   border-bottom: 1px solid var(--code-sep);
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  background: #0d1424;
 }
 
 .md-content :deep(.cb-lang) {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
-  color: var(--code-muted);
+  font-size: 11px;
+  color: #c4c4d4;
 }
 
 .md-content :deep(.cb-dot) {
@@ -247,23 +248,26 @@ onBeforeUnmount(() => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--chart-blue);
+  background: #60a5fa;
 }
 
 .md-content :deep(.cb-copy) {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-  font-size: 12px;
-  color: var(--text-muted);
-  opacity: 0.6;
-  transition: opacity 0.15s;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+  color: #8a8aa6;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s, background 0.15s;
 }
 .md-content :deep(.cb-copy:hover) {
-  opacity: 1;
-  color: var(--text);
+  color: #c4c4d4;
+  background: rgba(0,255,255,0.08);
 }
 
 .md-content :deep(.cb-body) {
@@ -271,6 +275,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
   overflow-x: auto;
   padding: 8px 0;
+  background: #0a0f1d;
 }
 
 .md-content :deep(.cb-body > div) { display: flex; }
@@ -287,6 +292,7 @@ onBeforeUnmount(() => {
   margin: -8px 0;
   padding-top: 8px;
   padding-bottom: 8px;
+  color: #5a5a72;
 }
 
 .md-content :deep(.cb-text) {
@@ -294,5 +300,23 @@ onBeforeUnmount(() => {
   line-height: 20px;
   white-space: pre-wrap;
   padding-left: 12px;
+  color: #3ecf75;
+}
+
+[data-theme="light"] .md-content :deep(.codeblock) {
+  background: #ffffff;
+}
+[data-theme="light"] .md-content :deep(.cb-header) {
+  background: #f5f5f8;
+  border-bottom-color: #d0d0e0;
+}
+[data-theme="light"] .md-content :deep(.cb-body) {
+  background: #ffffff;
+}
+[data-theme="light"] .md-content :deep(.cb-num) {
+  color: #5a5a7a;
+}
+[data-theme="light"] .md-content :deep(.cb-text) {
+  color: #1a1a2e;
 }
 </style>

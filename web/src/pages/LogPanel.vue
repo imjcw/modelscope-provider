@@ -1,6 +1,6 @@
 <script setup>
 /**
- * LogPanel — 虚拟模型「日志」列点开后的抽屉：使用情况统计。
+ * LogPanel — 智能路由「日志」列点开后的抽屉：使用情况统计。
  * 复用 <Drawer> 组件（与 Accounts/添加/编辑/用量抽屉同构），自带滑入/滑出过渡。
  * 纯展示型：GET /mappings/{alias}/logs，按时间范围聚合。
  * 赛博朋克霓虹主题。

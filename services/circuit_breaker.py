@@ -216,6 +216,20 @@ class CircuitBreaker:
                 self._escalate(strategy, account_id, model_name, state.error_type)
                 return
 
+            # 瞬时错误（server_error / network_error / timeout）第 1 次失败不冻结 —
+            # 允许下一次请求继续尝试，避免单一候选场景因一次上游抖动就整条路由冻住。
+            # 第 2 次起才进入冻结 + exponential backoff。
+            # bad_request / auth_error 不在此列：这些错误重试无意义，立即冻结。
+            if state.consecutive_failures == 1 and state.error_type in (
+                "server_error", "network_error", "timeout",
+            ):
+                logger.info(
+                    "Circuit breaker: %s/%s first transient failure (status=%s), "
+                    "not freezing — allowing next request to retry",
+                    account_id, model_name, status_code,
+                )
+                return
+
             # ----- Freeze -----
             freeze_seconds = self._get_freeze_seconds(
                 state.error_type, state.consecutive_failures,

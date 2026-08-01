@@ -6,7 +6,7 @@
  *
  * Usage:
  *   <FormField label="别名"><input class="form-input" ... /></FormField>
- *   <FormField label="虚拟模型ID" required>...</FormField>
+ *   <FormField label="智能路由ID" required>...</FormField>
  *   <FormField label="描述" optional>...</FormField>
  *   <FormField label="监听地址" plain hint="(读取配置文件)">...</FormField>
  */

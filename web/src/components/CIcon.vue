@@ -43,8 +43,15 @@ const ICONS = {
   spinner: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54 .54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
+  'chevron-up': '<polyline points="6 15 12 9 18 15"/>',
+  send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  lightbulb: '<path d="M9 21h6"/><path d="M10 21a8 8 0 0 1-3-15.5v1.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1.5a8 8 0 0 1-3 15.5"/><line x1="12" y1="3" x2="12" y2="3"/>',
+  code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  refresh: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+  message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   grip: { fill: true, d: '<circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>' },
   menu: { round: true, d: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>' },
+  terminal: { round: true, d: '<path d="M4 17l6-6-6-6"/><path d="M12 19h8"/>' },
 }
 
 const entry = computed(() => {

@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Loading Screen Designs</title>
+  <style>
+    /* ── Design Tokens (Cyberpunk Neon) ── */
+    :root {
+      --bg: #0a0a0f;
+      --cyan: #00ffff;
+      --magenta: #ff00ff;
+      --lime: #84cc16;
+      --fg: #ffffff;
+      --muted: #6b7280;
+      --card: #0f0f1a;
+      --border: rgba(0,255,255,0.15);
+      --glow-cyan: 0 0 15px rgba(0,255,255,0.4);
+      --glow-magenta: 0 0 15px rgba(255,0,255,0.4);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(to right, var(--cyan), var(--magenta));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      margin-bottom: 2rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 280px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-label {
+      position: absolute;
+      top: 0.75rem;
+      left: 0.75rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      color: var(--cyan);
+      opacity: 0.6;
+      text-transform: uppercase;
+    }
+
+    /* ═══════════════════════════════════════
+       Design 1: Morphing Dots
+       ═══════════════════════════════════════ */
+    .morph-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: var(--glow-cyan);
+      animation: morph 1.8s ease-in-out infinite;
+    }
+
+    @keyframes morph {
+      0%, 100% { transform: scale(1) rotate(0deg); border-radius: 50%; }
+      25% { transform: scale(1.4) rotate(45deg); border-radius: 30%; }
+      50% { transform: scale(1) rotate(90deg); border-radius: 50%; }
+      75% { transform: scale(0.7) rotate(135deg); border-radius: 20%; }
+    }
+
+    /* ═══════════════════════════════════════
+       Design 2: Breathing Ring Trails
+       ═══════════════════════════════════════ */
+    .trail-ring {
+      position: relative;
+      width: 60px;
+      height: 60px;
+    }
+
+    .trail-ring span {
+      position: absolute;
+      inset: 0;
+      border: 2px solid var(--cyan);
+      border-radius: 50%;
+      opacity: 0;
+      animation: trail 2s ease-out infinite;
+    }
+
+    .trail-ring span:nth-child(1) { animation-delay: 0s; }
+    .trail-ring span:nth-child(2) { animation-delay: 0.4s; }
+    .trail-ring span:nth-child(3) { animation-delay: 0.8s; }
+
+    @keyframes trail {
+      0% { transform: scale(0.3); opacity: 1; }
+      100% { transform: scale(1.8); opacity: 0; }
+    }
+
+    /* ═══════════════════════════════════════
+       Design 3: Glitch Text
+       ═══════════════════════════════════════ */
+    .glitch-text {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      position: relative;
+      color: var(--fg);
+    }
+
+    .glitch-text::before,
+    .glitch-text::after {
+      content: 'INIT';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .glitch-text::before {
+      color: var(--cyan);
+      animation: glitch-1 2s infinite linear alternate-reverse;
+      clip-path: inset(0 0 60% 0);
+    }
+
+    .glitch-text::after {
+      color: var(--magenta);
+      animation: glitch-2 2s infinite linear alternate-reverse;
+      clip-path: inset(60% 0 0 0);
+    }
+
+    @keyframes glitch-1 {
+      0%, 90% { transform: translate(0); }
+      92% { transform: translate(-3px, 1px); }
+      94% { transform: translate(3px, -1px); }
+      96% { transform: translate(-2px, 2px); }
+      98% { transform: translate(2px, -2px); }
+      100% { transform: translate(0); }
+    }
+
+    @keyframes glitch-2 {
+      0%, 88% { transform: translate(0); }
+      90% { transform: translate(2px, -1px); }
+      93% { transform: translate(-2px, 1px); }
+      96% { transform: translate(3px, 0); }
+      100% { transform: translate(0); }
+    }
+
+    /* ═══════════════════════════════════════
+       Design 4: Scanning Beam
+       ═══════════════════════════════════════ */
+    .scan-beam {
+      width: 120px;
+      height: 4px;
+      background: var(--card);
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .scan-beam::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -40%;
+      width: 40%;
+      height: 100%;
+      background: linear-gradient(to right, transparent, var(--cyan), var(--magenta), transparent);
+      animation: scan 1.5s ease-in-out infinite;
+    }
+
+    @keyframes scan {
+      0% { left: -40%; }
+      100% { left: 100%; }
+    }
+
+    /* ═══════════════════════════════════════
+       Design 5: Orbiting Particles
+       ═══════════════════════════════════════ */
+    .orbit {
+      position: relative;
+      width: 70px;
+      height: 70px;
+    }
+
+    .orbit span {
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      margin: -3px 0 0 -3px;
+      animation: orbit-spin 2s linear infinite;
+    }
+
+    .orbit span:nth-child(1) {
+      background: var(--cyan);
+      box-shadow: var(--glow-cyan);
+      --angle: 0deg;
+      --dist: 28px;
+      animation-name: orbit-spin;
+    }
+
+    .orbit span:nth-child(2) {
+      background: var(--magenta);
+      box-shadow: var(--glow-magenta);
+      animation-delay: 0.5s;
+      --dist: 28px;
+    }
+
+    .orbit span:nth-child(3) {
+      background: var(--lime);
+      box-shadow: 0 0 10px rgba(132,204,22,0.5);
+      animation-delay: 1s;
+      --dist: 28px;
+    }
+
+    @keyframes orbit-spin {
+      0% { transform: rotate(0deg) translateX(var(--dist)) rotate(0deg); }
+      100% { transform: rotate(360deg) translateX(var(--dist)) rotate(-360deg); }
+    }
+
+    /* ═══════════════════════════════════════
+       Design 6: Pulse Grid
+       ═══════════════════════════════════════ */
+    .pulse-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 10px);
+      gap: 6px;
+    }
+
+    .pulse-grid span {
+      width: 10px;
+      height: 10px;
+      background: var(--cyan);
+      border-radius: 2px;
+      animation: pulse-grid 1.6s ease-in-out infinite;
+    }
+
+    .pulse-grid span:nth-child(1) { animation-delay: 0s; }
+    .pulse-grid span:nth-child(2) { animation-delay: 0.1s; }
+    .pulse-grid span:nth-child(3) { animation-delay: 0.2s; }
+    .pulse-grid span:nth-child(4) { animation-delay: 0.1s; }
+    .pulse-grid span:nth-child(5) { animation-delay: 0.2s; }
+    .pulse-grid span:nth-child(6) { animation-delay: 0.3s; }
+    .pulse-grid span:nth-child(7) { animation-delay: 0.2s; }
+    .pulse-grid span:nth-child(8) { animation-delay: 0.3s; }
+    .pulse-grid span:nth-child(9) { animation-delay: 0.4s; }
+
+    @keyframes pulse-grid {
+      0%, 100% { opacity: 0.2; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    /* ═══════════════════════════════════════
+       Design 7: Waveform
+       ═══════════════════════════════════════ */
+    .waveform {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 40px;
+    }
+
+    .waveform span {
+      width: 3px;
+      height: 8px;
+      background: var(--cyan);
+      border-radius: 2px;
+      animation: wave 1.2s ease-in-out infinite;
+    }
+
+    .waveform span:nth-child(1) { animation-delay: 0s; }
+    .waveform span:nth-child(2) { animation-delay: 0.1s; }
+    .waveform span:nth-child(3) { animation-delay: 0.2s; }
+    .waveform span:nth-child(4) { animation-delay: 0.3s; }
+    .waveform span:nth-child(5) { animation-delay: 0.4s; }
+    .waveform span:nth-child(6) { animation-delay: 0.3s; }
+    .waveform span:nth-child(7) { animation-delay: 0.2s; }
+    .waveform span:nth-child(8) { animation-delay: 0.1s; }
+
+    @keyframes wave {
+      0%, 100% { height: 8px; opacity: 0.4; }
+      50% { height: 32px; opacity: 1; }
+    }
+
+    /* ═══════════════════════════════════════
+       Design 8: Fractal Spiral
+       ═══════════════════════════════════════ */
+    .spiral {
+      width: 60px;
+      height: 60px;
+      position: relative;
+    }
+
+    .spiral::before,
+    .spiral::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border: 2px solid transparent;
+      border-radius: 50%;
+    }
+
+    .spiral::before {
+      border-top-color: var(--cyan);
+      animation: spin 2s linear infinite;
+    }
+
+    .spiral::after {
+      border-bottom-color: var(--magenta);
+      animation: spin 2s linear infinite reverse;
+      inset: 8px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ═══════════════════════════════════════
+       Design 9: Typewriter
+       ═══════════════════════════════════════ */
+    .typewriter-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      width: 100%;
+    }
+
+    .typewriter-text {
+      font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+      font-size: 0.8rem;
+      color: var(--cyan);
+      letter-spacing: 0.05em;
+      min-height: 1.5em;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 3rem;
+      text-align: center;
+      font-size: 0.65rem;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+  </style>
+</head>
+<body>
+  <h1>LOADING SCREEN DESIGNS</h1>
+  <p class="subtitle">9 non-traditional loading animations · Cyberpunk Neon style</p>
+
+  <div class="grid">
+
+    <!-- 1: Morphing Dot -->
+    <div class="card">
+      <span class="card-label">01 · Morph</span>
+      <div class="morph-dot"></div>
+    </div>
+
+    <!-- 2: Breathing Ring Trails -->
+    <div class="card">
+      <span class="card-label">02 · Trails</span>
+      <div class="trail-ring">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+
+    <!-- 3: Glitch Text -->
+    <div class="card">
+      <span class="card-label">03 · Glitch</span>
+      <div class="glitch-text">INIT</div>
+    </div>
+
+    <!-- 4: Scanning Beam -->
+    <div class="card">
+      <span class="card-label">04 · Scan</span>
+      <div class="scan-beam"></div>
+    </div>
+
+    <!-- 5: Orbiting Particles -->
+    <div class="card">
+      <span class="card-label">05 · Orbit</span>
+      <div class="orbit">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+
+    <!-- 6: Pulse Grid -->
+    <div class="card">
+      <span class="card-label">06 · Grid</span>
+      <div class="pulse-grid">
+        <span></span><span></span><span></span>
+        <span></span><span></span><span></span>
+        <span></span><span></span><span></span>
+      </div>
+    </div>
+
+    <!-- 7: Waveform -->
+    <div class="card">
+      <span class="card-label">07 · Wave</span>
+      <div class="waveform">
+        <span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span>
+      </div>
+    </div>
+
+    <!-- 8: Fractal Spiral -->
+    <div class="card">
+      <span class="card-label">08 · Spiral</span>
+      <div class="spiral"></div>
+    </div>
+
+    <!-- 9: Typewriter -->
+    <div class="card">
+      <span class="card-label">09 · Typewriter</span>
+      <div class="flex items-start font-mono text-sm tracking-wider" id="typewriter-demo" style="color: var(--cyan); width: 100%;">
+        <span class="inline-block w-1 h-5 flex-shrink-0 mr-2"
+             style="background: var(--cyan); box-shadow: 0 0 8px rgba(0,255,255,0.6); align-self: flex-start; animation: blink 0.8s step-end infinite;"></span>
+        <span id="typewriter-demo-text"></span>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="footer">Pick your favorite · Copy the CSS + HTML into index.html</p>
+
+  <!-- ── Typewriter demo script ── -->
+  <script>
+    (function () {
+      const lines = [
+        '> initializing provider engine...',
+        '> loading rate-limit strategies...',
+        '> connecting to quota repository...',
+        '> ready.',
+      ];
+      const el = document.getElementById('typewriter-demo-text');
+      let lineIdx = 0;
+      let charIdx = 0;
+
+      function type() {
+        if (lineIdx >= lines.length) return;
+
+        const currentLine = lines[lineIdx];
+        el.textContent = currentLine.slice(0, charIdx + 1);
+        charIdx++;
+
+        if (charIdx === currentLine.length) {
+          lineIdx++;
+          charIdx = 0;
+          setTimeout(type, 600);
+          return;
+        }
+        setTimeout(type, 40 + Math.random() * 20);
+      }
+
+      type();
+    })();
+  </script>
+</body>
+</html>

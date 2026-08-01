@@ -8,9 +8,69 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+      }
+    </style>
   </head>
-  <body class="bg-ls-bg text-white antialiased">
-    <div id="app"></div>
+  <body class="bg-[#0a0a0f] text-white antialiased overflow-hidden">
+    <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <!-- fill 实心字形：颜色由外层 <svg fill="currentColor"> 继承，避免 currentColor 在 symbol 定义处解析 -->
+        <symbol id="icon-line-arrow-down" viewBox="0 0 24 24">
+          <path d="M12 5v14M19 12l-7 7-7-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </symbol>
+      </defs>
+    </svg>
+    <div id="app">
+      <!-- ── 打字机加载画面 ── -->
+      <div class="fixed inset-0 flex flex-col items-center justify-center bg-[#0a0a0f] z-50">
+        <!-- 扫描线叠加 -->
+        <div class="absolute inset-0 pointer-events-none"
+             style="background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,255,0.012) 2px, rgba(0,255,255,0.012) 4px);"></div>
+
+        <!-- 打字机：光标在左，文字往右打 -->
+        <div class="flex items-start font-mono text-sm tracking-wider" id="typewriter" style="color: #00ffff;">
+          <span class="inline-block w-1 h-5 flex-shrink-0 mr-2"
+               style="background: #00ffff; box-shadow: 0 0 8px rgba(0,255,255,0.6); align-self: flex-start; animation: blink 0.8s step-end infinite;"></span>
+          <span id="typewriter-text"></span>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.js"></script>
+    <script>
+      /* ── 打字机效果（只写不回删） ── */
+      (function () {
+        const lines = [
+          '> initializing provider engine...',
+          '> loading rate-limit strategies...',
+          '> connecting to quota repository...',
+          '> ready.',
+        ];
+        const el = document.getElementById('typewriter-text');
+        let lineIdx = 0;
+        let charIdx = 0;
+
+        function type() {
+          if (lineIdx >= lines.length) return;
+
+          const currentLine = lines[lineIdx];
+          el.textContent = currentLine.slice(0, charIdx + 1);
+          charIdx++;
+
+          if (charIdx === currentLine.length) {
+            lineIdx++;
+            charIdx = 0;
+            setTimeout(type, 600);
+            return;
+          }
+          setTimeout(type, 40 + Math.random() * 20);
+        }
+
+        type();
+      })();
+    </script>
   </body>
 </html>

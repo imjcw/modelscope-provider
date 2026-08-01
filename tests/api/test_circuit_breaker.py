@@ -101,18 +101,38 @@ class TestStateMachine:
         cb = CircuitBreaker()
         assert cb.check("acc-1", "model-1") is True
 
-    def test_single_failure_freezes_temporarily(self):
+    def test_single_transient_failure_does_not_freeze(self):
         cb = CircuitBreaker()
         cb.record_failure("acc-1", "model-1", 500)
-        # Should be frozen
-        assert cb.check("acc-1", "model-1") is False
+        # Transient error 1st failure → NOT frozen (allow retry)
+        assert cb.check("acc-1", "model-1") is True
         # Other (account, model) is unaffected
         assert cb.check("acc-2", "model-1") is True
+        # 2nd consecutive transient failure → now freezes
+        cb.record_failure("acc-1", "model-1", 502)
+        assert cb.check("acc-1", "model-1") is False
+        state = cb.get_state("acc-1", "model-1")
+        assert state.consecutive_failures == 2
+        assert state.error_type == "server_error"
+
+    def test_single_bad_request_failure_still_freezes(self):
+        """Non-transient errors (4xx) still freeze on 1st failure."""
+        cb = CircuitBreaker()
+        cb.record_failure("acc-1", "model-1", 401)
+        assert cb.check("acc-1", "model-1") is False
+        state = cb.get_state("acc-1", "model-1")
+        assert state.consecutive_failures == 1
+        assert state.error_type == "auth_error"
 
     def test_success_resets_circuit(self):
         cb = CircuitBreaker()
+        # 1st transient failure → not frozen
+        cb.record_failure("acc-1", "model-1", 500)
+        assert cb.check("acc-1", "model-1") is True
+        # 2nd transient failure → frozen
         cb.record_failure("acc-1", "model-1", 500)
         assert cb.check("acc-1", "model-1") is False
+        # Success resets (half-open probe succeeds)
         cb.record_success("acc-1", "model-1")
         assert cb.check("acc-1", "model-1") is True
 
@@ -139,7 +159,10 @@ class TestStateMachine:
 
     def test_probe_failure_reopens(self):
         cb = CircuitBreaker()
-        cb.record_failure("acc-1", "model-1", 500)  # 1st failure
+        # Two transient failures → 2nd one freezes
+        cb.record_failure("acc-1", "model-1", 500)
+        cb.record_failure("acc-1", "model-1", 500)
+        assert cb.check("acc-1", "model-1") is False
         state = cb.get_state("acc-1", "model-1")
         state.frozen_until = time.time() - 1  # expired
         # Half-open → probe allowed
@@ -149,8 +172,8 @@ class TestStateMachine:
         assert cb.check("acc-1", "model-1") is False
         state2 = cb.get_state("acc-1", "model-1")
         assert state2 is not None
-        assert state2.consecutive_failures == 2
-        # Second failure → 60s (backoff starts at index 0 for 2nd failure)
+        assert state2.consecutive_failures == 3
+        # 3rd failure (index 1) → backoff[1] = 120s
         assert state2.frozen_until > time.time()
 
     def test_10_consecutive_failures_escalates(self):
@@ -175,6 +198,8 @@ class TestStateMachine:
 
     def test_different_accounts_are_independent(self):
         cb = CircuitBreaker()
+        # 2 transient failures → frozen
+        cb.record_failure("acc-1", "model-1", 500)
         cb.record_failure("acc-1", "model-1", 500)
         assert cb.check("acc-1", "model-1") is False
         assert cb.check("acc-2", "model-1") is True
@@ -312,6 +337,7 @@ class TestIntegrationCircuitBreaker:
         """The /api/admin/circuit-breaker endpoint should show state."""
         cb = client.app.state.services["circuit_breaker"]
         cb.record_failure("acc-1", "model-1", 500)
+        cb.record_failure("acc-1", "model-1", 500)  # 2nd → frozen
         cb.record_failure("acc-2", "model-2", 401)
 
         resp = client.get("/api/admin/circuit-breaker")

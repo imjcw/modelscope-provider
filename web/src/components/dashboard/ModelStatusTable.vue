@@ -79,8 +79,6 @@ const rateClass = (r) => {
 }
 const barClass = (pct) =>
   pct < 50 ? 'bg-green-400' : pct < 90 ? 'bg-yellow-400' : 'bg-red-400'
-const pctLabelClass = (pct) =>
-  pct < 50 ? 'text-ls-muted' : pct < 90 ? 'text-yellow-400' : 'text-red-400'
 
 const fmtWindow = (r) => {
   const st = r.strategy_type
@@ -163,7 +161,6 @@ const WINDOW_BADGE = {
               <div v-if="fmtWindow(row).sub" class="text-[10px] text-ls-muted mb-1">{{ fmtWindow(row).sub }}</div>
               <div v-if="row.usedPct !== null" class="w-20 mx-auto">
                 <ProgressBar :pct="row.usedPct" width="w-20" height="h-1.5" :bar-class="barClass(row.usedPct)" />
-                <span class="text-xs mt-1 inline-block" :class="pctLabelClass(row.usedPct)">{{ row.usedPct }}%</span>
               </div>
             </td>
             <td class="text-right hidden sm:table-cell">

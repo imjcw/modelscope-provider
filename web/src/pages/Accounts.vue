@@ -41,10 +41,11 @@
             <td>
               <CCheckbox :model-value="acc.status === 'active'" @update:modelValue="(val) => toggleSupplier(val, acc)" />
             </td>
-            <td class="text-xs">
+            <td class="text-xs" v-if="acc.provider_type">
               <span class="text-ls-text">{{ acc.quota_remaining }}</span>
               <span class="text-ls-muted"> / {{ acc.quota_limit }}</span>
             </td>
+            <td class="text-xs text-ls-muted" v-else>—</td>
             <td class="text-xs text-ls-dim">{{ (acc.models || []).length }}</td>
             <td>
               <button @click="openModelInfo(acc)" class="model-info-btn" title="查看模型用量与限制">
@@ -93,7 +94,7 @@
           </div>
         </FormField>
         <FormField label="供应商类型">
-          <CSelect v-model="newSupplier.provider_type" :options="providerTypeOptions" placeholder="选择供应商类型" />
+          <CSelect v-model="newSupplier.provider_type" :options="providerTypeOptions" placeholder="选择供应商类型（可选）" />
         </FormField>
         <FormField label="Base URL">
           <input v-model="newSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
@@ -134,7 +135,7 @@
           </div>
         </FormField>
         <FormField label="供应商类型">
-          <CSelect v-model="editingSupplier.provider_type" :options="providerTypeOptions" placeholder="选择供应商类型" />
+          <CSelect v-model="editingSupplier.provider_type" :options="providerTypeOptions" placeholder="选择供应商类型（可选）" />
         </FormField>
         <FormField label="Base URL">
           <input v-model="editingSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
@@ -246,7 +247,6 @@
               <div v-if="fmtWindowRow(m).sub" class="text-[10px] text-ls-muted mb-1">{{ fmtWindowRow(m).sub }}</div>
               <div v-if="usedPctRow(m) !== null" class="w-20 mx-auto">
                 <ProgressBar :pct="usedPctRow(m)" width="w-20" height="h-1.5" :bar-class="barClass(usedPctRow(m))" />
-                <span class="text-xs mt-1 inline-block" :class="pctLabelClass(usedPctRow(m))">{{ usedPctRow(m) }}%</span>
               </div>
               <div v-else class="text-xs text-ls-muted">—</div>
             </td>
@@ -300,7 +300,7 @@ const activeCount = computed(() => suppliers.value.filter(a => a.status === 'act
 // ── 供应商类型（来自后端 provider_types，支持动态新增/配置） ──
 const providerTypes = ref([])
 const providerTypeOptions = computed(() =>
-  providerTypes.value.map(pt => ({ label: pt.name, value: pt.type_key }))
+  [{ label: '无', value: '' }, ...providerTypes.value.map(pt => ({ label: pt.name, value: pt.type_key }))]
 )
 const ptMap = computed(() =>
   Object.fromEntries(providerTypes.value.map(pt => [pt.type_key, pt]))
@@ -363,8 +363,6 @@ const WINDOW_BADGE = {
 }
 const barClass = (pct) =>
   pct < 50 ? 'bg-green-400' : pct < 90 ? 'bg-yellow-400' : 'bg-red-400'
-const pctLabelClass = (pct) =>
-  pct < 50 ? 'text-ls-muted' : pct < 90 ? 'text-yellow-400' : 'text-red-400'
 
 const fmtWindowRow = (m) => {
   const st = m.strategy_type
@@ -415,7 +413,7 @@ const openModelInfo = (acc) => {
 const showAddDrawer = ref(false)
 const adding = ref(false)
 const addNameInput = ref(null)
-const newSupplier = ref({ name: '', api_key: '', base_url: '', provider_type: 'modelscope', models: [] })
+const newSupplier = ref({ name: '', api_key: '', base_url: '', provider_type: '', models: [] })
 const showNewApiKey = ref(false)
 
 // ── Edit drawer ──
@@ -503,7 +501,7 @@ const loadData = async () => {
 
 // ── Add (drawer) ──
 const openAdd = async () => {
-  newSupplier.value = { name: '', api_key: '', base_url: '', provider_type: 'modelscope', models: [] }
+  newSupplier.value = { name: '', api_key: '', base_url: '', provider_type: '', models: [] }
   showNewApiKey.value = false
   showAddDrawer.value = true
   await nextTick()
@@ -554,7 +552,7 @@ const openEdit = async (acc) => {
     name: acc.name,
     api_key: acc.api_key,
     base_url: acc.base_url,
-    provider_type: acc.provider_type || 'modelscope',
+    provider_type: acc.provider_type || '',
     status: acc.status,
     models: [],
   }

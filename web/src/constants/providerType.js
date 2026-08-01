@@ -3,6 +3,7 @@
  */
 
 export const PROVIDER_TYPE_OPTIONS = [
+  { label: '无', value: '' },
   { label: 'ModelScope', value: 'modelscope' },
   { label: '商汤', value: 'sensetime' },
 ]

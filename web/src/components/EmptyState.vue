@@ -3,9 +3,9 @@
  * EmptyState — 虚线边框空态（icon 插槽 + 文案 + action 插槽）。
  *
  * Usage:
- *   <EmptyState text="暂无虚拟模型">
+ *   <EmptyState text="暂无智能路由">
  *     <template #icon><CIcon name="link" :size="32" class="text-gray-600" /></template>
- *     <template #action><button ...>添加第一个虚拟模型 →</button></template>
+ *     <template #action><button ...>添加第一个智能路由 →</button></template>
  *   </EmptyState>
  */
 defineProps({

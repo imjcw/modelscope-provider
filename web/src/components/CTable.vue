@@ -6,7 +6,7 @@
  * （文字颜色、font-mono、text-left/right 等；勿再写 px-、py-、hover:bg- 类）。
  *
  * Usage:
- *   <CTable>                                 text-sm + px-5 py-3（供应商 / 虚拟模型 / API Keys / 告警）
+ *   <CTable>                                 text-sm + px-5 py-3（供应商 / 智能路由 / API Keys / 告警）
  *   <CTable size="sm" head-bg hover="full">  text-xs + px-4（请求日志）
  *   <CTable pad="sm">                        text-sm + px-4（模型用量抽屉）
  *   <CTable size="sm" head-bg dense>         text-xs + px-4 py-2.5（使用统计）

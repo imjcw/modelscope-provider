@@ -744,13 +744,22 @@ input[type="number"] {
   background: rgba(0,180,216,0.1);
 }
 
-/* 浅色：表单元素背景白色 */
+/* 浅色：表单元素背景白色（聊天输入框除外，保持透明） */
 [data-theme="light"] input:not([type="color"]):not([type="range"]),
 [data-theme="light"] select,
-[data-theme="light"] textarea,
+[data-theme="light"] textarea:not(.chat-textarea),
 [data-theme="light"] .c-select > button,
 [data-theme="light"] .c-select-trigger {
   background: var(--ls-card) !important;
+}
+
+/* 聊天输入框容器：暗色用卡片色，浅色用 #f7f8fc */
+.chat-input-box {
+  background: var(--ls-card);
+  transition: background 0.25s ease;
+}
+[data-theme="light"] .chat-input-box {
+  background: #f7f8fc;
 }
 
 /* 浅色：下拉选项悬停用淡蓝色 */
