@@ -1,48 +1,69 @@
 """AliasRouter — 根据虚拟模型ID的绑定条目选择路由。"""
 import logging
 import random
+import threading
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class RoutingResult:
-    """路由结果：选中的账户 + 实际模型名。"""
+    """路由结果：选中的账户 + 实际模型名 + 具体 API Key。
+
+    ``key_id`` 是 ``account_api_keys.id``（0 = 主密钥），``key_string``
+    是实际 API Key 明文，由 HttpClient 直接使用（不再内部轮换）。
+    """
 
     account: object       # ModelScopeAccount 实例
     model_name: str       # 直接发给下游的模型名
+    key_id: int = 0       # account_api_keys.id；0 表示主密钥（accounts 表）
+    key_string: str = ""  # 实际用于 HTTP 请求的 API Key 字符串
 
 
 class AliasRouter:
-    """根据虚拟模型ID的绑定条目选择路由。
+    """根据虚拟模型ID的绑定条目选择路由，每个活跃 API Key 独立为一个候选。
 
-    职责：
-    1. 查找 alias 在 mapping_models 表中的所有绑定条目
-    2. 有绑定时按策略选一个，返回 (account, model_name)
-    3. 无绑定时返回 None（调用方 fallback 到旧逻辑）
+    ``_build_candidates`` 会把每个 ``(绑定条目, 活跃 Key)`` 展开为一个独立候选，
+    因此：
+    - 账号 A 有 3 个 Key、账号 B 有 2 个 Key → 共 5 个候选
+    - 负载均衡策略（round_robin/least_conn/random）在 Key 粒度上生效
+    - 熔断器按 ``(key_id, model)`` 冻结，一个 Key 失败不影响同账号其他 Key
+
+    候选过滤会排除：
+    - 失效绑定（``is_valid=0``）
+    - 已禁用账号（``status != 'active'``）
+    - 冻结状态的 Key（``status == 'frozen'``）
+    - 配额耗尽的模型（``unavailable_models``）
     """
 
-    def __init__(self, mapping_model_repo, account_repo, config_repo=None, config_cache=None):
+    def __init__(
+        self,
+        mapping_model_repo,
+        account_repo,
+        config_repo=None,
+        config_cache=None,
+        quota_repository=None,
+    ):
         self.mapping_model_repo = mapping_model_repo
         self.account_repo = account_repo
         self.config_repo = config_repo
         self.config_cache = config_cache
+        self.quota_repository = quota_repository
         # round_robin 计数器按 alias 隔离
-        self._rr_counters = {}
-        # least_conn 策略的每条目请求计数
-        self._conn_counts = {}
+        self._rr_counters: Dict[str, int] = {}
+        # least_conn 策略的在途连接计数，按 (key_id, model_name) 身份隔离
+        self._conn_counts: Dict[Tuple[int, str], int] = {}
+        self._lock = threading.Lock()
 
     def _get_strategy(self) -> str:
         """从缓存（优先）或 DB 读取策略，默认 round_robin。"""
-        # 优先使用内存缓存（避免每次请求查 DB）
         if self.config_cache is not None:
             val = self.config_cache.get("load_balancer_strategy")
             if val in ("round_robin", "least_conn", "random"):
                 return val
             return "round_robin"
-        # 保底：从 DB 读取
         if self.config_repo is not None:
             val = self.config_repo.get("load_balancer_strategy")
             if val in ("round_robin", "least_conn", "random"):
@@ -50,10 +71,10 @@ class AliasRouter:
         return "round_robin"
 
     def _build_candidates(self, alias: str) -> List[tuple]:
-        """解析 alias 的所有绑定条目，返回 (account_dict, model_name) 候选列表。
+        """解析 alias 的所有绑定条目，返回 ``(account_dict, model_name, key_record)``
+        候选列表——每个活跃 Key 独立一个候选。
 
-        自动过滤失效绑定（is_valid=0），即该供应商的 supplier_models 中
-        已不存在对应模型名的行。
+        过滤：失效绑定、禁用账号、冻结 Key、配额耗尽模型。
         """
         entries = self.mapping_model_repo.find_by_alias(alias)
         if not entries:
@@ -66,34 +87,94 @@ class AliasRouter:
                            alias, len(entries))
             return []
 
-        # 批量查询账户：收集所有唯一的 supplier_id，一次查询获取所有账户
+        # 批量查询账户
         supplier_ids = list({entry["supplier_id"] for entry in valid_entries})
         accounts_by_id = self.account_repo.find_by_ids(supplier_ids)
+
+        # 批量查询配额耗尽模型
+        unavailable_map = self._load_unavailable_models(accounts_by_id)
+
+        # 批量查询多 API Key
+        keys_by_id = self._load_api_keys(supplier_ids)
 
         candidates = []
         for entry in valid_entries:
             account_dict = accounts_by_id.get(entry["supplier_id"])
-            if account_dict:
-                candidates.append((account_dict, entry["model_name"]))
+            if not account_dict:
+                continue
+            # 跳过已禁用账号
+            if account_dict.get("status", "active") != "active":
+                continue
+            model_name = entry["model_name"]
+            # 跳过配额耗尽的模型
+            if model_name in unavailable_map.get(account_dict["account_id"], set()):
+                continue
+
+            # 获取该账号的 Key 记录；若无则用主 Key 构造虚拟记录
+            key_records = keys_by_id.get(entry["supplier_id"])
+            if not key_records:
+                # 没有 account_api_keys 记录 → 用主 Key 作为唯一候选
+                key_records = [{
+                    "id": 0,
+                    "account_id": entry["supplier_id"],
+                    "api_key": account_dict["api_key"],
+                    "status": "active",
+                    "alias": "主密钥",
+                }]
+
+            # 每个活跃 Key 展开为一个独立候选
+            for kr in key_records:
+                if kr.get("status") == "frozen":
+                    continue
+                candidates.append((account_dict, model_name, kr))
 
         return candidates
 
+    def _load_unavailable_models(self, accounts_by_id: Dict[int, dict]) -> Dict[str, set]:
+        """批量读取各账号当日 unavailable_models。"""
+        if self.quota_repository is None or not accounts_by_id:
+            return {}
+        getter = getattr(self.quota_repository, "get_unavailable_models_batch", None)
+        if getter is None:
+            return {}
+        acc_str_ids = [a["account_id"] for a in accounts_by_id.values()]
+        try:
+            return getter(acc_str_ids) or {}
+        except Exception:
+            logger.warning("Failed to load unavailable_models batch", exc_info=True)
+            return {}
+
+    def _load_api_keys(self, supplier_ids: List[int]) -> Dict[int, list]:
+        """批量读取各账号的 API Key 记录。"""
+        if not supplier_ids:
+            return {}
+        getter = getattr(self.account_repo, "find_api_keys_by_account_ids", None)
+        if getter is None:
+            return {}
+        try:
+            return getter(supplier_ids) or {}
+        except Exception:
+            logger.warning("Failed to load api keys batch", exc_info=True)
+            return {}
+
     def _to_ms_account(self, account_dict: dict) -> object:
-        """将 account dict 转换为 ModelScopeAccount。"""
+        """将 account dict 转换为 ModelScopeAccount（含多 API Key 记录）。"""
         from models.account import ModelScopeAccount, DEFAULT_PROVIDER_TYPE
+        key_records = account_dict.get("_api_key_records") or None
         return ModelScopeAccount(
             account_id=account_dict["account_id"],
             name=account_dict.get("name", ""),
             api_key=account_dict["api_key"],
             base_url=account_dict["base_url"],
             provider_type=account_dict.get("provider_type", DEFAULT_PROVIDER_TYPE),
+            api_key_records=key_records,
         )
 
     def get_candidates(self, alias: str) -> List[RoutingResult]:
         """返回 alias 的所有可用候选路由，按策略排序。
 
-        与 route() 不同，此方法返回所有候选而非只选一个，
-        调用方可在失败时尝试下一个候选。
+        每个候选对应一个 ``(账号, 模型, Key)`` 三元组。least_conn 策略按
+        当前在途连接数（``acquire/release`` 维护）升序排列。
 
         Returns:
             按策略排序的 RoutingResult 列表（可能为空）。
@@ -105,45 +186,41 @@ class AliasRouter:
         strategy = self._get_strategy()
 
         if strategy == "round_robin":
-            # 从当前轮询位置开始，取所有候选
             idx = self._round_robin_index(alias, len(candidates))
-            # 重排：从 idx 开始，循环取完所有
             ordered = candidates[idx:] + candidates[:idx]
         elif strategy == "random":
             ordered = candidates.copy()
             random.shuffle(ordered)
-        else:  # least_conn — 按连接数升序排列
-            counts = self._get_conn_counts(alias, len(candidates))
-            ordered = [c for _, c in sorted(zip(counts, candidates))]
-            # 递增第一个候选的连接数（模拟选中）
-            first_idx = candidates.index(ordered[0])
-            counts[first_idx] += 1
+        else:  # least_conn
+            ordered = sorted(
+                candidates,
+                key=lambda c: self._conn_count(self._identity(c)),
+            )
 
         results = []
-        for account_dict, model_name in ordered:
+        for account_dict, model_name, key_record in ordered:
             ms_account = self._to_ms_account(account_dict)
-            results.append(RoutingResult(account=ms_account, model_name=model_name))
+            results.append(RoutingResult(
+                account=ms_account,
+                model_name=model_name,
+                key_id=key_record["id"],
+                key_string=key_record["api_key"],
+            ))
 
         logger.info(
-            f"AliasRouter: got {len(results)} candidates for '{alias}', "
+            f"AliasRouter: got {len(results)} key-level candidates for '{alias}', "
             f"strategy={strategy}"
         )
         return results
 
     def route(self, alias: str) -> Optional[RoutingResult]:
-        """为 alias 选择一个绑定条目。
+        """为 alias 选择一个（账号, 模型, Key）三元组。
 
         Returns:
             RoutingResult（有绑定时）或 None（无绑定时）
         """
         candidates = self._build_candidates(alias)
         if not candidates:
-            return None
-
-        if not candidates:
-            logger.warning(
-                f"Alias '{alias}' has bindings but no valid accounts found"
-            )
             return None
 
         strategy = self._get_strategy()
@@ -154,34 +231,56 @@ class AliasRouter:
         elif strategy == "random":
             selected = random.choice(candidates)
         else:  # least_conn
-            selected = self._least_conn(alias, candidates)
+            selected = min(
+                candidates, key=lambda c: self._conn_count(self._identity(c))
+            )
+            self.acquire(*self._identity(selected))
 
-        account_dict, model_name = selected
+        account_dict, model_name, key_record = selected
         ms_account = self._to_ms_account(account_dict)
 
         logger.info(
             f"AliasRouter: routed '{alias}' → account={ms_account.account_id}, "
-            f"model={model_name}, strategy={strategy}"
+            f"key_id={key_record['id']}, model={model_name}, strategy={strategy}"
         )
-        return RoutingResult(account=ms_account, model_name=model_name)
+        return RoutingResult(
+            account=ms_account,
+            model_name=model_name,
+            key_id=key_record["id"],
+            key_string=key_record["api_key"],
+        )
+
+    # ----- least_conn 在途连接计数 -----------------------------------------
+
+    @staticmethod
+    def _identity(candidate: tuple) -> Tuple[int, str]:
+        """候选的身份键 ``(key_id, model_name)``。"""
+        _account_dict, model_name, key_record = candidate
+        return (key_record["id"], model_name)
+
+    def _conn_count(self, key: Tuple[int, str]) -> int:
+        with self._lock:
+            return self._conn_counts.get(key, 0)
+
+    def acquire(self, key_id: int, model_name: str) -> None:
+        """候选被实际派发时调用：在途连接数 +1。"""
+        with self._lock:
+            key = (key_id, model_name)
+            self._conn_counts[key] = self._conn_counts.get(key, 0) + 1
+
+    def release(self, key_id: int, model_name: str) -> None:
+        """请求完成（成功或失败）时调用：在途连接数 -1（不低于 0）。"""
+        with self._lock:
+            key = (key_id, model_name)
+            current = self._conn_counts.get(key, 0)
+            if current <= 1:
+                self._conn_counts.pop(key, None)
+            else:
+                self._conn_counts[key] = current - 1
 
     def _round_robin_index(self, alias: str, size: int) -> int:
         """rr 计数器按 alias 隔离。"""
-        current = self._rr_counters.get(alias, 0)
-        self._rr_counters[alias] = (current + 1) % size
-        return current
-
-    def _least_conn(self, alias: str, candidates):
-        """least_conn 策略：选择当前连接数最少的候选。"""
-        counts = self._get_conn_counts(alias, len(candidates))
-        min_idx = counts.index(min(counts[:len(candidates)]))
-        counts[min_idx] += 1
-        return candidates[min_idx]
-
-    def _get_conn_counts(self, alias: str, size: int) -> list:
-        """获取或初始化 least_conn 计数数组。"""
-        if alias not in self._conn_counts:
-            self._conn_counts[alias] = [0] * size
-        while len(self._conn_counts[alias]) < size:
-            self._conn_counts[alias].append(0)
-        return self._conn_counts[alias]
+        with self._lock:
+            current = self._rr_counters.get(alias, 0)
+            self._rr_counters[alias] = (current + 1) % size
+            return current

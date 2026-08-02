@@ -58,13 +58,17 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
             cfg.get("max_requests", self.default_max_requests),
         )
 
-    def check_rate_limit(self, account_id: str, model_name: str) -> bool:
+    def check_rate_limit(self, account_id: str, model_name: str, key_count: int = 1) -> bool:
         """Check and increment the per-model request counter.
 
         Uses in-memory ``RateLimitCache`` when available (fast path),
         otherwise falls back to the database.
+
+        ``key_count`` scales the effective quota limit: an account with N
+        active keys holds N× the per-key ``max_requests`` budget.
         """
         window_seconds, max_requests = self._get_model_config(model_name)
+        max_requests = max_requests * max(1, key_count)
 
         if self._cache is not None:
             return self._cache.check(

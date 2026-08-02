@@ -67,7 +67,7 @@ function fmtToken(v) {
             transform="rotate(-90 60 60)" stroke-linecap="round" />
         </svg>
         <div class="absolute inset-0 flex flex-col items-center justify-center">
-          <span class="text-xl font-bold text-ls-text">{{ hitRate.toFixed(1) }}</span>
+          <span class="text-xl font-bold text-ls-text">{{ hitRate.toFixed(1) }}%</span>
           <span class="text-[10px] text-ls-muted uppercase tracking-[0.15em]">命中率</span>
         </div>
       </div>

@@ -93,6 +93,24 @@ class DatabaseManager:
             else:
                 conn.close()
 
+    def close(self) -> None:
+        """Close every pooled connection.
+
+        Releases the open file handles held by the bounded pool. On Windows a
+        SQLite database file cannot be deleted while any connection is open, so
+        this must be called before cleanup removes the file (e.g. the test
+        fixture teardown). Safe to call multiple times / when the pool is empty.
+        """
+        while True:
+            try:
+                conn = self._conn_pool.get_nowait()
+            except Exception:
+                break
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     def vacuum(self):
         """Reclaim disk space by rebuilding the database file.
 
@@ -391,7 +409,6 @@ class DatabaseManager:
             ("log_level", "INFO", "日志级别: DEBUG/INFO/WARNING/ERROR"),
             ("load_balancer_strategy", "round_robin", "负载均衡策略: round_robin/least_conn/random"),
             ("request_timeout_ms", "3600000", "读取超时(ReadTimeout)毫秒数：等待上游开始响应的最长时限"),
-            ("retry_count", "0", "失败重试次数"),
             ("auto_disable_on_quota", "true", "配额耗尽时自动禁用供应商"),
             ("auto_reset_daily", "true", "每日自动重置配额"),
             ("log_retention_hours", "1", "保留日志的小时数，超出则定时清理"),

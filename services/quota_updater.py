@@ -65,8 +65,9 @@ class QuotaUpdater:
             # 供应商级配额
             res = self._extract_quota(headers, hc, "supplier")
             if res is None:
-                # 无相关响应头 → 清零（保持历史行为）
-                self.quota_repository.update_quota(account.account_id, 0, 0)
+                # 无相关响应头 → 跳过更新。上游不返回 ratelimit 头时保持已有配额值，
+                # 避免每次请求都把配额清零（0/0）导致仪表盘误报“配额耗尽”。
+                pass
             elif res == "invalid":
                 logger.warning(
                     f"供应商配额响应头非法，跳过更新: account={account.account_id}"

@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Set
+from dataclasses import dataclass, field
+from typing import List, Set, Optional
 
 # Default provider type used when an account/supplier omits one.
 # Centralized so the literal isn't duplicated as a magic string elsewhere.
@@ -19,7 +19,11 @@ class ModelScopeAccount:
     quota_remaining: int = 0
     last_reset_date: str = ""
     unavailable_models: Set[str] = None
+    api_keys: List[str] = field(default_factory=list)
+    api_key_records: Optional[List[dict]] = field(default=None)
 
     def __post_init__(self):
         if self.unavailable_models is None:
             self.unavailable_models = set()
+        if not self.api_keys:
+            self.api_keys = [self.api_key] if self.api_key else []

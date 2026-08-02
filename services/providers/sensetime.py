@@ -42,16 +42,20 @@ class SenseTimeStrategy(RateLimitStrategy):
         self.max_requests = max_requests
         self._cache = rate_limit_cache  # Optional RateLimitCache
 
-    def check_rate_limit(self, account_id: str, model_name: str) -> bool:
+    def check_rate_limit(self, account_id: str, model_name: str, key_count: int = 1) -> bool:
         """Check and increment the request counter.
 
         Uses in-memory ``RateLimitCache`` when available (fast path),
         otherwise falls back to the database.
+
+        ``key_count`` scales the effective quota limit: an account with N
+        active keys holds N× the per-key ``max_requests`` budget.
         """
+        effective_max = self.max_requests * max(1, key_count)
         if self._cache is not None:
             return self._cache.check(
                 account_id, _GLOBAL_MODEL,
-                self.window_seconds, self.max_requests,
+                self.window_seconds, effective_max,
             )
 
         # Fallback: database atomic counting
@@ -72,7 +76,7 @@ class SenseTimeStrategy(RateLimitStrategy):
                     (account_id, _GLOBAL_MODEL, now_iso),
                 )
                 logger.info(
-                    f"SenseTime rate window created for {account_id}: 1/{self.max_requests}"
+                    f"SenseTime rate window created for {account_id}: 1/{effective_max}"
                 )
                 return True
 
@@ -91,11 +95,11 @@ class SenseTimeStrategy(RateLimitStrategy):
                     (now_iso, account_id, _GLOBAL_MODEL),
                 )
                 logger.info(
-                    f"SenseTime rate window reset for {account_id}: 1/{self.max_requests}"
+                    f"SenseTime rate window reset for {account_id}: 1/{effective_max}"
                 )
                 return True
 
-            if request_count < self.max_requests:
+            if request_count < effective_max:
                 # Within limit — increment
                 conn.execute(
                     "UPDATE account_rate_windows SET request_count = request_count + 1, updated_at = CURRENT_TIMESTAMP "
@@ -104,14 +108,14 @@ class SenseTimeStrategy(RateLimitStrategy):
                 )
                 new_count = request_count + 1
                 logger.debug(
-                    f"SenseTime rate count for {account_id}: {new_count}/{self.max_requests}"
+                    f"SenseTime rate count for {account_id}: {new_count}/{effective_max}"
                 )
                 return True
 
             # Quota exhausted — no write, context manager commits the (empty) txn
             logger.warning(
                 f"SenseTime rate limit reached for {account_id}: "
-                f"{request_count}/{self.max_requests} in current window"
+                f"{request_count}/{effective_max} in current window"
             )
             return False
 

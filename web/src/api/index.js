@@ -31,6 +31,7 @@ export const deleteProviderType = (id) => api.delete(`/provider-types/${id}`)
 export const getMappings = () => api.get('/mappings')
 export const bulkUpdateMappings = (mappings) => api.put('/mappings/bulk', { mappings })
 export const updateMapping = (alias, data) => api.patch(`/mappings/${alias}`, data)
+export const renameMapping = (oldAlias, newAlias) => api.put(`/mappings/${oldAlias}/rename`, { alias_name: newAlias })
 export const toggleMappingStatus = (alias) => api.patch(`/mappings/${alias}/status`)
 export const deleteMapping = (alias) => api.delete(`/mappings/${alias}`)
 
@@ -44,11 +45,14 @@ export const removeMappingModel = (modelId) => api.delete(`/mappings/models/${mo
 // ── Mapping usage (使用情况) ──
 export const getMappingUsage = (alias, params) => api.get(`/mappings/${encodeURIComponent(alias)}/logs`, { params })
 
-// ── Supplier Import / Export ──
+// ── Config Import / Export ──
 export const exportSuppliers = (format = 'json') =>
   api.get('/suppliers/export', { params: { format }, responseType: 'blob' })
 
-export const importSuppliers = (file, strategy = 'skip') => {
+export const exportConfig = (format = 'json') =>
+  api.get('/config/export', { params: { format }, responseType: 'blob' })
+
+export const importConfig = (file, strategy = 'skip') => {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('strategy', strategy)
@@ -84,3 +88,11 @@ export const deleteClientKey = (id) => api.delete(`/client-keys/${id}`)
 export const getClientKeyLogs = (id, params) => api.get(`/client-keys/${id}/logs`, { params })
 export const getClientKeyStats = (id, params) => api.get(`/client-keys/${id}/stats`, { params })
 export const getClientKeyDocs = (id) => api.get(`/client-keys/${id}/docs`)
+
+// ── Account API Keys (multi-key management) ──
+export const listApiKeys = (supplierId) => api.get(`/suppliers/${supplierId}/api-keys`)
+export const addApiKey = (supplierId, data) => api.post(`/suppliers/${supplierId}/api-keys`, data)
+export const updateApiKeyStatus = (supplierId, keyId, data) =>
+  api.put(`/suppliers/${supplierId}/api-keys/${keyId}/status`, data)
+export const deleteApiKey = (supplierId, keyId) =>
+  api.delete(`/suppliers/${supplierId}/api-keys/${keyId}`)

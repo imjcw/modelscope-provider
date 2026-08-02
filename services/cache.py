@@ -103,6 +103,11 @@ class RateLimitWindow:
     def _purge(self, now: Optional[float] = None) -> float:
         """Drop timestamps older than now - window_seconds. Returns ``now``."""
         now = time.time() if now is None else now
+        if not self.window_seconds:
+            # Unconfigured placeholder (window restored from DB before the real
+            # config is backfilled by check()/get_quota_info()) — skip purging,
+            # otherwise a 0-second window would drop every timestamp.
+            return now
         cutoff = now - self.window_seconds
         ts = self.timestamps
         while ts and ts[0] < cutoff:
@@ -200,9 +205,11 @@ class RateLimitCache:
         # persisted in ``account_rate_windows``. Backfill the real config from
         # the caller on first access; otherwise the window would be
         # misinterpreted (e.g. a 0-second window purges every timestamp).
+        # Also self-heal when the caller's limit changed (e.g. the account's
+        # active key count changed → quota limit = config_limit × N).
         if not window.window_seconds:
             window.window_seconds = float(window_seconds)
-        if not window.max_requests:
+        if max_requests and window.max_requests != max_requests:
             window.max_requests = max_requests
 
         # Sliding window: reject only if the current window is already full.
@@ -250,7 +257,7 @@ class RateLimitCache:
         # Backfill placeholder config from restored-from-DB windows.
         if not window.window_seconds and window_seconds:
             window.window_seconds = float(window_seconds)
-        if not window.max_requests and max_requests:
+        if max_requests and window.max_requests != max_requests:
             window.max_requests = max_requests
 
         count = window.count

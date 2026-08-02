@@ -74,6 +74,20 @@ def test_summarize_latency_ignores_null(database):
     assert s["avg_latency_ms"] == 150.0
 
 
+def test_negative_status_not_counted_as_success(database):
+    """Interrupted streams are logged with status -1; that must NOT be counted
+    as a success by the minute-level stats (regression: ``-1 < 400`` used to
+    make every interrupted stream a success, inflating the dashboard)."""
+    repo = LogRepository(database)
+    base = datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc)
+    _insert_stats(repo, database, base + timedelta(minutes=1), status_code=-1)
+    _insert_stats(repo, database, base + timedelta(minutes=2), status_code=200)
+
+    s = repo.query_stats_summarize(_ts(base), _ts(base + timedelta(minutes=3)))
+    assert s["total"] == 2
+    assert s["success"] == 1
+
+
 # ── query_stats_aggregate (bucketed) ───────────────────────────────────────
 
 

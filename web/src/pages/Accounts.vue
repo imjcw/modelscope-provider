@@ -35,6 +35,11 @@
                 <div>
                   <p class="font-medium text-ls-text">{{ acc.name }}</p>
                   <p class="text-xs text-ls-muted font-mono">{{ maskKey(acc.api_key) }}</p>
+                  <p v-if="acc.api_keys && acc.api_keys.length > 1" class="text-xs text-ls-dim">
+                    +{{ acc.api_keys.length - 1 }} 个密钥
+                    <span v-if="acc.api_key_records && acc.api_key_records.some(r => r.status === 'frozen')"
+                      class="text-yellow-400"> · 有已冻结密钥</span>
+                  </p>
                 </div>
               </div>
             </td>
@@ -79,17 +84,39 @@
           <input v-model="newSupplier.name" type="text" placeholder="如：智谱、阿里云"
             class="form-input" @keyup.enter="addSupplier" ref="addNameInput">
         </FormField>
-        <FormField label="API Key">
-          <div class="relative">
-            <input type="text" v-model="newSupplier.api_key"
-              placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              class="form-input pr-10 font-mono" @keyup.enter="addSupplier"
-              autocomplete="off"
-              :style="showNewApiKey ? null : { '-webkit-text-security': 'disc', 'text-security': 'disc' }">
-            <button type="button" @click="showNewApiKey = !showNewApiKey"
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-ls-muted hover:text-ls-text p-1" title="显示/隐藏">
-              <CIcon v-if="showNewApiKey" name="eye" />
-              <CIcon v-else name="eye-off" />
+        <!-- ── 密钥管理（统一管理所有密钥） ── -->
+        <FormField label="密钥管理">
+          <div class="space-y-2">
+            <div v-for="(record, idx) in newSupplier.api_key_records" :key="'new-' + idx"
+              class="bg-ls-bg rounded-lg border border-ls-border p-3">
+              <div class="grid grid-cols-1 md:grid-cols-[120px_1fr_auto_28px] gap-2 items-center">
+                <input v-model="record.alias" type="text" placeholder="别名"
+                  class="form-input h-10 px-2 text-sm w-full" />
+                <div class="flex items-center gap-2">
+                  <input v-if="record._showKey" v-model="record.api_key" type="text"
+                    class="form-input h-10 px-3 font-mono text-sm flex-1" />
+                  <div v-else
+                    class="form-input h-10 px-3 font-mono text-sm flex-1 cursor-default select-none"
+                    @click="toggleKeyVisibility(record)" :title="record.api_key">
+                    {{ maskKey(record.api_key) }}
+                  </div>
+                  <button type="button" @click="toggleKeyVisibility(record)"
+                    class="text-ls-muted hover:text-ls-text p-1 flex-shrink-0" :title="record._showKey ? '隐藏密钥' : '显示密钥'">
+                    <CIcon :name="record._showKey ? 'eye-off' : 'eye'" :size="14" :stroke-width="2" />
+                  </button>
+                </div>
+                <CCheckbox :model-value="record._enabled" @update:modelValue="(val) => record._enabled = val"
+                  class="key-toggle" />
+                <button type="button" @click="removeNewApiKeyRecord(idx)"
+                  class="action-icon" title="删除">
+                  <CIcon name="x" />
+                </button>
+              </div>
+            </div>
+            <button type="button" @click="addNewApiKeyRecord"
+              class="mt-3 w-full h-10 rounded-lg border border-dashed border-ls-border text-ls-accent hover:text-ls-accentHover hover:border-ls-accent/30 transition-all flex items-center justify-center gap-2 text-sm">
+              <CIcon name="plus" :size="16" />
+              添加密钥
             </button>
           </div>
         </FormField>
@@ -120,18 +147,42 @@
           <input v-model="editingSupplier.name" type="text" placeholder="如：智谱、阿里云"
             class="form-input" @keyup.enter="saveEdit">
         </FormField>
-        <FormField label="API Key">
-          <div class="relative">
-            <input type="text" v-model="editingSupplier.api_key"
-              placeholder="ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              class="form-input pr-10 font-mono" @keyup.enter="saveEdit"
-              autocomplete="off"
-              :style="showApiKey ? null : { '-webkit-text-security': 'disc', 'text-security': 'disc' }">
-            <button type="button" @click="showApiKey = !showApiKey"
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-ls-muted hover:text-ls-text p-1" title="显示/隐藏">
-              <CIcon v-if="showApiKey" name="eye" />
-              <CIcon v-else name="eye-off" />
-            </button>
+        <!-- ── 密钥管理（统一管理所有密钥：主键 + 额外密钥） ── -->
+        <FormField label="密钥管理">
+          <div class="space-y-2">
+            <div v-for="(record, idx) in editingSupplier.api_key_records" :key="record.id || 'new-' + idx"
+              class="bg-ls-bg rounded-lg border border-ls-border p-3">
+              <div class="grid grid-cols-1 md:grid-cols-[120px_1fr_auto_28px] gap-2 items-center">
+                <input v-model="record.alias" type="text" placeholder="别名"
+                  class="form-input h-10 px-2 text-sm w-full" />
+                <div class="flex items-center gap-2">
+                  <input v-if="record._showKey" v-model="record.api_key" type="text"
+                    class="form-input h-10 px-3 font-mono text-sm flex-1" />
+                  <div v-else
+                    class="form-input h-10 px-3 font-mono text-sm flex-1 cursor-default select-none"
+                    @click="toggleKeyVisibility(record)" :title="record.api_key">
+                    {{ maskKey(record.api_key) }}
+                  </div>
+                  <button type="button" @click="toggleKeyVisibility(record)"
+                    class="text-ls-muted hover:text-ls-text p-1 flex-shrink-0" :title="record._showKey ? '隐藏密钥' : '显示密钥'">
+                    <CIcon :name="record._showKey ? 'eye-off' : 'eye'" :size="14" :stroke-width="2" />
+                  </button>
+                </div>
+                <CCheckbox :model-value="record._enabled" @update:modelValue="(val) => record._enabled = val"
+                  class="key-toggle" />
+                <button type="button" @click="deleteEditKey(record.id, idx)"
+                  class="action-icon" title="删除此密钥">
+                  <CIcon name="x" />
+                </button>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 mt-3">
+              <button type="button" @click="addEditApiKeyRecord"
+                class="btn btn-secondary text-xs">
+                <CIcon name="plus" :size="14" :stroke-width="2" class="mr-1" />
+                添加密钥
+              </button>
+            </div>
           </div>
         </FormField>
         <FormField label="供应商类型">
@@ -180,6 +231,15 @@
       :message="`确定要删除模型 <strong class='text-ls-text font-mono'>${pendingModelDelete?.name || ''}</strong> 吗？<br><span class='text-ls-muted text-xs'>此操作不可撤销</span>`"
       danger
       @confirm="confirmModelDelete"
+    />
+
+    <!-- ── 删除密钥确认 弹窗 ── -->
+    <ConfirmModal
+      v-model="showKeyDeleteModal"
+      title="确认删除密钥"
+      :message="`确定要删除密钥 <strong class='text-ls-text'>${pendingKeyDelete?.name || ''}</strong> 吗？<br><span class='text-ls-muted text-xs'>此操作不可撤销</span>`"
+      danger
+      @confirm="confirmKeyDelete"
     />
 
     <!-- ── 模型用量详情 抽屉 ── -->
@@ -248,7 +308,6 @@
               <div v-if="usedPctRow(m) !== null" class="w-20 mx-auto">
                 <ProgressBar :pct="usedPctRow(m)" width="w-20" height="h-1.5" :bar-class="barClass(usedPctRow(m))" />
               </div>
-              <div v-else class="text-xs text-ls-muted">—</div>
             </td>
             <td class="text-right text-xs font-mono text-ls-dim">{{ (m.today_input_tokens || 0).toLocaleString() }}</td>
             <td class="text-right text-xs font-mono" :class="(m.today_cached_tokens || 0) > 0 ? 'text-green-400' : 'text-ls-muted'">{{ (m.today_cached_tokens || 0).toLocaleString() }}</td>
@@ -287,7 +346,7 @@ import SegmentedControl from '@/components/SegmentedControl.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
 import { maskKey, formatContextLength } from '@/utils/format'
 import { modelTypeColor, modelTypeLabel } from '@/constants/modelType'
-import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, getModelQuotas, getProviderTypes } from '@/api'
+import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, getModelQuotas, getProviderTypes, listApiKeys, addApiKey, updateApiKeyStatus, deleteApiKey } from '@/api'
 
 const toast = inject('$toast')
 
@@ -366,7 +425,7 @@ const barClass = (pct) =>
 
 const fmtWindowRow = (m) => {
   const st = m.strategy_type
-  if (!st) return { label: '被动', sub: 'header 驱动', badge: 'muted', custom: false }
+  if (!st || st === 'header_based') return { label: '无限制', sub: '', badge: 'muted', custom: false }
   const secs = m.window_seconds || 0
   const val = secs >= 3600 ? (secs / 3600) : (secs / 60)
   const unit = secs >= 3600 ? 'h' : 'm'
@@ -378,7 +437,7 @@ const fmtWindowRow = (m) => {
     return { label: `按模型 ${val}${unit}`, sub, badge: 'accent', custom: !!m.has_custom_window }
   if (st === 'fixed_window' || st === 'sensetime')
     return { label: `滑动窗口 ${val}${unit}`, sub, badge: 'accent', custom: false }
-  return { label: '被动', sub: 'header 驱动', badge: 'muted', custom: false }
+  return { label: '被动', sub: '', badge: 'muted', custom: false }
 }
 const usedPctRow = (m) => {
   const winLimit = m.window_quota_limit
@@ -413,14 +472,111 @@ const openModelInfo = (acc) => {
 const showAddDrawer = ref(false)
 const adding = ref(false)
 const addNameInput = ref(null)
-const newSupplier = ref({ name: '', api_key: '', base_url: '', provider_type: '', models: [] })
-const showNewApiKey = ref(false)
+const newSupplier = ref({ name: '', api_key: '', base_url: '', provider_type: '', models: [], api_key_records: [] })
 
 // ── Edit drawer ──
 const showEditDrawer = ref(false)
 const saving = ref(false)
 const editingSupplier = ref(null)
-const showApiKey = ref(false)
+const apiKeyLoading = ref(false)
+
+// ── API Key management ──
+const loadApiKeys = async (supplierId) => {
+  try {
+    const res = await listApiKeys(supplierId)
+    return res.data || []
+  } catch (e) {
+    console.error('Failed to load API keys:', e)
+    toast('加载密钥列表失败，将使用缓存数据', 'warning')
+    return []
+  }
+}
+
+const freezeApiKey = async (keyId) => {
+  apiKeyLoading.value = true
+  try {
+    await updateApiKeyStatus(editingSupplier.value.id, keyId, { status: 'frozen' })
+    await refreshApiKeyRecords()
+  } catch (e) {
+    toast('冻结失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
+  } finally {
+    apiKeyLoading.value = false
+  }
+}
+
+const unfreezeApiKey = async (keyId) => {
+  apiKeyLoading.value = true
+  try {
+    await updateApiKeyStatus(editingSupplier.value.id, keyId, { status: 'active' })
+    await refreshApiKeyRecords()
+  } catch (e) {
+    toast('解冻失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
+  } finally {
+    apiKeyLoading.value = false
+  }
+}
+
+const deleteApiKeyRecord = async (keyId) => {
+  const record = editingSupplier.value.api_key_records.find(r => r.id === keyId)
+  pendingKeyDelete.value = {
+    keyId,
+    name: record?.alias || maskKey(record?.api_key || ''),
+  }
+  showKeyDeleteModal.value = true
+}
+
+const confirmKeyDelete = async () => {
+  if (!pendingKeyDelete.value) return
+  apiKeyLoading.value = true
+  try {
+    await deleteApiKey(editingSupplier.value.id, pendingKeyDelete.value.keyId)
+    await refreshApiKeyRecords()
+    showKeyDeleteModal.value = false
+    pendingKeyDelete.value = null
+  } catch (e) {
+    toast('删除失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
+  } finally {
+    apiKeyLoading.value = false
+  }
+}
+
+const refreshApiKeyRecords = async () => {
+  if (!editingSupplier.value) return
+  const records = await loadApiKeys(editingSupplier.value.id)
+  editingSupplier.value.api_key_records = records.map(r => ({
+    ...r,
+    _enabled: r.status !== 'frozen',
+    _showKey: false,
+  }))
+}
+
+const addNewApiKeyRecord = () => {
+  newSupplier.value.api_key_records.push({ alias: '', api_key: '', _enabled: true, _showKey: false })
+}
+
+const addEditApiKeyRecord = () => {
+  editingSupplier.value.api_key_records.push({ id: 0, alias: '', api_key: '', _enabled: true, _showKey: false })
+}
+
+const deleteEditKey = (keyId, idx) => {
+  if (keyId && keyId !== 0) {
+    deleteApiKeyRecord(keyId)
+  } else {
+    editingSupplier.value.api_key_records.splice(idx, 1)
+  }
+}
+
+const toggleKeyVisibility = (record) => {
+  record._showKey = !record._showKey
+}
+
+const removeNewApiKeyRecord = (idx) => {
+  newSupplier.value.api_key_records.splice(idx, 1)
+}
+
+// ── Key delete confirmation modal ──
+const showKeyDeleteModal = ref(false)
+const pendingKeyDelete = ref(null) // { keyId, name }
 
 // ── Delete confirmation modal ──
 const showDeleteModal = ref(false)
@@ -501,8 +657,7 @@ const loadData = async () => {
 
 // ── Add (drawer) ──
 const openAdd = async () => {
-  newSupplier.value = { name: '', api_key: '', base_url: '', provider_type: '', models: [] }
-  showNewApiKey.value = false
+  newSupplier.value = { name: '', api_key: '', base_url: '', provider_type: '', models: [], api_key_records: [] }
   showAddDrawer.value = true
   await nextTick()
   addNameInput.value?.focus()
@@ -519,11 +674,23 @@ const addSupplier = async () => {
   }
   adding.value = true
   try {
+    // Ensure primary key is the first record
+    const records = [{ alias: '主密钥', api_key: newSupplier.value.api_key, status: 'active' }]
+    for (const r of newSupplier.value.api_key_records) {
+      if (r.api_key && r.api_key !== newSupplier.value.api_key) {
+        records.push({
+          alias: r.alias || '',
+          api_key: r.api_key,
+          status: r._enabled ? 'active' : 'frozen',
+        })
+      }
+    }
     const res = await apiCreateSupplier({
       name: newSupplier.value.name,
       api_key: newSupplier.value.api_key,
       base_url: newSupplier.value.base_url,
       provider_type: newSupplier.value.provider_type,
+      api_key_records: records,
     })
     const supplierId = res.data.id
     // Add models if any
@@ -555,6 +722,7 @@ const openEdit = async (acc) => {
     provider_type: acc.provider_type || '',
     status: acc.status,
     models: [],
+    api_key_records: acc.api_key_records || [],
   }
   try {
     const res = await getSupplierModels(acc.id)
@@ -562,7 +730,13 @@ const openEdit = async (acc) => {
   } catch (e) {
     console.error('Failed to load supplier models:', e)
   }
-  showApiKey.value = false
+  // Load full API key records for status management
+  const records = await loadApiKeys(acc.id)
+  editingSupplier.value.api_key_records = records.map(r => ({
+    ...r,
+    _enabled: r.status !== 'frozen',
+    _showKey: false,
+  }))
   showEditDrawer.value = true
 }
 
@@ -574,12 +748,33 @@ const saveEdit = async () => {
   if (!editingSupplier.value) return
   saving.value = true
   try {
+    // Reload API keys if they appear missing to prevent accidental key loss.
+    // This handles the case where loadApiKeys() failed when the edit drawer opened.
+    if (!editingSupplier.value.api_key_records || editingSupplier.value.api_key_records.length === 0) {
+      const freshRecords = await loadApiKeys(editingSupplier.value.id)
+      editingSupplier.value.api_key_records = freshRecords.map(r => ({
+        ...r,
+        _enabled: r.status !== 'frozen',
+        _showKey: false,
+      }))
+    }
+    const records = []
+    for (const r of editingSupplier.value.api_key_records) {
+      if (r.api_key) {
+        records.push({
+          alias: r.alias || '',
+          api_key: r.api_key,
+          status: r._enabled ? 'active' : 'frozen',
+        })
+      }
+    }
     const body = {
       name: editingSupplier.value.name,
       api_key: editingSupplier.value.api_key,
       base_url: editingSupplier.value.base_url,
       provider_type: editingSupplier.value.provider_type,
       status: editingSupplier.value.status,
+      api_key_records: records,
     }
     const res = await apiUpdateSupplier(editingSupplier.value.id, body)
     const idx = suppliers.value.findIndex(a => a.id === editingSupplier.value.id)
@@ -639,6 +834,20 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ── 密钥行 toggle 缩小 ── */
+.key-toggle .c-toggle {
+  width: 28px !important;
+  height: 16px !important;
+  border-radius: 8px !important;
+}
+.key-toggle .c-toggle-thumb {
+  width: 14px !important;
+  height: 14px !important;
+}
+.key-toggle .c-toggle-checked .c-toggle-thumb {
+  left: 14px !important;
+}
+
 /* ── 模型用量入口（网格卡片：文字链接） ── */
 .model-info-link {
   font-size: 12px;

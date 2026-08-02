@@ -9,6 +9,7 @@ import os
 import uuid
 from unittest.mock import AsyncMock, patch, Mock
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -64,8 +65,8 @@ def test_400_error_triggers_fallback_to_next_candidate(client):
 
     from provider.services.alias_router import RoutingResult
     candidates = [
-        RoutingResult(account=account1, model_name="test-model"),
-        RoutingResult(account=account2, model_name="test-model"),
+        RoutingResult(account=account1, model_name="test-model", key_id=0, key_string="key1"),
+        RoutingResult(account=account2, model_name="test-model", key_id=1, key_string="key2"),
     ]
 
     # Mock responses: first returns 400, second returns 200
@@ -125,8 +126,8 @@ def test_500_error_triggers_fallback_to_next_candidate(client):
 
     from provider.services.alias_router import RoutingResult
     candidates = [
-        RoutingResult(account=account1, model_name="test-model"),
-        RoutingResult(account=account2, model_name="test-model"),
+        RoutingResult(account=account1, model_name="test-model", key_id=0, key_string="key1"),
+        RoutingResult(account=account2, model_name="test-model", key_id=1, key_string="key2"),
     ]
 
     response_500 = Mock()
@@ -183,8 +184,8 @@ def test_all_candidates_fail_returns_error(client):
 
     from provider.services.alias_router import RoutingResult
     candidates = [
-        RoutingResult(account=account1, model_name="test-model"),
-        RoutingResult(account=account2, model_name="test-model"),
+        RoutingResult(account=account1, model_name="test-model", key_id=0, key_string="key1"),
+        RoutingResult(account=account2, model_name="test-model", key_id=1, key_string="key2"),
     ]
 
     response_400 = Mock()
@@ -245,8 +246,8 @@ def test_streaming_400_error_triggers_fallback_to_next_candidate(client):
 
     from provider.services.alias_router import RoutingResult
     candidates = [
-        RoutingResult(account=account1, model_name="test-model"),
-        RoutingResult(account=account2, model_name="test-model"),
+        RoutingResult(account=account1, model_name="test-model", key_id=0, key_string="key1"),
+        RoutingResult(account=account2, model_name="test-model", key_id=1, key_string="key2"),
     ]
 
     # First response: 400 error
@@ -315,8 +316,8 @@ def test_streaming_500_error_triggers_fallback_to_next_candidate(client):
 
     from provider.services.alias_router import RoutingResult
     candidates = [
-        RoutingResult(account=account1, model_name="test-model"),
-        RoutingResult(account=account2, model_name="test-model"),
+        RoutingResult(account=account1, model_name="test-model", key_id=0, key_string="key1"),
+        RoutingResult(account=account2, model_name="test-model", key_id=1, key_string="key2"),
     ]
 
     response_500 = Mock()
@@ -378,8 +379,8 @@ def test_streaming_all_candidates_fail_returns_error(client):
 
     from provider.services.alias_router import RoutingResult
     candidates = [
-        RoutingResult(account=account1, model_name="test-model"),
-        RoutingResult(account=account2, model_name="test-model"),
+        RoutingResult(account=account1, model_name="test-model", key_id=0, key_string="key1"),
+        RoutingResult(account=account2, model_name="test-model", key_id=1, key_string="key2"),
     ]
 
     response_400 = Mock()
@@ -409,3 +410,112 @@ def test_streaming_all_candidates_fail_returns_error(client):
     # All candidates failed — should return 400 (last error)
     assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text}"
     assert mock_req.call_count == 2, "Expected both candidates to be tried"
+
+# ── Network/transport error fallback tests ──────────────────────────────────
+
+
+def _two_candidates():
+    account1 = Mock()
+    account1.account_id = "acc-1"
+    account1.name = "Supplier 1"
+    account1.api_key = "key1"
+    account1.base_url = "https://api1.test.com"
+    account1.provider_type = "modelscope"
+
+    account2 = Mock()
+    account2.account_id = "acc-2"
+    account2.name = "Supplier 2"
+    account2.api_key = "key2"
+    account2.base_url = "https://api2.test.com"
+    account2.provider_type = "modelscope"
+
+    from provider.services.alias_router import RoutingResult
+    return [
+        RoutingResult(account=account1, model_name="test-model", key_id=0, key_string="key1"),
+        RoutingResult(account=account2, model_name="test-model", key_id=1, key_string="key2"),
+    ]
+
+
+def test_network_error_triggers_fallback_and_records_circuit(client):
+    """A connection error on the first candidate should fall back to the next
+    candidate AND record a network_error in the circuit breaker (previously it
+    bubbled up as an unhandled 500 with no fallback and no circuit recording).
+    """
+    app = client.app
+    http_client = app.state.services["http_client"]
+    alias_router = app.state.alias_router
+    alias_resolver = app.state.services["alias_resolver"]
+    cb = app.state.services["circuit_breaker"]
+
+    candidates = _two_candidates()
+
+    response_200 = Mock()
+    response_200.status_code = 200
+    response_200.text = '{"id": "chatcmpl-123", "object": "chat.completion", "choices": [{"message": {"role": "assistant", "content": "Hello!"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 2}}'
+    response_200.headers = {}
+
+    connect_error = httpx.ConnectError("Connection refused")
+
+    with (
+        patch.object(alias_router, "get_candidates", return_value=candidates),
+        patch.object(http_client, "request", new_callable=AsyncMock) as mock_req,
+        patch.object(alias_resolver, "resolve_alias", new_callable=AsyncMock) as mock_resolve,
+    ):
+        mock_req.side_effect = [connect_error, response_200]
+        mock_resolve.return_value = "test-model"
+
+        resp = client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": False,
+            },
+        )
+
+    assert resp.status_code == 200, f"Expected 200 after fallback, got {resp.status_code}: {resp.text}"
+    assert mock_req.call_count == 2, "Expected fallback to second candidate"
+    state = cb.get_state(0, "test-model")
+    assert state is not None
+    assert state.error_type == "network_error"
+
+
+def test_timeout_triggers_fallback(client):
+    """A timeout on the first candidate should fall back to the next."""
+    app = client.app
+    http_client = app.state.services["http_client"]
+    alias_router = app.state.alias_router
+    alias_resolver = app.state.services["alias_resolver"]
+    cb = app.state.services["circuit_breaker"]
+
+    candidates = _two_candidates()
+
+    response_200 = Mock()
+    response_200.status_code = 200
+    response_200.text = '{"id": "chatcmpl-123", "object": "chat.completion", "choices": [{"message": {"role": "assistant", "content": "Hello!"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 2}}'
+    response_200.headers = {}
+
+    timeout_error = httpx.ConnectTimeout("Timed out")
+
+    with (
+        patch.object(alias_router, "get_candidates", return_value=candidates),
+        patch.object(http_client, "request", new_callable=AsyncMock) as mock_req,
+        patch.object(alias_resolver, "resolve_alias", new_callable=AsyncMock) as mock_resolve,
+    ):
+        mock_req.side_effect = [timeout_error, response_200]
+        mock_resolve.return_value = "test-model"
+
+        resp = client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": False,
+            },
+        )
+
+    assert resp.status_code == 200, f"Expected 200 after fallback, got {resp.status_code}: {resp.text}"
+    assert mock_req.call_count == 2
+    state = cb.get_state(0, "test-model")
+    assert state is not None
+    assert state.error_type == "network_error"

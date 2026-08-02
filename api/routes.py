@@ -6,6 +6,7 @@ import json
 import asyncio
 import logging
 import time
+import httpx
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,7 @@ async def _log_error_request(
     first_response: str = None,
     raw_response: str = None,
     is_stream: bool = False,
+    key_id: int = 0,
 ):
     """记录失败请求到数据库，确保错误路径也有日志可查。
 
@@ -142,6 +144,7 @@ async def _log_error_request(
             cached_tokens=0,
             prompt_partial_cached=0,
             client_key_name=client_key_name,
+            api_key_id=key_id,
         )
     except Exception as le:
         logger.error(f"Failed to log error request: {le}", exc_info=True)
@@ -254,6 +257,22 @@ def refresh_load_balancer(request: Request):
             repo = AccountRepository(db)
             db_accounts = repo.find_active()
 
+            # Batch-load multi API keys and today's unavailable models so the
+            # legacy LoadBalancer path also honors key rotation and quota-based
+            # exclusion (previously these fields were left empty/dead).
+            int_ids = [a["id"] for a in db_accounts]
+            keys_by_id = repo.find_api_keys_by_account_ids(int_ids)
+            quota_repo = services.get("quota_repository")
+            unavailable_map = {}
+            if quota_repo is not None:
+                try:
+                    unavailable_map = quota_repo.get_unavailable_models_batch(
+                        [a["account_id"] for a in db_accounts]
+                    )
+                except Exception:
+                    logger.warning("Failed to load unavailable_models for LB refresh",
+                                   exc_info=True)
+
             accounts = []
             for a in db_accounts:
                 accounts.append(ModelScopeAccount(
@@ -262,6 +281,8 @@ def refresh_load_balancer(request: Request):
                     api_key=a["api_key"],
                     base_url=a["base_url"],
                     provider_type=a.get("provider_type", DEFAULT_PROVIDER_TYPE),
+                    api_key_records=keys_by_id.get(a["id"]) or None,
+                    unavailable_models=unavailable_map.get(a["account_id"], set()),
                 ))
 
             from services.load_balancer import LoadBalancer
@@ -344,12 +365,20 @@ async def stream_response_with_logging(
     quota_updater=None,
     client_key_name: str = None,
     strategy=None,
+    circuit_breaker=None,
+    alias_router=None,
+    key_id: int = 0,
 ):
     """Streaming response wrapper that logs and updates quota after completion.
 
     Caller is responsible for making the HTTP request and checking the
     status code before calling this function. Only successful (2xx)
     responses should be passed here.
+
+    Circuit-breaker / least_conn bookkeeping happens here (not at response
+    creation) so that ``record_success`` and the in-flight connection release
+    only fire once the stream actually completes — a mid-stream upstream
+    failure is recorded as a failure instead of being masked as a success.
     """
     output_tokens = 0
     input_tokens = 0
@@ -359,74 +388,143 @@ async def stream_response_with_logging(
     raw_chunks = []
     first_response = None
     stream_status_code = 200
+    stream_failed = False
+    stream_interrupted = False
+    interrupt_reason = None
 
-    async for chunk_data in stream_response(
-        response, _capture_headers=True
-    ):
-        data_str = chunk_data.removeprefix("data: ").strip()
-        is_special_chunk = False
+    try:
+        async for chunk_data in stream_response(
+            response, _capture_headers=True
+        ):
+            data_str = chunk_data.removeprefix("data: ").strip()
+            is_special_chunk = False
 
-        # Strip out injected marker chunks (do NOT yield or log them)
-        if data_str:
+            # Strip out injected marker chunks (do NOT yield or log them)
+            if data_str:
+                try:
+                    dec = json.JSONDecoder()
+                    obj, _ = dec.raw_decode(data_str)
+                    if "__hdrs__" in obj:
+                        response_headers = obj["__hdrs__"]
+                        is_special_chunk = True
+                except Exception:
+                    pass
+
+            if is_special_chunk:
+                continue
+
+            if first_response is None:
+                first_response = datetime.now(timezone.utc).isoformat()
+            yield chunk_data
+            raw_chunks.append(chunk_data)
+
+            # Try to extract token count from usage in each chunk
             try:
-                dec = json.JSONDecoder()
-                obj, _ = dec.raw_decode(data_str)
-                if "__hdrs__" in obj:
-                    response_headers = obj["__hdrs__"]
-                    is_special_chunk = True
+                if data_str:
+                    decoder = json.JSONDecoder()
+                    json_data, _ = decoder.raw_decode(data_str)
+                    usage = json_data.get("usage", {})
+                    # Only take the latest usage (last chunk has final counts)
+                    input_tokens = usage.get("prompt_tokens", 0) or input_tokens
+                    output_tokens = usage.get("completion_tokens", 0) or output_tokens
+                    _cached, _partial = _extract_cache_usage(usage)
+                    cached_tokens = _cached or cached_tokens
+                    prompt_partial_cached = _partial or prompt_partial_cached
+            except Exception:
+                pass
+    except GeneratorExit:
+        # Client disconnected mid-stream — not a supplier fault, but the
+        # partial stream must still appear in the request logs.
+        stream_interrupted = True
+        interrupt_reason = "client disconnected"
+        raise
+    except asyncio.CancelledError:
+        # uvicorn surfaces client disconnects as task cancellation; record
+        # the partial stream before the cancellation propagates.
+        stream_interrupted = True
+        interrupt_reason = "client disconnected"
+        raise
+    except Exception as stream_exc:
+        # Upstream broke mid-stream: record as failure so the circuit breaker
+        # is not blind to half-finished streams.
+        stream_failed = True
+        stream_interrupted = True
+        interrupt_reason = str(stream_exc)
+        if circuit_breaker is not None:
+            try:
+                circuit_breaker.record_failure(
+                    key_id, account.account_id, actual_model_id or model_name, -1, strategy,
+                )
+            except Exception:
+                pass
+        logger.warning(
+            "Streaming failed mid-stream for %s/%s: %s",
+            account.account_id, actual_model_id or model_name, stream_exc,
+        )
+        raise
+    finally:
+        # Release the in-flight connection slot (least_conn accounting). Safe
+        # even if never acquired (release() floors at zero).
+        if alias_router is not None:
+            try:
+                alias_router.release(key_id, actual_model_id or model_name)
             except Exception:
                 pass
 
-        if is_special_chunk:
-            continue
+        # Circuit-breaker success is recorded here (not at response-creation
+        # time) so half-finished streams aren't counted as OK.
+        if not stream_failed and circuit_breaker is not None:
+            try:
+                circuit_breaker.record_success(
+                    key_id, actual_model_id or model_name,
+                )
+            except Exception:
+                pass
 
-        if first_response is None:
-            first_response = datetime.now(timezone.utc).isoformat()
-        yield chunk_data
-        raw_chunks.append(chunk_data)
-
-        # Try to extract token count from usage in each chunk
-        try:
-            if data_str:
-                decoder = json.JSONDecoder()
-                json_data, _ = decoder.raw_decode(data_str)
-                usage = json_data.get("usage", {})
-                # Only take the latest usage (last chunk has final counts)
-                input_tokens = usage.get("prompt_tokens", 0) or input_tokens
-                output_tokens = usage.get("completion_tokens", 0) or output_tokens
-                _cached, _partial = _extract_cache_usage(usage)
-                cached_tokens = _cached or cached_tokens
-                prompt_partial_cached = _partial or prompt_partial_cached
-        except Exception:
-            pass
-
-    # Log after streaming completes
-    end_time = datetime.now(timezone.utc).isoformat()
-    logger.info(f"Streaming completed for {account.account_id}: status={stream_status_code} input={input_tokens} output={output_tokens} chunks={len(raw_chunks)} admin_svc={'yes' if admin_service else 'no'}")
-    if admin_service:
-        try:
-            await asyncio.to_thread(admin_service.log_request,
-                model=model_name,
-                actual_model_id=actual_model_id,
-                account_id=account.account_id,
-                account_name=account.name,
-                status_code=stream_status_code,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                is_stream=True,
-                latency_ms=None,
-                raw_request=json.dumps(request_body, ensure_ascii=False),
-                raw_response="".join(raw_chunks),
-                request_start=request_start,
-                first_response=first_response,
-                end_time=end_time,
-                cached_tokens=cached_tokens,
-                prompt_partial_cached=prompt_partial_cached,
-                client_key_name=client_key_name,
-                response_headers=json.dumps(response_headers, ensure_ascii=False) if response_headers else None,
-            )
-        except Exception as e:
-            logger.error(f"Failed to log streaming request: {e}")
+        # Log the request regardless of how the stream ended. Interrupted
+        # streams (client disconnect / upstream failure) get status -1 so they
+        # stay visible in the admin request logs instead of silently vanishing.
+        end_time = datetime.now(timezone.utc).isoformat()
+        log_status = -1 if stream_interrupted else stream_status_code
+        log_error = (
+            f"Streaming interrupted: {interrupt_reason}"
+            if stream_interrupted else None
+        )
+        logger.info(
+            f"Streaming finished for {account.account_id}: "
+            f"status={log_status} input={input_tokens} output={output_tokens} "
+            f"chunks={len(raw_chunks)} interrupted={stream_interrupted} "
+            f"admin_svc={'yes' if admin_service else 'no'}"
+        )
+        if admin_service:
+            try:
+                await asyncio.to_thread(admin_service.log_request,
+                    model=model_name,
+                    actual_model_id=actual_model_id,
+                    account_id=account.account_id,
+                    account_name=account.name,
+                    status_code=log_status,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    is_stream=True,
+                    latency_ms=None,
+                    error_message=log_error,
+                    raw_request=json.dumps(request_body, ensure_ascii=False),
+                    raw_response="".join(raw_chunks),
+                    request_start=request_start,
+                    first_response=first_response,
+                    end_time=end_time,
+                    cached_tokens=cached_tokens,
+                    prompt_partial_cached=prompt_partial_cached,
+                    client_key_name=client_key_name,
+                    response_headers=json.dumps(response_headers, ensure_ascii=False) if response_headers else None,
+                )
+            except asyncio.CancelledError:
+                # Task cancellation: the to_thread worker still finishes the
+                # write, so the log entry is produced even if we can't await it.
+                pass
+            except Exception as e:
+                logger.error(f"Failed to log streaming request: {e}")
 
     # Update quota via provider strategy (or fallback to legacy quota_updater)
     if strategy:
@@ -457,12 +555,79 @@ async def stream_response_with_logging(
             logger.warning(f"Failed to update streaming quota: {e}")
 
 
+async def _raise_upstream_request_error(
+    exc, admin_service, request, actual_model_id, selected_account,
+    client_key_name, request_body, request_start, first_response,
+    circuit_breaker, strategy, is_stream, key_id=0,
+):
+    """把 ``http_client.request`` 抛出的异常转换为 HTTPException（并记录熔断），
+    使 fallback 循环能继续尝试下一个候选，而不是冒泡成未处理的 500。
+
+    覆盖两类异常：
+    - ``httpx.HTTPStatusError``：例如多 Key 全部 401/403 耗尽，带真实状态码；
+    - 传输层错误：超时（``httpx.TimeoutException``）/ 连接 / 网络错误，
+      用负状态码（-1 超时、-2 连接）记入熔断器（归类为 network_error）。
+
+    修复前：这些异常只会被外层 ``except Exception`` 捕获返回 500，既不 fallback
+    也不触发熔断，导致上游宕机时每个请求都要干等超时。
+    """
+    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    if status_code is not None:
+        cb_code = status_code
+        resp_status = status_code
+        msg = f"供应商 {selected_account.name or selected_account.account_id} 返回错误：{status_code}"
+        err_type = "upstream_error"
+    elif isinstance(exc, httpx.TimeoutException):
+        cb_code = -1
+        resp_status = 504
+        msg = f"供应商 {selected_account.name or selected_account.account_id} 请求超时"
+        err_type = "upstream_timeout"
+    else:
+        cb_code = -2
+        resp_status = 502
+        msg = f"供应商 {selected_account.name or selected_account.account_id} 连接失败：{type(exc).__name__}"
+        err_type = "upstream_network"
+
+    if circuit_breaker:
+        circuit_breaker.record_failure(
+            key_id,
+            selected_account.account_id,
+            actual_model_id or request.model,
+            cb_code,
+            strategy,
+        )
+    logger.warning(
+        "Upstream request error: key %s / %s (account %s) → %s (%s)",
+        key_id, actual_model_id or request.model,
+        selected_account.account_id, type(exc).__name__, exc,
+    )
+    await _log_error_request(
+        admin_service, request.model, actual_model_id,
+        selected_account, client_key_name,
+        resp_status, msg, request_body, request_start, first_response,
+        raw_response=f"{type(exc).__name__}: {exc}",
+        is_stream=is_stream, key_id=key_id,
+    )
+    raise HTTPException(
+        status_code=resp_status,
+        detail={
+            "error": {
+                "message": msg,
+                "type": err_type,
+                "param": None,
+                "code": err_type,
+            }
+        },
+    )
+
+
 async def _try_candidate(
     request, selected_account, actual_model_id,
     http_client, response_converter, admin_service,
     quota_updater, services, client_key_name,
     alias_router, alias_resolver, load_balancer,
     candidate_idx: int, total_candidates: int,
+    key_id: int = 0, key_string: str = None,
 ):
     """尝试向一个候选供应商发送请求。
 
@@ -524,13 +689,22 @@ async def _try_candidate(
     # account_rate_windows 会按客户端原始名计数，而管理后台按
     # supplier_models.model_name（真实模型 ID）匹配不上，导致“按模型”
     # 窗口的使用数始终显示为满额 (max/max)。
-    if strategy and not strategy.check_rate_limit(selected_account.account_id, actual_model_id):
-        _log_error_request(
+    # 配额上限 = 配置上限 × 活跃 key 数：每个 key 在上游持有独立配额，
+    # 因此多 key 账户的有效额度是 N×。
+    key_count = 1
+    repo = services.get("account_repo")
+    if repo is not None:
+        try:
+            key_count = repo.count_active_keys(selected_account.account_id)
+        except Exception:
+            key_count = 1
+    if strategy and not strategy.check_rate_limit(selected_account.account_id, actual_model_id, key_count):
+        await _log_error_request(
             admin_service, request.model, actual_model_id,
             selected_account, client_key_name,
             429, f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
             request_body, request_start, first_response,
-            is_stream=request.stream,
+            is_stream=request.stream, key_id=key_id,
         )
         raise HTTPException(
             status_code=429,
@@ -561,13 +735,24 @@ async def _try_candidate(
         url = f"{selected_account.base_url}/chat/completions"
         # stream=True 是流式生效的关键：否则 httpx 会先缓冲整个上游响应体，
         # SSE 内容会在结尾一次性返回给客户端（表现为“非流式”）。
-        response = await http_client.request(
-            selected_account,
-            "POST",
-            url,
-            json=request_body,
-            stream=True,
-        )
+        try:
+            response = await http_client.request(
+                selected_account,
+                "POST",
+                url,
+                json=request_body,
+                stream=True,
+                key_string=key_string,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # 网络/传输层异常（超时、连接失败）或 Key 耗尽 → 记熔断并 fallback
+            await _raise_upstream_request_error(
+                exc, admin_service, request, actual_model_id, selected_account,
+                client_key_name, request_body, request_start, first_response,
+                circuit_breaker, strategy, is_stream=True, key_id=key_id,
+            )
         first_response = datetime.now(timezone.utc).isoformat()
 
         # Check for rate limit errors — allow fallback to next candidate
@@ -581,6 +766,7 @@ async def _try_candidate(
                 )
             if circuit_breaker:
                 circuit_breaker.record_failure(
+                    key_id,
                     selected_account.account_id,
                     actual_model_id or request.model,
                     response.status_code,
@@ -594,7 +780,7 @@ async def _try_candidate(
                 429, f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
                 request_body, request_start, first_response,
                 raw_response=_upstream_429_body,
-                is_stream=True,
+                is_stream=True, key_id=key_id,
             )
             raise HTTPException(
                 status_code=429,
@@ -623,6 +809,7 @@ async def _try_candidate(
             )
             if circuit_breaker:
                 circuit_breaker.record_failure(
+                    key_id,
                     selected_account.account_id,
                     actual_model_id or request.model,
                     response.status_code,
@@ -635,7 +822,7 @@ async def _try_candidate(
                 f"供应商 {selected_account.name or selected_account.account_id} 返回错误：{response.status_code}",
                 request_body, request_start, first_response,
                 raw_response=_upstream_err_body,
-                is_stream=True,
+                is_stream=True, key_id=key_id,
             )
             raise HTTPException(
                 status_code=response.status_code,
@@ -649,12 +836,9 @@ async def _try_candidate(
                 }
             )
 
-        # Request successful — record success and return streaming response
-        if circuit_breaker:
-            circuit_breaker.record_success(
-                selected_account.account_id,
-                actual_model_id or request.model,
-            )
+        # Request successful — return streaming response. Circuit-breaker
+        # record_success and the least_conn release are deferred to the stream
+        # generator so they only fire once the stream actually completes.
         return StreamingResponse(
             stream_response_with_logging(
                 response,
@@ -663,6 +847,9 @@ async def _try_candidate(
                 quota_updater=quota_updater,
                 client_key_name=client_key_name,
                 strategy=strategy,
+                circuit_breaker=circuit_breaker,
+                alias_router=alias_router,
+                key_id=key_id,
             ),
             media_type="text/event-stream",
             headers={
@@ -673,12 +860,23 @@ async def _try_candidate(
 
     # Non-streaming request
     url = f"{selected_account.base_url}/chat/completions"
-    response = await http_client.request(
-        selected_account,
-        "POST",
-        url,
-        json=request_body
-    )
+    try:
+        response = await http_client.request(
+            selected_account,
+            "POST",
+            url,
+            json=request_body,
+            key_string=key_string,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # 网络/传输层异常（超时、连接失败）或 Key 耗尽 → 记熔断并 fallback
+        await _raise_upstream_request_error(
+            exc, admin_service, request, actual_model_id, selected_account,
+            client_key_name, request_body, request_start, first_response,
+            circuit_breaker, strategy, is_stream=False, key_id=key_id,
+        )
     first_response = datetime.now(timezone.utc).isoformat()
 
     # Check for rate limit errors — allow fallback to next candidate
@@ -692,18 +890,19 @@ async def _try_candidate(
             )
         if circuit_breaker:
             circuit_breaker.record_failure(
+                key_id,
                 selected_account.account_id,
                 actual_model_id or request.model,
                 response.status_code,
                 strategy,
             )
-        _log_error_request(
+        await _log_error_request(
             admin_service, request.model, actual_model_id,
             selected_account, client_key_name,
             429, f"供应商 {selected_account.name or selected_account.account_id} 的 {request.model} 配额已耗尽",
             request_body, request_start, first_response,
             raw_response=await _safe_read_response_body(response),
-            is_stream=False,
+            is_stream=False, key_id=key_id,
         )
         raise HTTPException(
             status_code=429,
@@ -731,19 +930,20 @@ async def _try_candidate(
         )
         if circuit_breaker:
             circuit_breaker.record_failure(
+                key_id,
                 selected_account.account_id,
                 actual_model_id or request.model,
                 response.status_code,
                 strategy,
             )
-        _log_error_request(
+        await _log_error_request(
             admin_service, request.model, actual_model_id,
             selected_account, client_key_name,
             response.status_code,
             f"供应商 {selected_account.name or selected_account.account_id} 返回错误：{response.status_code}",
             request_body, request_start, first_response,
             raw_response=_upstream_err_body,
-            is_stream=False,
+            is_stream=False, key_id=key_id,
         )
         raise HTTPException(
             status_code=response.status_code,
@@ -784,7 +984,7 @@ async def _try_candidate(
                 502, "Could not parse SSE response",
                 request_body, request_start, first_response,
                 raw_response=response_text,
-                is_stream=False,
+                is_stream=False, key_id=key_id,
             )
             raise HTTPException(
                 status_code=502,
@@ -807,7 +1007,7 @@ async def _try_candidate(
                 502, "Could not parse response JSON",
                 request_body, request_start, first_response,
                 raw_response=response_text,
-                is_stream=False,
+                is_stream=False, key_id=key_id,
             )
             raise HTTPException(
                 status_code=502,
@@ -826,13 +1026,13 @@ async def _try_candidate(
         openai_response = response_converter.convert_to_openai(ms_response)
     except Exception as conv_err:
         logger.error(f"Response conversion failed: {conv_err}", exc_info=True)
-        _log_error_request(
+        await _log_error_request(
             admin_service, request.model, actual_model_id,
             selected_account, client_key_name,
             502, f"Response conversion failed: {conv_err}",
             request_body, request_start, first_response,
             raw_response=response_text,
-            is_stream=False,
+            is_stream=False, key_id=key_id,
         )
         raise HTTPException(
             status_code=502,
@@ -849,11 +1049,11 @@ async def _try_candidate(
     # Record success in circuit breaker
     if circuit_breaker:
         circuit_breaker.record_success(
-            selected_account.account_id,
+            key_id,
             actual_model_id or request.model,
         )
 
-# Update quota via provider strategy
+    # Update quota via provider strategy
     try:
         if strategy:
             await asyncio.to_thread(strategy.record_request,
@@ -961,7 +1161,7 @@ async def chat_completions(
 
                 # Check circuit breaker before trying — skip frozen candidates
                 if circuit_breaker and not circuit_breaker.check(
-                    selected_account.account_id,
+                    candidate.key_id,
                     actual_model_id,
                 ):
                     logger.info(
@@ -976,7 +1176,7 @@ async def chat_completions(
                         selected_account, client_key_name,
                         503, f"供应商 {selected_account.name or selected_account.account_id} 的 {actual_model_id} 模型已被冻结(熔断)",
                         _cb_req_body, _now, None,
-                        is_stream=request.stream,
+                        is_stream=request.stream, key_id=candidate.key_id,
                     )
                     last_error = last_error or HTTPException(
                         status_code=503,
@@ -996,15 +1196,24 @@ async def chat_completions(
                     f"account {selected_account.account_id} model {actual_model_id}"
                 )
 
+                # least_conn: count this dispatch as an in-flight connection.
+                # Released on completion — immediately for non-streaming (which
+                # finishes inside _try_candidate), or by the streaming generator
+                # once the stream ends. Frozen/skipped candidates are not counted.
+                alias_router.acquire(candidate.key_id, actual_model_id)
                 try:
-                    return await _try_candidate(
+                    result = await _try_candidate(
                         request, selected_account, actual_model_id,
                         http_client, response_converter, admin_service,
                         quota_updater, services, client_key_name,
                         alias_router, alias_resolver, load_balancer,
                         candidate_idx, len(candidates),
+                        key_id=candidate.key_id, key_string=candidate.key_string,
                     )
                 except HTTPException as e:
+                    # Failed before completion (non-streaming error, or streaming
+                    # pre-stream error) → release the in-flight slot now.
+                    alias_router.release(candidate.key_id, actual_model_id)
                     last_error = e
                     logger.warning(
                         f"Candidate {candidate_idx + 1}/{len(candidates)} failed: "
@@ -1012,6 +1221,11 @@ async def chat_completions(
                         f"model={actual_model_id} status={e.status_code}"
                     )
                     continue
+                if not request.stream:
+                    # Non-streaming request fully completed → release now.
+                    alias_router.release(candidate.key_id, actual_model_id)
+                # Streaming success: the response generator releases on completion.
+                return result
 
             # All candidates failed
             raise last_error or HTTPException(
@@ -1038,7 +1252,7 @@ async def chat_completions(
             http_client, response_converter, admin_service,
             quota_updater, services, client_key_name,
             alias_router, alias_resolver, load_balancer,
-            0, 1,
+            0, 1, key_id=0, key_string=None,
         )
 
     except HTTPException:

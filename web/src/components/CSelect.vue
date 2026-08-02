@@ -97,7 +97,7 @@ function positionPopover() {
     open ? 'border-ls-accent' : '',
       ]"
     >
-      <span class="truncate" :class="selectedOption ? 'text-ls-text' : 'text-ls-muted'">
+      <span class="truncate inline-block" :class="selectedOption ? 'text-ls-text' : 'text-ls-muted'">
         {{ selectedOption ? selectedOption.label : placeholder }}
       </span>
       <svg
@@ -125,14 +125,14 @@ function positionPopover() {
             :key="i"
             type="button"
             @click="select(option)"
-            class="w-full text-left px-3 py-2 text-sm transition-colors duration-100"
+            class="w-full text-left px-3 py-2 text-sm transition-colors duration-100 overflow-hidden"
             :class="
               option.value === modelValue
                 ? 'bg-ls-accent/10 text-ls-accent'
                 : 'text-ls-text hover:bg-ls-elevated'
             "
           >
-            <span class="truncate">{{ option.label }}</span>
+            <span class="truncate inline-block">{{ option.label }}</span>
           </button>
         </div>
       </div>

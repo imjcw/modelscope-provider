@@ -55,17 +55,36 @@ class AdminService:
     # ── Accounts ──
 
     def get_suppliers(self):
-        """List suppliers enriched with today's quota info (when quota_repo set)."""
+        """List suppliers enriched with today's quota info and API keys."""
         suppliers = self.account_repo.find_all()
         for s in suppliers:
             self._enrich_quota(s)
+            self._enrich_api_keys(s)
         return suppliers
 
     def get_supplier(self, supplier_id: int):
         s = self.account_repo.find_by_id(supplier_id)
         if s:
             self._enrich_quota(s)
+            self._enrich_api_keys(s)
         return s
+
+    def _enrich_api_keys(self, supplier: dict) -> None:
+        """Add api_keys list and api_key_records to supplier dict from account_api_keys table."""
+        if self.account_repo is None:
+            supplier["api_keys"] = [supplier.get("api_key", "")]
+            supplier["api_key_records"] = [
+                {"id": 0, "account_id": supplier["id"], "api_key": supplier.get("api_key", ""), "status": "active", "alias": "主密钥", "created_at": None, "updated_at": None}
+            ]
+            return
+        records = self.account_repo.find_all_api_keys(supplier["id"])
+        # Ensure the primary api_key is always first in records
+        primary = supplier.get("api_key", "")
+        primary_in_records = any(r["api_key"] == primary for r in records)
+        if primary and not primary_in_records:
+            records.insert(0, {"id": 0, "account_id": supplier["id"], "api_key": primary, "status": "active", "alias": "主密钥", "created_at": None, "updated_at": None})
+        supplier["api_keys"] = [r["api_key"] for r in records]
+        supplier["api_key_records"] = records
 
     def _enrich_quota(self, supplier: dict):
         """Enrich a supplier dict with quota info from the appropriate strategy."""
@@ -89,12 +108,28 @@ class AdminService:
             supplier.setdefault("quota_limit", 0)
 
     def create_supplier(self, name: str, api_key: str,
-                        base_url: str, provider_type: str = DEFAULT_PROVIDER_TYPE) -> dict:
-        return self.account_repo.create(name, api_key, base_url,
-                                        provider_type=provider_type)
+                        base_url: str, provider_type: str = DEFAULT_PROVIDER_TYPE,
+                        api_keys: list = None, api_key_records: list = None) -> dict:
+        created = self.account_repo.create(name, api_key, base_url,
+                                           provider_type=provider_type)
+        if api_key_records is not None and self.account_repo is not None:
+            self.account_repo.replace_api_keys_with_records(created["id"], api_key_records)
+        elif api_keys is not None and self.account_repo is not None:
+            all_keys = [api_key] + api_keys
+            self.account_repo.replace_api_keys(created["id"], all_keys)
+        else:
+            self.account_repo.replace_api_keys(created["id"], [api_key])
+        return created
 
     def update_supplier(self, supplier_id: int, **kwargs) -> dict:
-        return self.account_repo.update(supplier_id, **kwargs)
+        api_keys = kwargs.pop("api_keys", None)
+        api_key_records = kwargs.pop("api_key_records", None)
+        updated = self.account_repo.update(supplier_id, **kwargs)
+        if api_key_records is not None and updated and self.account_repo is not None:
+            self.account_repo.replace_api_keys_with_records(supplier_id, api_key_records)
+        elif api_keys is not None and updated and self.account_repo is not None:
+            self.account_repo.replace_api_keys(supplier_id, api_keys)
+        return updated
 
     def delete_supplier(self, supplier_id: int) -> bool:
         if self.supplier_model_repo is not None:
@@ -107,6 +142,38 @@ class AdminService:
             return None
         new_status = "disabled" if s["status"] == "active" else "active"
         return self.account_repo.update(supplier_id, status=new_status)
+
+    # ── Account API Keys ──
+
+    def get_api_keys(self, supplier_id: int) -> list:
+        """List all API keys for a supplier."""
+        if self.account_repo is None:
+            return []
+        return self.account_repo.find_api_keys(supplier_id)
+
+    def add_api_key(self, supplier_id: int, api_key: str) -> dict:
+        """Add an additional API key for a supplier."""
+        if self.account_repo is None:
+            raise NotImplementedError("Account repo not configured")
+        return self.account_repo.add_api_key(supplier_id, api_key)
+
+    def update_api_key_status(self, key_id: int, status: str) -> dict:
+        """Freeze or unfreeze an API key."""
+        if self.account_repo is None:
+            raise NotImplementedError("Account repo not configured")
+        return self.account_repo.update_api_key_status(key_id, status)
+
+    def delete_api_key(self, key_id: int) -> bool:
+        """Delete an API key."""
+        if self.account_repo is None:
+            return False
+        return self.account_repo.delete_api_key(key_id)
+
+    def get_api_key_by_id(self, key_id: int) -> dict:
+        """Get a specific API key by ID."""
+        if self.account_repo is None:
+            return None
+        return self.account_repo.find_api_key_by_id(key_id)
 
     # ── Provider Types ──
 
@@ -222,7 +289,8 @@ class AdminService:
         """Export all suppliers with their models as a structured dict.
 
         The returned dict is JSON/YAML-serializable and includes metadata
-        (version, exported_at) plus the full supplier list including models.
+        (version, exported_at) plus the full supplier list including models
+        and API key records (with status).
         """
         suppliers = self.account_repo.find_all()
         result = []
@@ -230,6 +298,9 @@ class AdminService:
             models = []
             if self.supplier_model_repo is not None:
                 models = self.supplier_model_repo.find_by_supplier(sup["id"])
+            key_records = []
+            if self.account_repo is not None:
+                key_records = self.account_repo.find_api_keys(sup["id"])
             result.append({
                 "name": sup.get("name", ""),
                 "api_key": sup.get("api_key", ""),
@@ -244,6 +315,7 @@ class AdminService:
                     }
                     for m in models
                 ],
+                "api_key_records": key_records,
             })
         return {
             "version": "1.0",
@@ -251,25 +323,86 @@ class AdminService:
             "suppliers": result,
         }
 
+    def export_config(self) -> dict:
+        """Export full system config: suppliers, provider_types, mappings."""
+        suppliers = self.account_repo.find_all()
+        supplier_list = []
+        for sup in suppliers:
+            models = []
+            if self.supplier_model_repo is not None:
+                models = self.supplier_model_repo.find_by_supplier(sup["id"])
+            key_records = []
+            if self.account_repo is not None:
+                key_records = self.account_repo.find_api_keys(sup["id"])
+            supplier_list.append({
+                "name": sup.get("name", ""),
+                "api_key": sup.get("api_key", ""),
+                "base_url": sup.get("base_url", ""),
+                "provider_type": sup.get("provider_type", DEFAULT_PROVIDER_TYPE),
+                "status": sup.get("status", "active"),
+                "models": [
+                    {
+                        "model_name": m.get("model_name", ""),
+                        "model_type": m.get("model_type", "text"),
+                        "context_length": m.get("context_length"),
+                    }
+                    for m in models
+                ],
+                "api_key_records": key_records,
+            })
+
+        provider_types = self.get_provider_types()
+        mappings = self.get_mappings()
+
+        return {
+            "version": "1.0",
+            "exported_at": _tz_now().isoformat(timespec="seconds"),
+            "suppliers": supplier_list,
+            "provider_types": provider_types,
+            "mappings": mappings,
+        }
+
     def import_suppliers(self, data: dict, strategy: str = "skip") -> dict:
-        """Import suppliers from a previously exported data structure.
+        """Import full system config from a previously exported data structure.
+
+        Handles three sections when present: ``provider_types``, ``suppliers``,
+        and ``mappings``.  Each section is processed in dependency order so that
+        provider types exist before suppliers are created, and suppliers exist
+        before mappings are resolved.
 
         Args:
-            data: Parsed dict from JSON/YAML import.
+            data: Parsed dict from JSON/YAML import (as produced by export_config).
             strategy: How to handle duplicate names — "skip" (default) or "overwrite".
 
         Returns:
-            Stats dict: {created, skipped, updated, errors, total}
+            Stats dict: {provider_types: {created, skipped, updated, errors},
+                         suppliers: {created, skipped, updated, errors, total},
+                         mappings: {created, skipped, updated, errors},
+                         errors}
         """
-        if not isinstance(data, dict) or "suppliers" not in data:
+        if not isinstance(data, dict):
+            raise ValueError("无效的导入格式：根对象必须是字典")
+
+        if "suppliers" not in data:
             raise ValueError("无效的导入格式：缺少 'suppliers' 字段")
 
         entries = data["suppliers"]
         if not isinstance(entries, list):
             raise ValueError("无效的导入格式：'suppliers' 必须是列表")
 
-        stats = {"created": 0, "skipped": 0, "updated": 0, "errors": [], "total": len(entries)}
+        stats = {
+            "provider_types": {"created": 0, "skipped": 0, "updated": 0, "errors": []},
+            "suppliers": {"created": 0, "skipped": 0, "updated": 0, "errors": [], "total": len(entries)},
+            "mappings": {"created": 0, "skipped": 0, "updated": 0, "errors": []},
+            "errors": [],
+        }
 
+        # ── 1. Import provider_types first ──
+        if "provider_types" in data and isinstance(data["provider_types"], list):
+            self._import_provider_types(data["provider_types"], strategy, stats["provider_types"])
+            self.rebuild_rate_limit_strategies()
+
+        # ── 2. Import suppliers ──
         for idx, entry in enumerate(entries):
             try:
                 # ── Validate required fields ──
@@ -282,12 +415,13 @@ class AdminService:
                 status = entry.get("status", "active")
                 provider_type = entry.get("provider_type", DEFAULT_PROVIDER_TYPE)
                 models = entry.get("models", [])
+                api_key_records = entry.get("api_key_records")
 
                 # ── Check for duplicate by name ──
                 existing = self.account_repo.find_by_name(name)
                 if existing:
                     if strategy == "skip":
-                        stats["skipped"] += 1
+                        stats["suppliers"]["skipped"] += 1
                         continue
                     elif strategy == "overwrite":
                         self.account_repo.update(
@@ -297,9 +431,13 @@ class AdminService:
                             status=status,
                             provider_type=provider_type,
                         )
+                        if api_key_records and self.account_repo is not None:
+                            self.account_repo.replace_api_keys_with_records(existing["id"], api_key_records)
+                        elif self.account_repo is not None:
+                            self.account_repo.replace_api_keys(existing["id"], [api_key])
                         if self.supplier_model_repo is not None and isinstance(models, list):
                             self._safe_bulk_models(existing["id"], models)
-                        stats["updated"] += 1
+                        stats["suppliers"]["updated"] += 1
                         continue
                     else:
                         raise ValueError(f"未知的处理策略: {strategy}")
@@ -309,14 +447,111 @@ class AdminService:
                     name=name, api_key=api_key, base_url=base_url,
                     status=status, provider_type=provider_type,
                 )
+                if api_key_records and self.account_repo is not None:
+                    self.account_repo.replace_api_keys_with_records(created["id"], api_key_records)
+                elif self.account_repo is not None:
+                    self.account_repo.replace_api_keys(created["id"], [api_key])
                 if self.supplier_model_repo is not None and isinstance(models, list):
                     self._safe_bulk_models(created["id"], models)
+                stats["suppliers"]["created"] += 1
+
+            except Exception as e:
+                stats["suppliers"]["errors"].append(f"第 {idx + 1} 项 ({entry.get('name', '?')}): {str(e)}")
+
+        # ── 3. Import mappings last ──
+        if "mappings" in data and isinstance(data["mappings"], list):
+            self._import_mappings(data["mappings"], strategy, stats["mappings"])
+
+        # ── Consolidate top-level errors ──
+        for section in ("provider_types", "suppliers", "mappings"):
+            stats["errors"].extend(stats[section]["errors"])
+
+        return stats
+
+    def _import_provider_types(self, types: list, strategy: str, stats: dict) -> None:
+        """Import provider types from exported data."""
+        if self.provider_type_repo is None:
+            stats["errors"].append("provider_type_repo 未配置，跳过供应商类型导入")
+            return
+
+        for idx, pt in enumerate(types):
+            try:
+                type_key = pt.get("type_key", "").strip()
+                if not type_key:
+                    raise ValueError("缺少必填字段 type_key")
+
+                existing = self.provider_type_repo.find_by_type_key(type_key)
+                if existing:
+                    if pt.get("built_in") and strategy == "skip":
+                        stats["skipped"] += 1
+                        continue
+                    if strategy == "overwrite":
+                        self.provider_type_repo.update(
+                            existing["id"],
+                            name=pt.get("name", ""),
+                            description=pt.get("description", ""),
+                            strategy_type=pt.get("strategy_type", "header_based"),
+                            config=pt.get("config") or {},
+                            color=pt.get("color", "#89b4fa"),
+                        )
+                        stats["updated"] += 1
+                        continue
+                    else:
+                        raise ValueError(f"未知的处理策略: {strategy}")
+
+                self.provider_type_repo.create(
+                    type_key=type_key,
+                    name=pt.get("name", ""),
+                    description=pt.get("description", ""),
+                    strategy_type=pt.get("strategy_type", "header_based"),
+                    config=pt.get("config") or {},
+                    color=pt.get("color", "#89b4fa"),
+                    built_in=bool(pt.get("built_in")),
+                )
                 stats["created"] += 1
 
             except Exception as e:
-                stats["errors"].append(f"第 {idx + 1} 项 ({entry.get('name', '?')}): {str(e)}")
+                stats["errors"].append(f"第 {idx + 1} 项 ({pt.get('type_key', '?')}): {str(e)}")
 
-        return stats
+    def _import_mappings(self, mappings: list, strategy: str, stats: dict) -> None:
+        """Import model mappings from exported data."""
+        if self.mapping_repo is None:
+            stats["errors"].append("mapping_repo 未配置，跳过映射导入")
+            return
+
+        for idx, m in enumerate(mappings):
+            try:
+                alias_name = m.get("alias_name", "").strip()
+                if not alias_name:
+                    raise ValueError("缺少必填字段 alias_name")
+
+                existing_rows = self.mapping_repo.find_by_alias(alias_name)
+                if existing_rows:
+                    if strategy == "skip":
+                        stats["skipped"] += 1
+                        continue
+                    elif strategy == "overwrite":
+                        self.mapping_repo.update(
+                            alias_name,
+                            actual_model_id=m.get("actual_model_id", alias_name),
+                            description=m.get("description", ""),
+                            status=m.get("status", "active"),
+                        )
+                        stats["updated"] += 1
+                        continue
+                    else:
+                        raise ValueError(f"未知的处理策略: {strategy}")
+
+                self.mapping_repo.create(
+                    alias_name=alias_name,
+                    actual_model_id=m.get("actual_model_id", alias_name),
+                    description=m.get("description", ""),
+                    status=m.get("status", "active"),
+                )
+                stats["created"] += 1
+
+            except Exception as e:
+                stats["errors"].append(f"第 {idx + 1} 项 ({m.get('alias_name', '?')}): {str(e)}")
 
     def _safe_bulk_models(self, supplier_id: int, models: list) -> None:
         """Bulk-insert models for a supplier, skipping invalid entries."""
@@ -360,6 +595,9 @@ class AdminService:
 
     def delete_mapping(self, alias_name: str):
         return self.mapping_repo.delete_by_alias(alias_name)
+
+    def rename_mapping(self, old_alias: str, new_alias: str):
+        return self.mapping_repo.rename(old_alias, new_alias)
 
     def get_mapping_models(self, alias_name: str):
         """Get all models bound to a mapping alias (with model_type, context_length)."""
@@ -586,7 +824,8 @@ class AdminService:
                     request_start: str = None, first_response: str = None, end_time: str = None,
                     cached_tokens: int = 0, prompt_partial_cached: int = 0,
                     client_key_name: str = None,
-                    response_headers: str = None) -> str:
+                    response_headers: str = None,
+                    api_key_id: int = 0) -> str:
         """Log a request and return its request_id."""
         request_id = f"req_{uuid.uuid4().hex[:8]}"
 
@@ -619,7 +858,8 @@ class AdminService:
             cached_tokens=cached_tokens, prompt_partial_cached=prompt_partial_cached,
             client_key_name=client_key_name,
             response_headers=response_headers,
-            )
+            api_key_id=api_key_id,
+        )
 
         # Update minute-level aggregated stats (independent of raw log retention)
         try:
@@ -963,9 +1203,17 @@ class AdminService:
                 today_output = mq.get("total_output_tokens", 0) or 0
                 today_cached = mq.get("total_cached_tokens", 0) or 0
 
-                # Fallback: if no model quota entry yet, derive from request_logs
+                # Fallback: if no model quota entry yet, derive from request_logs.
+                # cached_tokens is always read from request_stats_minute because the
+                # model_quotas table lacks a total_cached_tokens column — without this
+                # fallback the cache column would always show 0.
                 if quota_limit == 0 and today_input == 0 and today_output == 0:
                     today_input, today_output, today_cached = self._get_today_token_usage(account_id, model_name)
+                elif today_cached == 0:
+                    # Model has usage data in model_quotas but cached_tokens was
+                    # never persisted there — fetch it from the stats table.
+                    _inp, _out, _cached = self._get_today_token_usage(account_id, model_name)
+                    today_cached = _cached or today_cached
 
                 is_unavailable = model_name in supplier_quota_map.get(account_id, {}).get("unavailable_models", set())
 
@@ -982,6 +1230,14 @@ class AdminService:
                     win_cfg = model_overrides.get(model_name) or {}
                     window_seconds = win_cfg.get("window_seconds") or pt_info.get("window_seconds") or 18000
                     max_requests = win_cfg.get("max_requests") or pt_info.get("max_requests") or 1500
+                    # 配额上限 × 活跃 key 数：每个 key 在上游持有独立配额，因此
+                    # 多 key 账户的有效窗口额度 = 配置上限 × N，与拦截侧一致。
+                    # 计数语义与 AliasRouter 候选一致（主密钥 + 活跃 account_api_keys）。
+                    try:
+                        _key_count = self.account_repo.count_active_keys(account_id)
+                        max_requests = max_requests * max(1, _key_count)
+                    except Exception:
+                        pass
                     # 计数 key 以真实模型 ID (actual_model_id) 写入（见 routes.py
                     # check_rate_limit），此处 model_name 是模型目录名，往往是
                     # mapping 的 alias，两者可能不同。优先直接匹配，否则尝试把

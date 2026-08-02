@@ -95,11 +95,12 @@ def test_streaming_error_returns_http_error(client):
     assert error_obj["type"] == "upstream_error"
 
 
-def test_streaming_error_with_single_candidate_no_log(client):
+def test_streaming_error_with_single_candidate_logs_error(client):
     """When upstream returns 403 in streaming mode with a single candidate
-    (no alias binding), the error is raised before streaming starts, so no
-    streaming log entry should be created. The error is returned as an HTTP
-    error response.
+    (no alias binding), the error is raised before streaming starts, but the
+    failed request must still be recorded in the request logs so the admin
+    panel shows why it failed. (Regression: failure logging was added in
+    ``fix(api): 记录失败请求日志``; older expectation of "no log" is obsolete.)
     """
 
     mock_response = AsyncMock()
@@ -138,9 +139,10 @@ def test_streaming_error_with_single_candidate_no_log(client):
         r for r in logs_after
         if r["id"] not in before_ids and r.get("is_stream")
     ]
-    # No streaming log entry should be created because the error was detected
-    # before streaming started (the HTTP request is now made before
-    # StreamingResponse is returned)
-    assert len(new_streaming) == 0, (
-        f"Expected no streaming log entries, got {len(new_streaming)}"
+    # The failed stream request must be logged (status 403), so operators can
+    # see why the stream never started.
+    assert len(new_streaming) == 1, (
+        f"Expected 1 streaming error log entry, got {len(new_streaming)}"
     )
+    assert new_streaming[0]["status_code"] == 403
+    assert new_streaming[0]["error_message"]

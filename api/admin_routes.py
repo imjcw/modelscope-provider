@@ -61,6 +61,8 @@ class SupplierCreate(BaseModel):
     api_key: str = Field(..., description="API key")
     base_url: str = Field(..., description="Provider base URL")
     provider_type: str = Field(default=DEFAULT_PROVIDER_TYPE, description="Provider type: modelscope, sensetime")
+    api_keys: List[str] = Field(default_factory=list, description="Additional API keys for rotation")
+    api_key_records: List[dict] = Field(default_factory=list, description="API key records with status (id, api_key, status)")
 
 
 class SupplierUpdate(BaseModel):
@@ -69,6 +71,8 @@ class SupplierUpdate(BaseModel):
     base_url: Optional[str] = None
     status: Optional[str] = None
     provider_type: Optional[str] = None
+    api_keys: Optional[List[str]] = None
+    api_key_records: Optional[List[dict]] = None
 
 
 class MappingUpsert(BaseModel):
@@ -81,6 +85,10 @@ class MappingUpsert(BaseModel):
 class MappingUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
+
+
+class MappingRename(BaseModel):
+    alias_name: str = Field(..., description="New alias name")
 
 
 class MappingBulkUpdate(BaseModel):
@@ -188,14 +196,40 @@ def export_suppliers(format: str = "json", service=Depends(get_admin_service)):
     )
 
 
+@router.get("/config/export")
+def export_config(format: str = "json", service=Depends(get_admin_service)):
+    """Export full system config: suppliers, provider_types, mappings."""
+    data = service.export_config()
+
+    if format == "yaml":
+        import yaml
+        content = yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        return Response(
+            content=content,
+            media_type="application/yaml",
+            headers={"Content-Disposition": 'attachment; filename="config_export.yaml"'},
+        )
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        content=data,
+        headers={"Content-Disposition": 'attachment; filename="config_export.json"'},
+    )
+
+
 @router.post("/suppliers/import")
 async def import_suppliers(
     request: Request,
-    file: UploadFile = File(..., description="JSON or YAML file with supplier data"),
+    file: UploadFile = File(..., description="JSON or YAML file with full config data (suppliers, provider_types, mappings)"),
     strategy: str = Form("skip", description="How to handle duplicates: 'skip' or 'overwrite'"),
     service=Depends(get_admin_service),
 ):
-    """Import suppliers from an uploaded JSON or YAML file."""
+    """Import full system config from an uploaded JSON or YAML file.
+
+    Handles three sections when present in the file: ``provider_types``,
+    ``suppliers``, and ``mappings``.  Each section is processed in
+    dependency order.
+    """
     import yaml
 
     contents = await file.read()
@@ -248,6 +282,8 @@ def create_supplier(body: SupplierCreate, request: Request, service=Depends(get_
             api_key=body.api_key,
             base_url=body.base_url,
             provider_type=body.provider_type,
+            api_keys=body.api_keys,
+            api_key_records=body.api_key_records,
         )
         _refresh_after_account_change(request)
         return result
@@ -279,6 +315,52 @@ def toggle_supplier(supplier_id: int, request: Request, service=Depends(get_admi
 def delete_supplier(supplier_id: int, request: Request, service=Depends(get_admin_service)):
     if not service.delete_supplier(supplier_id):
         raise HTTPException(status_code=404, detail="Supplier not found")
+    _refresh_after_account_change(request)
+    return {"ok": True}
+
+
+# ── Account API Keys ──────────────────────────────────────────────
+
+class ApiKeyCreate(BaseModel):
+    api_key: str = Field(..., description="API key value")
+
+
+class ApiKeyStatusUpdate(BaseModel):
+    status: Literal["active", "frozen"] = Field(..., description="Key status")
+
+
+@router.get("/suppliers/{supplier_id}/api-keys")
+def list_api_keys(supplier_id: int, service=Depends(get_admin_service)):
+    """List all API keys for a supplier."""
+    return service.get_api_keys(supplier_id)
+
+
+@router.post("/suppliers/{supplier_id}/api-keys")
+def add_api_key(supplier_id: int, body: ApiKeyCreate, request: Request, service=Depends(get_admin_service)):
+    """Add an additional API key for a supplier."""
+    try:
+        return service.add_api_key(supplier_id, body.api_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/suppliers/{supplier_id}/api-keys/{key_id}/status")
+def update_api_key_status(
+    supplier_id: int, key_id: int, body: ApiKeyStatusUpdate,
+    request: Request, service=Depends(get_admin_service),
+):
+    """Freeze or unfreeze an API key."""
+    try:
+        return service.update_api_key_status(key_id, body.status)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/suppliers/{supplier_id}/api-keys/{key_id}")
+def delete_api_key(supplier_id: int, key_id: int, request: Request, service=Depends(get_admin_service)):
+    """Delete an API key."""
+    if not service.delete_api_key(key_id):
+        raise HTTPException(status_code=404, detail="API key not found")
     _refresh_after_account_change(request)
     return {"ok": True}
 
@@ -362,13 +444,16 @@ def delete_supplier_model(
 
 @router.put("/suppliers/{supplier_id}/models/bulk")
 def bulk_set_supplier_models(
-    supplier_id: int, body: SupplierModelBulkUpdate, service=Depends(get_admin_service)
+    supplier_id: int, body: SupplierModelBulkUpdate, request: Request,
+    service=Depends(get_admin_service),
 ):
     models = [
         {"model_name": m.model_name, "model_type": m.model_type, "context_length": m.context_length}
         for m in body.models
     ]
-    return service.bulk_set_supplier_models(supplier_id, models)
+    result = service.bulk_set_supplier_models(supplier_id, models)
+    _refresh_after_account_change(request)
+    return result
 
 
 # ── Mappings ────────────────────────────────────────────────────────────────
@@ -391,6 +476,18 @@ def update_mapping(alias_name: str, body: MappingUpdate, service=Depends(get_adm
     if not updated:
         raise HTTPException(status_code=404, detail="Mapping not found")
     return updated
+
+
+@router.put("/mappings/{alias_name}/rename")
+def rename_mapping(alias_name: str, body: MappingRename, service=Depends(get_admin_service)):
+    """Rename a mapping alias (cascades to mapping_models and model_alias_cache)."""
+    try:
+        updated = service.rename_mapping(alias_name, body.alias_name)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Mapping not found")
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.patch("/mappings/{alias_name}/status")
@@ -796,3 +893,46 @@ def get_circuit_breaker_state(request: Request, service=Depends(get_admin_servic
         "frozen": sum(1 for s in states if s.get("frozen_remaining", 0) > 0),
         "escalated": sum(1 for s in states if s.get("escalated")),
     }
+
+
+class CircuitBreakerResetBody(BaseModel):
+    """Optional target for a circuit-breaker reset.
+
+    When both ``key_id`` and ``model_name`` are provided, only that circuit
+    is cleared (``key_id`` is the ``account_api_keys.id``; 0 = primary key).
+    When omitted, every tracked circuit is reset.
+    """
+
+    key_id: Optional[int] = None
+    model_name: Optional[str] = None
+
+
+@router.post("/circuit-breaker/reset")
+def reset_circuit_breaker(
+    request: Request,
+    body: Optional[CircuitBreakerResetBody] = None,
+    service=Depends(get_admin_service),
+):
+    """Manually unfreeze circuit breaker state.
+
+    Pass ``key_id`` + ``model_name`` to reset a single circuit, or omit them
+    to reset all circuits. Useful for recovering a supplier without restarting.
+
+    ``key_id``: the ``account_api_keys.id`` (0 = primary key from accounts table).
+    """
+    try:
+        services = request.app.state.services
+    except AttributeError:
+        services = {}
+
+    circuit_breaker = services.get("circuit_breaker") if services else None
+    if circuit_breaker is None:
+        raise HTTPException(status_code=404, detail="Circuit breaker not available")
+
+    if body and body.key_id is not None and body.model_name:
+        cleared = circuit_breaker.clear_one(body.key_id, body.model_name)
+        return {"ok": True, "cleared": 1 if cleared else 0, "scope": "one"}
+
+    before = len(circuit_breaker.get_all_states())
+    circuit_breaker.clear()
+    return {"ok": True, "cleared": before, "scope": "all"}

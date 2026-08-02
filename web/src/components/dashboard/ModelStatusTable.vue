@@ -82,13 +82,13 @@ const barClass = (pct) =>
 
 const fmtWindow = (r) => {
   const st = r.strategy_type
-  if (!st) return { label: '被动', sub: 'header 驱动', badge: 'muted', custom: false }
+  if (!st || st === 'header_based') return { label: '无限制', sub: '', badge: 'muted', custom: false }
   const secs = r.window_seconds || 0
   const val = secs >= 3600 ? (secs / 3600) : (secs / 60)
   const unit = secs >= 3600 ? 'h' : 'm'
   const max = r.max_requests ?? r.window_quota_limit ?? null
   const rem = r.window_quota_remaining
-  // 展示“已用/上限”（使用数），而不是“剩余/上限”，避免把剩余数误认为已用数。
+  // 展示”已用/上限”（使用数），而不是”剩余/上限”，避免把剩余数误认为已用数。
   const used = max != null && rem != null ? Math.max(0, max - rem) : null
   const sub =
     used != null ? `已用 ${used}/${max} 滑窗`
@@ -98,7 +98,7 @@ const fmtWindow = (r) => {
     return { label: `按模型 ${val}${unit}`, sub, badge: 'accent', custom: !!r.has_custom_window }
   if (st === 'fixed_window' || st === 'sensetime')
     return { label: `滑动窗口 ${val}${unit}`, sub, badge: 'accent', custom: false }
-  return { label: '被动', sub: 'header 驱动', badge: 'muted', custom: false }
+  return { label: '被动', sub: '', badge: 'muted', custom: false }
 }
 const WINDOW_BADGE = {
   accent: 'bg-ls-accent/10 text-ls-accent border-ls-accent/20',

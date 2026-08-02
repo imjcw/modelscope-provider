@@ -142,6 +142,30 @@ class QuotaRepository:
                 }
             return None
 
+    def get_unavailable_models_batch(self, account_ids) -> dict:
+        """Batch fetch today's unavailable models for multiple accounts.
+
+        Returns ``{account_id(str): set(model_names)}``. Accounts with no quota
+        row for today map to an empty set. Used by the router to skip candidates
+        whose model quota is exhausted, without an N+1 query per candidate.
+        """
+        if not account_ids:
+            return {}
+        today = self.db.get_today_date()
+        ids = list(account_ids)
+        result = {aid: set() for aid in ids}
+        with self.db.get_connection() as conn:
+            placeholders = ",".join("?" * len(ids))
+            cursor = conn.execute(
+                f"SELECT account_id, unavailable_models FROM account_quotas "
+                f"WHERE account_id IN ({placeholders}) AND quota_date = ?",
+                (*ids, today),
+            )
+            for row in cursor.fetchall():
+                um = row["unavailable_models"]
+                result[row["account_id"]] = set(json.loads(um) if um else [])
+        return result
+
     def reset_unavailable_models(self, account_id: str):
         """Reset unavailable models (called when quota is reset)."""
         today = self.db.get_today_date()

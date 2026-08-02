@@ -30,7 +30,7 @@ class ModelScopeStrategy(RateLimitStrategy):
         # 供应商类型可配置的响应头名称（None 表示使用默认 ModelScope 头）
         self.header_config = header_config
 
-    def check_rate_limit(self, account_id: str, model_name: str) -> bool:
+    def check_rate_limit(self, account_id: str, model_name: str, key_count: int = 1) -> bool:
         """Always allow — ModelScope quota is enforced upstream."""
         return True
 

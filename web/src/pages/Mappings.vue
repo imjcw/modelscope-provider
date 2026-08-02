@@ -87,9 +87,8 @@
         <!-- 智能路由ID -->
         <FormField label="智能路由ID" required>
           <input v-model="form.alias" type="text" placeholder="my-smart-route"
-            class="form-input font-mono" :disabled="isEditing"
+            class="form-input font-mono"
             @keyup.enter="submitForm" ref="formAliasInput">
-          <p v-if="isEditing" class="text-[10px] text-ls-muted mt-1">智能路由ID不可修改</p>
         </FormField>
 
         <!-- 描述 -->
@@ -229,6 +228,7 @@ import {
   getMappings,
   bulkUpdateMappings as apiBulkUpdate,
   deleteMapping as apiDelete,
+  renameMapping as apiRenameMapping,
   getMappingModels,
   addMappingModel,
   removeMappingModel as apiRemoveMappingModel,
@@ -337,7 +337,7 @@ const openAdd = async () => {
 
 const openEdit = async (item) => {
   isEditing.value = true
-  form.value = { alias: item.alias_name, description: item.description || '' }
+  form.value = { alias: item.alias_name, description: item.description || '', _oldAlias: item.alias_name }
   bindingList.value = []
   selectedSupplier.value = null
   selectedModels.value = []
@@ -365,6 +365,19 @@ const submitForm = async () => {
   }
   submitting.value = true
   try {
+    // Rename: changed alias in edit mode — use dedicated rename API (cascades to mapping_models)
+    if (isEditing.value && form.value.alias !== form.value._oldAlias) {
+      await apiRenameMapping(form.value._oldAlias, form.value.alias)
+      // Remove old entry from list so loadData picks up the renamed one
+      const idx = mappings.value.findIndex(m => m.alias_name === form.value._oldAlias)
+      if (idx !== -1) mappings.value.splice(idx, 1)
+      // Update the alias reference in bound models list
+      const m = mappings.value.find(m => m.alias_name === form.value.alias)
+      if (m) m.description = form.value.description
+      await loadData()
+      closeForm()
+      return
+    }
     const allMappings = {}
     for (const m of mappings.value) {
       allMappings[m.alias_name] = m.actual_model_id || m.alias_name

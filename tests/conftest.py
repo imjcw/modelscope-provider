@@ -44,6 +44,9 @@ def database(test_db_url):
     db.initialize_tables()
     Migrator(db).run()
     yield db
+    # Close pooled connections first — on Windows the DB file cannot be
+    # deleted while any connection is open (PermissionError: WinError 32).
+    db.close()
     db_path = Path(_test_db_path)
     if db_path.exists():
         db_path.unlink()

@@ -52,9 +52,6 @@
         <FormField label="超时 (ms)" plain>
           <input v-model.number="config.timeoutMs" type="number" class="form-input font-mono">
         </FormField>
-        <FormField label="重试次数" plain>
-          <input v-model.number="config.retryCount" type="number" class="form-input font-mono">
-        </FormField>
       </CCard>
 
       <!-- Quota Settings -->
@@ -89,7 +86,7 @@
               <svg v-else class="animate-spin mr-1.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
               </svg>
-              {{ exporting ? '导出中…' : '导出供应商数据' }}
+              {{ exporting ? '导出中…' : '导出配置' }}
             </button>
           </div>
 
@@ -111,7 +108,7 @@
               </FormField>
             </div>
             <div class="flex items-center justify-between">
-              <p class="text-xs text-ls-dim">导入将批量添加或更新供应商及其关联模型</p>
+              <p class="text-xs text-ls-dim">导入将批量添加或更新供应商、供应商类型及映射配置</p>
               <button @click="handleImport" class="btn btn-primary whitespace-nowrap" :disabled="!selectedFile || importing">
                 <svg v-if="!importing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-1.5">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
@@ -119,7 +116,7 @@
                 <svg v-else class="animate-spin mr-1.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                 </svg>
-                {{ importing ? '导入中…' : '导入供应商数据' }}
+                {{ importing ? '导入中…' : '导入配置' }}
               </button>
             </div>
           </div>
@@ -130,9 +127,20 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
               </svg>
-              <span>导入完成 — 新增 <strong>{{ importResult.created }}</strong> / 跳过 <strong>{{ importResult.skipped }}</strong> / 更新 <strong>{{ importResult.updated }}</strong> / 错误 <strong>{{ importResult.errors.length }}</strong></span>
+              <span>导入完成</span>
             </div>
-            <ul v-if="importResult.errors.length" class="mt-2 space-y-1">
+            <div class="mt-2 grid grid-cols-3 gap-3 text-xs">
+              <div class="text-ls-dim">供应商类型</div>
+              <div class="text-ls-text">新增 {{ importResult.provider_types?.created ?? 0 }} / 跳过 {{ importResult.provider_types?.skipped ?? 0 }} / 更新 {{ importResult.provider_types?.updated ?? 0 }}</div>
+              <div></div>
+              <div class="text-ls-dim">供应商</div>
+              <div class="text-ls-text">新增 {{ importResult.suppliers?.created ?? 0 }} / 跳过 {{ importResult.suppliers?.skipped ?? 0 }} / 更新 {{ importResult.suppliers?.updated ?? 0 }}</div>
+              <div></div>
+              <div class="text-ls-dim">映射</div>
+              <div class="text-ls-text">新增 {{ importResult.mappings?.created ?? 0 }} / 跳过 {{ importResult.mappings?.skipped ?? 0 }} / 更新 {{ importResult.mappings?.updated ?? 0 }}</div>
+              <div></div>
+            </div>
+            <ul v-if="importResult.errors?.length" class="mt-2 space-y-1">
               <li v-for="(err, i) in importResult.errors" :key="i" class="text-xs text-ls-danger font-mono">• {{ err }}</li>
             </ul>
           </div>
@@ -167,7 +175,7 @@ import CCard from '@/components/CCard.vue'
 import FormField from '@/components/FormField.vue'
 import CSelect from '@/components/CSelect.vue'
 import CCheckbox from '@/components/CCheckbox.vue'
-import { getConfig as apiGetConfig, updateConfig as apiUpdateConfig, getAppInfo, exportSuppliers, importSuppliers } from '@/api'
+import { getConfig as apiGetConfig, updateConfig as apiUpdateConfig, getAppInfo, exportConfig, importConfig } from '@/api'
 
 const toast = inject('$toast')
 
@@ -188,7 +196,7 @@ const DEFAULTS = {
   listenHost: '0.0.0.0', listenPort: 8000, apiPrefix: '/api',
   dbPath: 'modelscope_proxy.db', logLevel: 'INFO', persistLogs: true,
   logRetentionHours: 1,
-  lbStrategy: 'round_robin', timeoutMs: 30000, retryCount: 0,
+  lbStrategy: 'round_robin', timeoutMs: 30000,
   autoDisable: true, autoReset: true,
 }
 
@@ -211,7 +219,6 @@ const applyBackendConfig = (data) => {
     logLevel: m('log_level') || 'INFO',
     lbStrategy: m('load_balancer_strategy') || 'round_robin',
     timeoutMs: Number(m('request_timeout_ms')) || 30000,
-    retryCount: Number(m('retry_count')) || 0,
     autoDisable: (m('auto_disable_on_quota') || 'true').toLowerCase() === 'true',
     autoReset: (m('auto_reset_daily') || 'true').toLowerCase() === 'true',
     logRetentionHours: Number(m('log_retention_hours')) || 1,
@@ -262,7 +269,6 @@ const saveConfig = async () => {
     log_level: config.logLevel,
     load_balancer_strategy: config.lbStrategy,
     request_timeout_ms: String(config.timeoutMs),
-    retry_count: String(config.retryCount),
     auto_disable_on_quota: String(config.autoDisable),
     auto_reset_daily: String(config.autoReset),
     log_retention_hours: String(config.logRetentionHours),
@@ -312,7 +318,7 @@ const handleFileSelect = (e) => {
 const handleExport = async () => {
   exporting.value = true
   try {
-    const res = await exportSuppliers(exportFormat.value)
+    const res = await exportConfig(exportFormat.value)
     const blob = new Blob([res.data], {
       type: exportFormat.value === 'yaml' ? 'application/yaml' : 'application/json',
     })
@@ -320,7 +326,7 @@ const handleExport = async () => {
     const a = document.createElement('a')
     a.href = url
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-    a.download = `suppliers_export_${date}.${exportFormat.value === 'yaml' ? 'yaml' : 'json'}`
+    a.download = `config_export_${date}.${exportFormat.value === 'yaml' ? 'yaml' : 'json'}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -338,7 +344,7 @@ const handleImport = async () => {
   importing.value = true
   importResult.value = null
   try {
-    const res = await importSuppliers(selectedFile.value, importStrategy.value)
+    const res = await importConfig(selectedFile.value, importStrategy.value)
     importResult.value = res.data || res
     const errs = importResult.value?.errors?.length || 0
     if (errs > 0) {

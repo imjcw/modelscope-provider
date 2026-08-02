@@ -1,6 +1,8 @@
+import asyncio
 import json
 from unittest.mock import Mock
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -252,3 +254,113 @@ async def test_stream_logging_no_cache_data_defaults_zero():
     kwargs = admin_service.log_request.call_args.kwargs
     assert kwargs["cached_tokens"] == 0
     assert kwargs["prompt_partial_cached"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Interrupted streams must still produce a request log entry
+# ---------------------------------------------------------------------------
+# Regression: stream_response_with_logging only logged AFTER the stream
+# completed normally. Upstream mid-stream failures, client disconnects
+# (CancelledError / GeneratorExit) silently produced NO log entry — the admin
+# panel only saw a subset of the streams that were actually started.
+
+class _BrokenStreamResponse:
+    """Streaming response whose upstream connection dies mid-stream."""
+
+    def __init__(self, fail_at: int = 1):
+        self._fail_at = fail_at
+        self._count = 0
+        self.headers = {"content-type": "text/event-stream"}
+
+    async def aiter_lines(self):
+        yield 'data: {"choices":[{"delta":{"content":"hi"},"index":0}]}'
+        self._count += 1
+        if self._count >= self._fail_at:
+            raise httpx.ReadError("connection closed mid-stream")
+        yield "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_logging_on_upstream_interrupt():
+    """Upstream breaking mid-stream must still write a request log entry."""
+    admin_service = Mock()
+
+    with pytest.raises(httpx.ReadError):
+        async for _ in stream_response_with_logging(
+            response=_BrokenStreamResponse(),
+            account=_FakeAccount(),
+            model_name="test-model",
+            request_body={"model": "test-model", "messages": []},
+            actual_model_id="vendor/test-model",
+            admin_service=admin_service,
+            request_start="2026-07-27T00:00:00+00:00",
+        ):
+            pass
+
+    admin_service.log_request.assert_called_once()
+    kwargs = admin_service.log_request.call_args.kwargs
+    assert kwargs["is_stream"] is True
+    assert kwargs["status_code"] == -1, "Interrupted stream should be logged as a failure"
+    assert "interrupted" in (kwargs.get("error_message") or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_stream_logging_on_client_disconnect_cancelled():
+    """Client disconnect surfacing as CancelledError must still be logged."""
+    admin_service = Mock()
+
+    class _DisconnectedStream:
+        headers = {"content-type": "text/event-stream"}
+
+        async def aiter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"hi"},"index":0}]}'
+            raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        async for _ in stream_response_with_logging(
+            response=_DisconnectedStream(),
+            account=_FakeAccount(),
+            model_name="test-model",
+            request_body={"model": "test-model", "messages": []},
+            actual_model_id="vendor/test-model",
+            admin_service=admin_service,
+            request_start="2026-07-27T00:00:00+00:00",
+        ):
+            pass
+
+    admin_service.log_request.assert_called_once()
+    kwargs = admin_service.log_request.call_args.kwargs
+    assert kwargs["is_stream"] is True
+    assert kwargs["status_code"] == -1
+    assert "client disconnected" in (kwargs.get("error_message") or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_stream_logging_on_generator_exit():
+    """aclose() (GeneratorExit) mid-stream must still be logged."""
+    admin_service = Mock()
+    gen = stream_response_with_logging(
+        response=_FakeStreamResponse(
+            [
+                'data: {"choices":[{"delta":{"content":"hi"},"index":0}]}',
+                "data: [DONE]",
+            ]
+        ),
+        account=_FakeAccount(),
+        model_name="test-model",
+        request_body={"model": "test-model", "messages": []},
+        actual_model_id="vendor/test-model",
+        admin_service=admin_service,
+        request_start="2026-07-27T00:00:00+00:00",
+    )
+
+    # Consume one chunk, then simulate client disconnect via aclose()
+    async for _ in gen:
+        break
+    await gen.aclose()
+
+    admin_service.log_request.assert_called_once()
+    kwargs = admin_service.log_request.call_args.kwargs
+    assert kwargs["is_stream"] is True
+    assert kwargs["status_code"] == -1
+    assert "client disconnected" in (kwargs.get("error_message") or "").lower()

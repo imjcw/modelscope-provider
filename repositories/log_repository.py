@@ -62,7 +62,8 @@ class LogRepository:
                request_start: str = None, first_response: str = None, end_time: str = None,
                cached_tokens: int = 0, prompt_partial_cached: int = 0,
                client_key_name: str = None,
-               response_headers: str = None) -> int:
+               response_headers: str = None,
+               api_key_id: int = 0) -> int:
         """Insert a log entry."""
         with self.db.get_connection() as conn:
             cursor = conn.execute(
@@ -72,14 +73,14 @@ class LogRepository:
                     error_message, raw_request, raw_response,
                     request_start, first_response, end_time,
                     cached_tokens, prompt_partial_cached,
-                    client_key_name, response_headers)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    client_key_name, response_headers, api_key_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (request_id, model, actual_model_id, account_id, account_name, status_code,
                  input_tokens, output_tokens, latency_ms, is_stream,
                  error_message, raw_request, raw_response,
                  request_start, first_response, end_time,
                  cached_tokens, prompt_partial_cached,
-                 client_key_name, response_headers),
+                 client_key_name, response_headers, api_key_id),
             )
             return cursor.lastrowid
 
@@ -202,7 +203,7 @@ class LogRepository:
         # Normalise to Shanghai-local, minute-floored, space-separated bucket so
         # it matches the query side (get_window_stats).
         bucket = LogRepository._normalize_bucket(timestamp)
-        success = 1 if status_code is not None and status_code < 400 else 0
+        success = 1 if status_code is not None and 0 < status_code < 400 else 0
         lat_val = latency_ms if latency_ms is not None else 0
         lat_count = 1 if latency_ms is not None else 0
 

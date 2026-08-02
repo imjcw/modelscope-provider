@@ -85,7 +85,12 @@ def test_update_quota_with_invalid_headers():
 
 
 def test_update_quota_missing_headers():
-    """Test quota update with missing headers (defaults to 0)."""
+    """Missing rate-limit headers should NOT zero out quota (skip update).
+
+    Upstreams that don't return ratelimit headers keep their last-known quota
+    values instead of being reset to 0/0 (which made the dashboard falsely
+    report "quota exhausted").
+    """
     mock_repo = Mock()
     updater = QuotaUpdater(mock_repo)
 
@@ -96,11 +101,7 @@ def test_update_quota_missing_headers():
 
     updater.update_quota_after_request(account, headers, "hy3")
 
-    mock_repo.update_quota.assert_called_once_with(
-        "test_account",
-        0,  # quota_remaining defaults to 0
-        0   # quota_limit defaults to 0
-    )
+    mock_repo.update_quota.assert_not_called()
 
 
 def test_custom_header_names():

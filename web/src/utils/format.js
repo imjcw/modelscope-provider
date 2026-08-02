@@ -85,8 +85,8 @@ export function formatContextLength(len) {
 
 /** API Key 脱敏：保留前 10 位与后 10 位 */
 export function maskKey(key) {
-  if (!key || key.length < 20) return '****'
-  return key.slice(0, 10) + '****' + key.slice(-10)
+  if (!key || key.length < 12) return '••••••••'
+  return key.slice(0, 6) + '••••••••' + key.slice(-8)
 }
 
 /**

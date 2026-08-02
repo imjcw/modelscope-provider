@@ -15,11 +15,15 @@
       <PageState :loading="loading && logs.length === 0">
       <!-- Filters (1 row) -->
       <div class="flex flex-wrap gap-3 mb-5 items-center">
-        <FilterField label="供应商" width="lg:w-36">
-          <CSelect v-model="filters.accountId" :options="ACCOUNT_OPTIONS" size="sm" placeholder="选择供应商" />
-        </FilterField>
-        <FilterField label="模型" width="lg:w-36">
-          <CSelect v-model="filters.model" :options="MODEL_OPTIONS" size="sm" placeholder="选择模型" />
+        <FilterField label="" width="lg:w-96">
+          <CLevelSelect
+            v-model:level1-model-value="filters.accountId"
+            v-model:level2-model-value="filters.model"
+            :level1-options="ACCOUNT_OPTIONS"
+            :level2-options="supplierModelsMap"
+            level1-placeholder="供应商"
+            level2-placeholder="模型"
+          />
         </FilterField>
         <FilterField label="状态" width="lg:w-20">
           <CSelect v-model="filters.statusCode" :options="STATUS_CODE_OPTIONS" size="sm" placeholder="全部" />
@@ -27,6 +31,17 @@
         <FilterField label="流式" width="lg:w-20">
           <CSelect v-model="filters.isStream" :options="STREAM_OPTIONS" size="sm" placeholder="全部" />
         </FilterField>
+
+        <!-- 清除筛选 -->
+        <button v-if="hasActiveFilters"
+          @click="clearFilters"
+          class="h-8 inline-flex items-center gap-1.5 px-3 rounded-lg border border-ls-border text-xs text-ls-muted hover:text-ls-text hover:border-ls-accent hover:bg-ls-elevated transition-colors">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+          清除
+        </button>
       </div>
 
       <!-- ═══════════════════════════════════════════
@@ -40,9 +55,9 @@
           <thead>
             <tr>
               <th class="text-left">时间</th>
-              <th class="text-left">请求 ID</th>
               <th class="text-left">供应商</th>
               <th class="text-left">模型</th>
+              <th class="text-left">路由</th>
               <th class="text-left">状态</th>
               <th class="text-left">输入</th>
               <th class="text-left">缓存命中</th>
@@ -55,7 +70,6 @@
             <tr v-for="log in filteredLogs" :key="log.request_id"
               class="cursor-pointer" @click="showDetail(log)">
               <td class="text-ls-dim">{{ formatLogTime(log.timestamp) }}</td>
-              <td class="text-ls-dim font-mono">{{ log.request_id }}</td>
               <td>
                 <span class="inline-flex items-center gap-1.5 text-ls-dim">
                   <span class="w-4 h-4 rounded bg-ls-accent/10 flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ (log.account_name || log.account_id || '')[0].toUpperCase() }}</span>
@@ -64,9 +78,12 @@
               </td>
               <td>
                 <span class="text-ls-text hover:underline inline-flex items-center gap-1.5">
-                  <span class="w-4 h-4 rounded bg-ls-accent/10 flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ log.model[0].toUpperCase() }}</span>
-                  <span class="font-mono">{{ log.model }}</span>
+                  <span class="w-4 h-4 rounded bg-ls-accent/10 flex items-center justify-center text-[9px] font-bold text-ls-accent">{{ (log.actual_model_id || log.model || '')[0].toUpperCase() }}</span>
+                  <span class="font-mono truncate inline-block max-w-[180px]" :title="log.actual_model_id || log.model">{{ log.actual_model_id || log.model }}</span>
                 </span>
+              </td>
+              <td>
+                <span class="font-mono text-ls-dim truncate inline-block max-w-[140px]" :title="log.model">{{ log.model }}</span>
               </td>
               <td>
                 <StatusCodeBadge :code="log.status_code" />
@@ -111,20 +128,19 @@ import Pagination from '@/components/Pagination.vue'
 import { formatTime } from '@/utils/format'
 import { getLogs, getSuppliers, getSupplierModels } from '@/api'
 import CSelect from '@/components/CSelect.vue'
+import CLevelSelect from '@/components/CLevelSelect.vue'
 import LogDetailPanel from './LogDetailPanel.vue'
 
 const ACCOUNT_OPTIONS = ref([
   { label: '选择供应商', value: '' },
 ])
+const supplierModelsMap = ref({}) // { supplierId: [{ label, value }], '' : [{ label, value }] }
 const STATUS_CODE_OPTIONS = [
   { label: '全部', value: '' },
   { label: '200', value: '200' },
   { label: '429', value: '429' },
   { label: '500', value: '500' },
 ]
-const MODEL_OPTIONS = ref([
-  { label: '选择模型', value: '' },
-])
 const STREAM_OPTIONS = [
   { label: '全部', value: '' },
   { label: '是', value: true },
@@ -166,6 +182,22 @@ function resetAndLoad() {
 
 // 筛选已由后端完成，这里直接透出当前页数据
 const filteredLogs = computed(() => logs.value)
+
+// ── 清空筛选 ──
+const hasActiveFilters = computed(() =>
+  !!filters.value.accountId ||
+  !!filters.value.model ||
+  !!filters.value.statusCode ||
+  (filters.value.isStream !== '' && filters.value.isStream !== undefined),
+)
+
+const clearFilters = () => {
+  filters.value.accountId = ''
+  filters.value.model = ''
+  filters.value.statusCode = ''
+  filters.value.isStream = ''
+  resetAndLoad()
+}
 
 const selectedLog = ref(null)
 
@@ -209,20 +241,20 @@ const loadFilterOptions = async () => {
       { label: '选择供应商', value: '' },
       ...sups.map(s => ({ label: s.name || s.account_id, value: s.account_id || s.id })),
     ]
-    // Collect all model names from all suppliers
-    const modelNames = new Set()
+    // Build supplier → models map, plus a '' key for "all models"
+    const allModelNames = new Set()
+      const map = {}
     for (const s of sups) {
       try {
         const mRes = await getSupplierModels(s.id)
-        ;(mRes.data || []).forEach(m => {
-          if (m.model_name) modelNames.add(m.model_name)
-        })
+        const names = new Set((mRes.data || []).map(m => m.model_name).filter(Boolean))
+        const arr = [...names].sort().map(name => ({ label: name, value: name }))
+        map[s.account_id || s.id] = arr
+        for (const n of names) allModelNames.add(n)
       } catch { /* skip */ }
     }
-    MODEL_OPTIONS.value = [
-      { label: '选择模型', value: '' },
-      ...[...modelNames].sort().map(name => ({ label: name, value: name })),
-    ]
+    map[''] = [...allModelNames].sort().map(name => ({ label: name, value: name }))
+    supplierModelsMap.value = map
   } catch { /* keep defaults */ }
 }
 

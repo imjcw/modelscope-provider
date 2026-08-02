@@ -12,12 +12,17 @@ class RateLimitStrategy(ABC):
     """
 
     @abstractmethod
-    def check_rate_limit(self, account_id: str, model_name: str) -> bool:
+    def check_rate_limit(self, account_id: str, model_name: str, key_count: int = 1) -> bool:
         """Pre-request check. Return True if the request may proceed.
 
         For proactive providers (e.g. SenseTime), this atomically increments
         the request counter and returns False when the limit is reached.
         For reactive providers (e.g. ModelScope), this always returns True.
+
+        ``key_count`` is the number of active API keys on the account; the
+        effective quota limit is ``config_limit × key_count`` (each key holds
+        its own upstream quota, so an account with N keys has N× the budget).
+        Defaults to 1 (single-key accounts unchanged).
         """
 
     @abstractmethod

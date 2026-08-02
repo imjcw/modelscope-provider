@@ -65,6 +65,19 @@ class ConfigManager:
         if not db_accounts:
             return []
 
+        # Batch-load multi API keys and today's unavailable models so the legacy
+        # LoadBalancer path honors key rotation and quota-based exclusion from
+        # startup (mirrors refresh_load_balancer in api/routes.py).
+        keys_by_id = repo.find_api_keys_by_account_ids([a["id"] for a in db_accounts])
+        unavailable_map = {}
+        try:
+            from repositories.quota_repository import QuotaRepository
+            unavailable_map = QuotaRepository(self.db).get_unavailable_models_batch(
+                [a["account_id"] for a in db_accounts]
+            )
+        except Exception:
+            unavailable_map = {}
+
         accounts = []
         for a in db_accounts:
             accounts.append(ModelScopeAccount(
@@ -73,6 +86,8 @@ class ConfigManager:
                 api_key=a["api_key"],
                 base_url=a["base_url"],
                 provider_type=a.get("provider_type", DEFAULT_PROVIDER_TYPE),
+                api_key_records=keys_by_id.get(a["id"]) or None,
+                unavailable_models=unavailable_map.get(a["account_id"], set()),
             ))
         return accounts
 

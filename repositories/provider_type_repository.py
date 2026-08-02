@@ -93,6 +93,52 @@ class ProviderTypeRepository:
             )
             return cursor.rowcount > 0
 
+    def bulk_upsert(self, types: list) -> None:
+        """Bulk upsert provider types from a list of dicts.
+
+        Uses ``type_key`` as the unique identifier.
+        """
+        with self.db.get_connection() as conn:
+            for pt in types:
+                type_key = pt.get("type_key")
+                if not type_key:
+                    continue
+                existing = self.find_by_type_key(type_key)
+                if existing:
+                    conn.execute(
+                        """UPDATE provider_types
+                           SET name=?, description=?, strategy_type=?,
+                               config=?, color=?, built_in=?,
+                               updated_at=CURRENT_TIMESTAMP
+                           WHERE type_key=?""",
+                        (
+                            pt.get("name", ""),
+                            pt.get("description", ""),
+                            pt.get("strategy_type", "header_based"),
+                            json.dumps(pt.get("config") or {}),
+                            pt.get("color", "#89b4fa"),
+                            1 if pt.get("built_in") else 0,
+                            type_key,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """INSERT INTO provider_types
+                           (type_key, name, description, strategy_type, config, color, built_in)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            type_key,
+                            pt.get("name", ""),
+                            pt.get("description", ""),
+                            pt.get("strategy_type", "header_based"),
+                            json.dumps(pt.get("config") or {}),
+                            pt.get("color", "#89b4fa"),
+                            1 if pt.get("built_in") else 0,
+                        ),
+                    )
+            conn.commit()
+        logger.info(f"Bulk upserted {len(types)} provider types")
+
     def count_accounts_by_type(self, type_key: str) -> int:
         """统计使用该类型的供应商数量（用于删除前校验）。"""
         with self.db.get_connection() as conn:

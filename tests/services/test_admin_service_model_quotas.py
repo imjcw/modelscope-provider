@@ -117,3 +117,73 @@ def test_no_strategy_instance_yields_none_window_fields(svc, database):
     assert m3["window_seconds"] is None
     assert m3["window_quota_remaining"] is None
     assert m3["has_custom_window"] is False
+
+
+def test_multi_key_scales_window_limit(svc, database):
+    """Extra active keys multiply the window quota (N keys → N× limit)."""
+    account_repo = AccountRepository(database)
+    supplier_model_repo = SupplierModelRepository(database)
+    acc = account_repo.create(
+        name="Supplier MultiKey",
+        api_key="k1",
+        base_url="http://x",
+        provider_type="pt-per-model",
+    )
+    sid = acc["id"]
+    # m1 is overridden to max_requests=5 on the provider type config.
+    supplier_model_repo.create(sid, "m1", "text", 8000)
+
+    def _m1_for(sup_name):
+        return next(
+            r for r in svc.get_model_quotas()
+            if r["model_name"] == "m1" and r["supplier_name"] == sup_name
+        )
+
+    # No extra keys → base limit unchanged (5, from the m1 override).
+    row = _m1_for("Supplier MultiKey")
+    assert row["max_requests"] == 5
+    assert row["window_quota_limit"] == 5
+
+    # Add two more active keys → 3 keys total → limit 3×5 = 15.
+    account_repo.add_api_key(sid, "k2")
+    account_repo.add_api_key(sid, "k3")
+
+    row = _m1_for("Supplier MultiKey")
+    assert row["max_requests"] == 15
+    assert row["window_quota_limit"] == 15
+    assert row["window_quota_remaining"] == 15
+
+
+def test_frozen_keys_not_counted(svc, database):
+    """Frozen keys must not contribute to the multiplier."""
+    account_repo = AccountRepository(database)
+    supplier_model_repo = SupplierModelRepository(database)
+    acc = account_repo.create(
+        name="Supplier Frozen",
+        api_key="k1",
+        base_url="http://x",
+        provider_type="pt-per-model",
+    )
+    sid = acc["id"]
+    supplier_model_repo.create(sid, "m2", "text", 8000)
+
+    key = account_repo.add_api_key(sid, "k2")
+    account_repo.update_api_key_status(key["id"], "frozen")
+
+    row = next(
+        r for r in svc.get_model_quotas()
+        if r["model_name"] == "m2" and r["supplier_name"] == "Supplier Frozen"
+    )
+    # m2 uses the default limit (1500); the frozen key is not counted → 1×1500.
+    assert row["max_requests"] == _DEFAULT_MAX_REQUESTS
+    assert row["window_quota_limit"] == _DEFAULT_MAX_REQUESTS
+
+
+def test_single_key_keeps_base_limit(svc):
+    """Regression: a single-key account keeps the base window limit."""
+    m1 = next(
+        r for r in svc.get_model_quotas()
+        if r["model_name"] == "m1" and r["supplier_name"] == "Supplier A"
+    )
+    assert m1["max_requests"] == 5
+    assert m1["window_quota_limit"] == 5

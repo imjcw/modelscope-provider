@@ -99,78 +99,78 @@ class TestStateMachine:
 
     def test_initial_state_is_closed(self):
         cb = CircuitBreaker()
-        assert cb.check("acc-1", "model-1") is True
+        assert cb.check(0, "model-1") is True
 
     def test_single_transient_failure_does_not_freeze(self):
         cb = CircuitBreaker()
-        cb.record_failure("acc-1", "model-1", 500)
+        cb.record_failure(0, "acc-1", "model-1", 500)
         # Transient error 1st failure → NOT frozen (allow retry)
-        assert cb.check("acc-1", "model-1") is True
+        assert cb.check(0, "model-1") is True
         # Other (account, model) is unaffected
-        assert cb.check("acc-2", "model-1") is True
+        assert cb.check(0, "model-1") is True
         # 2nd consecutive transient failure → now freezes
-        cb.record_failure("acc-1", "model-1", 502)
-        assert cb.check("acc-1", "model-1") is False
-        state = cb.get_state("acc-1", "model-1")
+        cb.record_failure(0, "acc-1", "model-1", 502)
+        assert cb.check(0, "model-1") is False
+        state = cb.get_state(0, "model-1")
         assert state.consecutive_failures == 2
         assert state.error_type == "server_error"
 
     def test_single_bad_request_failure_still_freezes(self):
         """Non-transient errors (4xx) still freeze on 1st failure."""
         cb = CircuitBreaker()
-        cb.record_failure("acc-1", "model-1", 401)
-        assert cb.check("acc-1", "model-1") is False
-        state = cb.get_state("acc-1", "model-1")
+        cb.record_failure(0, "acc-1", "model-1", 401)
+        assert cb.check(0, "model-1") is False
+        state = cb.get_state(0, "model-1")
         assert state.consecutive_failures == 1
         assert state.error_type == "auth_error"
 
     def test_success_resets_circuit(self):
         cb = CircuitBreaker()
         # 1st transient failure → not frozen
-        cb.record_failure("acc-1", "model-1", 500)
-        assert cb.check("acc-1", "model-1") is True
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        assert cb.check(0, "model-1") is True
         # 2nd transient failure → frozen
-        cb.record_failure("acc-1", "model-1", 500)
-        assert cb.check("acc-1", "model-1") is False
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        assert cb.check(0, "model-1") is False
         # Success resets (half-open probe succeeds)
-        cb.record_success("acc-1", "model-1")
-        assert cb.check("acc-1", "model-1") is True
+        cb.record_success(0, "model-1")
+        assert cb.check(0, "model-1") is True
 
     def test_half_open_allows_probe_after_freeze_expires(self):
         cb = CircuitBreaker()
-        cb.record_failure("acc-1", "model-1", 500)
+        cb.record_failure(0, "acc-1", "model-1", 500)
         # Manually expire the freeze
-        state = cb.get_state("acc-1", "model-1")
+        state = cb.get_state(0, "model-1")
         assert state is not None
         state.frozen_until = time.time() - 1  # expired
         # Should be half-open → allow probe
-        assert cb.check("acc-1", "model-1") is True
+        assert cb.check(0, "model-1") is True
 
     def test_probe_success_resets(self):
         cb = CircuitBreaker()
-        cb.record_failure("acc-1", "model-1", 500)
-        state = cb.get_state("acc-1", "model-1")
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        state = cb.get_state(0, "model-1")
         state.frozen_until = time.time() - 1  # expired
         # Half-open → probe allowed
-        assert cb.check("acc-1", "model-1") is True
+        assert cb.check(0, "model-1") is True
         # Success resets
-        cb.record_success("acc-1", "model-1")
-        assert cb.get_state("acc-1", "model-1") is None
+        cb.record_success(0, "model-1")
+        assert cb.get_state(0, "model-1") is None
 
     def test_probe_failure_reopens(self):
         cb = CircuitBreaker()
         # Two transient failures → 2nd one freezes
-        cb.record_failure("acc-1", "model-1", 500)
-        cb.record_failure("acc-1", "model-1", 500)
-        assert cb.check("acc-1", "model-1") is False
-        state = cb.get_state("acc-1", "model-1")
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        assert cb.check(0, "model-1") is False
+        state = cb.get_state(0, "model-1")
         state.frozen_until = time.time() - 1  # expired
         # Half-open → probe allowed
-        assert cb.check("acc-1", "model-1") is True
+        assert cb.check(0, "model-1") is True
         # Probe fails → reopened with longer freeze
-        cb.record_failure("acc-1", "model-1", 500)
-        assert cb.check("acc-1", "model-1") is False
-        state2 = cb.get_state("acc-1", "model-1")
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        assert cb.check(0, "model-1") is False
+        state2 = cb.get_state(0, "model-1")
         assert state2 is not None
         assert state2.consecutive_failures == 3
         # 3rd failure (index 1) → backoff[1] = 120s
@@ -180,35 +180,67 @@ class TestStateMachine:
         cb = CircuitBreaker()
         strategy = Mock()
         for i in range(10):
-            cb.record_failure("acc-1", "model-1", 500, strategy)
-        state = cb.get_state("acc-1", "model-1")
+            cb.record_failure(0, "acc-1", "model-1", 500, strategy)
+        state = cb.get_state(0, "model-1")
         assert state is not None
         assert state.escalated is True
-        assert cb.check("acc-1", "model-1") is False  # permanently blocked
+        # Blocked while the escalation freeze is active...
+        assert cb.check(0, "model-1") is False
+        # ...but recoverable once the freeze expires (no longer permanent).
+        state.frozen_until = time.time() - 1
+        assert cb.check(0, "model-1") is True
+        # A successful probe fully resets the escalated circuit.
+        cb.record_success(0, "model-1")
+        assert cb.get_state(0, "model-1") is None
+
+    def test_escalation_applies_finite_freeze(self):
+        """Escalation sets a long but finite freeze (not permanent)."""
+        cb = CircuitBreaker()
+        for i in range(10):
+            cb.record_failure(0, "acc-1", "model-1", 500)
+        state = cb.get_state(0, "model-1")
+        assert state.escalated is True
+        # frozen_until should be ~ escalation_freeze_seconds in the future
+        assert state.frozen_until > time.time()
+        assert state.frozen_until <= time.time() + cb.escalation_freeze_seconds + 5
+
+    def test_single_429_does_not_freeze(self):
+        """A first 429 (rate_limited) should not freeze — allow retry."""
+        cb = CircuitBreaker()
+        cb.record_failure(0, "acc-1", "model-1", 429)
+        assert cb.check(0, "model-1") is True
+        state = cb.get_state(0, "model-1")
+        assert state.error_type == "rate_limited"
+        # 2nd consecutive 429 → now freezes
+        cb.record_failure(0, "acc-1", "model-1", 429)
+        assert cb.check(0, "model-1") is False
 
     def test_escalation_notifies_strategy(self):
         cb = CircuitBreaker()
         strategy = Mock()
         strategy.on_circuit_breaker_escalation = Mock()
         for i in range(10):
-            cb.record_failure("acc-1", "model-1", 500, strategy)
+            cb.record_failure(0, "acc-1", "model-1", 500, strategy)
         strategy.on_circuit_breaker_escalation.assert_called_once_with(
             "acc-1", "model-1", "server_error"
         )
 
-    def test_different_accounts_are_independent(self):
+    def test_different_keys_are_independent(self):
+        """Different (key_id, model) pairs are tracked independently."""
         cb = CircuitBreaker()
-        # 2 transient failures → frozen
-        cb.record_failure("acc-1", "model-1", 500)
-        cb.record_failure("acc-1", "model-1", 500)
-        assert cb.check("acc-1", "model-1") is False
-        assert cb.check("acc-2", "model-1") is True
-        assert cb.check("acc-1", "model-2") is True
+        # key 0 / model-1: 2 failures → frozen
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        assert cb.check(0, "model-1") is False
+        # key 1 / model-1 (different key, same model): unaffected
+        assert cb.check(1, "model-1") is True
+        # key 0 / model-2 (same key, different model): unaffected
+        assert cb.check(0, "model-2") is True
 
     def test_get_all_states_returns_summary(self):
         cb = CircuitBreaker()
-        cb.record_failure("acc-1", "model-1", 500)
-        cb.record_failure("acc-2", "model-2", 401)
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        cb.record_failure(0, "acc-2", "model-2", 401)
         states = cb.get_all_states()
         assert len(states) == 2
         for s in states:
@@ -219,8 +251,8 @@ class TestStateMachine:
 
     def test_clear_resets_all_states(self):
         cb = CircuitBreaker()
-        cb.record_failure("acc-1", "model-1", 500)
-        cb.record_failure("acc-2", "model-2", 401)
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        cb.record_failure(0, "acc-2", "model-2", 401)
         assert len(cb.get_all_states()) == 2
         cb.clear()
         assert len(cb.get_all_states()) == 0
@@ -288,8 +320,8 @@ class TestIntegrationCircuitBreaker:
 
         from provider.services.alias_router import RoutingResult
         candidates = [
-            RoutingResult(account=account1, model_name="test-model"),
-            RoutingResult(account=account2, model_name="test-model"),
+            RoutingResult(account=account1, model_name="test-model", key_id=0, key_string="key1"),
+            RoutingResult(account=account2, model_name="test-model", key_id=1, key_string="key2"),
         ]
 
         response_400 = Mock()
@@ -326,19 +358,19 @@ class TestIntegrationCircuitBreaker:
 
         assert resp.status_code == 200
         # Should have recorded failure for acc-1
-        state = cb.get_state("acc-1", "test-model")
+        state = cb.get_state(0, "test-model")
         assert state is not None
         assert state.consecutive_failures == 1
         assert state.error_type == "bad_request"
-        # Should NOT have recorded anything for acc-2 (it succeeded)
-        assert cb.get_state("acc-2", "test-model") is None
+        # Should NOT have recorded anything for acc-2's key (it succeeded)
+        assert cb.get_state(1, "test-model") is None
 
     def test_admin_endpoint_shows_circuit_breaker_state(self, client):
         """The /api/admin/circuit-breaker endpoint should show state."""
         cb = client.app.state.services["circuit_breaker"]
-        cb.record_failure("acc-1", "model-1", 500)
-        cb.record_failure("acc-1", "model-1", 500)  # 2nd → frozen
-        cb.record_failure("acc-2", "model-2", 401)
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        cb.record_failure(0, "acc-1", "model-1", 500)  # 2nd → frozen
+        cb.record_failure(0, "acc-2", "model-2", 401)
 
         resp = client.get("/api/admin/circuit-breaker")
         assert resp.status_code == 200
@@ -349,3 +381,31 @@ class TestIntegrationCircuitBreaker:
         accounts = {c["account_id"] for c in data["circuits"]}
         assert "acc-1" in accounts
         assert "acc-2" in accounts
+
+    def test_admin_reset_all(self, client):
+        """POST /circuit-breaker/reset without a body clears all circuits."""
+        cb = client.app.state.services["circuit_breaker"]
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        assert len(cb.get_all_states()) == 1
+
+        resp = client.post("/api/admin/circuit-breaker/reset")
+        assert resp.status_code == 200
+        assert resp.json()["scope"] == "all"
+        assert len(cb.get_all_states()) == 0
+
+    def test_admin_reset_one(self, client):
+        """POST /circuit-breaker/reset with a target clears only that circuit."""
+        cb = client.app.state.services["circuit_breaker"]
+        cb.record_failure(0, "acc-1", "model-1", 401)
+        cb.record_failure(0, "acc-2", "model-2", 401)
+        assert len(cb.get_all_states()) == 2
+
+        resp = client.post(
+            "/api/admin/circuit-breaker/reset",
+            json={"key_id": 0, "model_name": "model-1"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["scope"] == "one"
+        remaining = {s["account_id"] for s in cb.get_all_states()}
+        assert remaining == {"acc-2"}

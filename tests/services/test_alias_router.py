@@ -14,9 +14,11 @@ class MockMappingModelRepo:
 
 
 class MockAccountRepo:
-    def __init__(self, accounts):
+    def __init__(self, accounts, api_keys=None):
         # accounts: dict[id, dict]
         self._accounts = accounts
+        # api_keys: dict[id, list[record]] (optional multi-key support)
+        self._api_keys = api_keys or {}
 
     def find_by_id(self, account_id):
         return self._accounts.get(account_id)
@@ -24,6 +26,19 @@ class MockAccountRepo:
     def find_by_ids(self, ids):
         """Batch query mock — returns dict mapping id -> account."""
         return {id: self._accounts[id] for id in ids if id in self._accounts}
+
+    def find_api_keys_by_account_ids(self, ids):
+        """Batch multi-key mock — returns dict mapping id -> [records]."""
+        return {id: self._api_keys[id] for id in ids if id in self._api_keys}
+
+
+class MockQuotaRepo:
+    def __init__(self, unavailable=None):
+        # unavailable: dict[account_id(str), set(model_names)]
+        self._unavailable = unavailable or {}
+
+    def get_unavailable_models_batch(self, account_ids):
+        return {aid: self._unavailable.get(aid, set()) for aid in account_ids}
 
 
 class MockConfigRepo:
@@ -77,7 +92,7 @@ def test_alias_router_uses_batch_queries():
     
     # 验证结果
     assert len(candidates) == 3
-    for (account_dict, model_name) in candidates:
+    for (account_dict, model_name, _key_record) in candidates:
         assert account_dict["name"] in ["Supplier 1", "Supplier 2", "Supplier 3"]
         assert model_name == "model1"
     
@@ -273,3 +288,117 @@ class TestAliasRouterGetCandidates:
         candidates = router.get_candidates("my-alias")
         assert len(candidates) == 1
         assert candidates[0].model_name == "qwen"
+
+
+class TestAliasRouterFiltering:
+    """候选过滤：禁用账号、配额耗尽模型、多 API Key。"""
+
+    def test_skips_disabled_accounts(self):
+        """禁用账号（status != active）不再被路由。"""
+        accounts = {
+            1: _make_account(1, name="Active"),
+            2: {**_make_account(2, name="Disabled"), "status": "disabled"},
+        }
+        router = AliasRouter(
+            mapping_model_repo=MockMappingModelRepo({
+                "my-alias": [
+                    {"id": 1, "supplier_id": 1, "model_name": "qwen"},
+                    {"id": 2, "supplier_id": 2, "model_name": "qwen"},
+                ]
+            }),
+            account_repo=MockAccountRepo(accounts),
+            config_repo=MockConfigRepo(),
+        )
+        candidates = router.get_candidates("my-alias")
+        assert len(candidates) == 1
+        assert candidates[0].account.account_id == "acc-1"
+
+    def test_skips_unavailable_models(self):
+        """配额耗尽的 (账号, 模型) 候选被过滤。"""
+        accounts = {1: _make_account(1), 2: _make_account(2)}
+        quota_repo = MockQuotaRepo(unavailable={"acc-1": {"qwen"}})
+        router = AliasRouter(
+            mapping_model_repo=MockMappingModelRepo({
+                "my-alias": [
+                    {"id": 1, "supplier_id": 1, "model_name": "qwen"},   # acc-1 的 qwen 已耗尽
+                    {"id": 2, "supplier_id": 2, "model_name": "qwen"},   # acc-2 正常
+                ]
+            }),
+            account_repo=MockAccountRepo(accounts),
+            config_repo=MockConfigRepo(),
+            quota_repository=quota_repo,
+        )
+        candidates = router.get_candidates("my-alias")
+        assert len(candidates) == 1
+        assert candidates[0].account.account_id == "acc-2"
+
+    def test_populates_api_key_records(self):
+        """候选账号带上多 API Key 记录，供 HttpClient 轮换。"""
+        accounts = {1: _make_account(1)}
+        keys = {1: [
+            {"id": 1, "api_key": "key-primary", "status": "active"},
+            {"id": 2, "api_key": "key-frozen", "status": "frozen"},
+        ]}
+        router = AliasRouter(
+            mapping_model_repo=MockMappingModelRepo({
+                "my-alias": [{"id": 1, "supplier_id": 1, "model_name": "qwen"}]
+            }),
+            account_repo=MockAccountRepo(accounts, api_keys=keys),
+            config_repo=MockConfigRepo(),
+        )
+        candidates = router.get_candidates("my-alias")
+        assert len(candidates) == 1
+        assert candidates[0].key_id == 1
+        assert candidates[0].key_string == "key-primary"
+
+
+class TestAliasRouterLeastConn:
+    """least_conn 按身份计数 + acquire/release。"""
+
+    def _router(self):
+        accounts = {1: _make_account(1), 2: _make_account(2)}
+        return AliasRouter(
+            mapping_model_repo=MockMappingModelRepo({
+                "my-alias": [
+                    {"id": 1, "supplier_id": 1, "model_name": "m1"},
+                    {"id": 2, "supplier_id": 2, "model_name": "m2"},
+                ]
+            }),
+            account_repo=MockAccountRepo(accounts),
+            config_repo=MockConfigRepo("least_conn"),
+        )
+
+    def test_acquire_release_tracks_inflight(self):
+        router = self._router()
+        router.acquire(0, "m1")
+        router.acquire(0, "m1")
+        assert router._conn_count((0, "m1")) == 2
+        router.release(0, "m1")
+        assert router._conn_count((0, "m1")) == 1
+        router.release(0, "m1")
+        assert router._conn_count((0, "m1")) == 0
+
+    def test_release_floors_at_zero(self):
+        """无配对的 release 不会变成负数（legacy 路径安全）。"""
+        router = self._router()
+        router.release(0, "m1")  # 从未 acquire
+        assert router._conn_count((0, "m1")) == 0
+
+    def test_orders_by_inflight_count(self):
+        """在途连接多的候选排后面。"""
+        router = self._router()
+        # (0, m1) 有 2 个在途，(0, m2) 有 0 个
+        router.acquire(0, "m1")
+        router.acquire(0, "m1")
+        candidates = router.get_candidates("my-alias")
+        # 空闲的 (0, m2) 应排在最前
+        assert candidates[0].account.account_id == "acc-2"
+        assert candidates[0].model_name == "m2"
+
+    def test_identity_keying_survives_reorder(self):
+        """计数按 (key_id, model) 身份存储，候选列表变化不错位。"""
+        router = self._router()
+        router.acquire(0, "m1")
+        # 即使直接看下标含义变化，身份键仍指向正确候选
+        assert router._conn_count((0, "m1")) == 1
+        assert router._conn_count((0, "m2")) == 0

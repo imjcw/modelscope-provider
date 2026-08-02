@@ -28,7 +28,8 @@
                 <div class="flex items-center gap-3">
                   <span class="text-xs font-medium text-ls-muted uppercase tracking-wide">Request</span>
                   <span class="text-xs text-ls-muted">→ {{ modelValue.account_name || modelValue.account_id }}</span>
-                  <span class="text-xs text-ls-muted">· {{ modelValue.model }}</span>
+                  <span class="text-xs text-ls-muted">· {{ modelValue.actual_model_id || modelValue.model }}</span>
+                  <span v-if="modelValue.actual_model_id && modelValue.model !== modelValue.actual_model_id" class="text-xs text-ls-dim">（路由: {{ modelValue.model }}）</span>
                   <span v-if="modelValue.is_stream" class="text-xs text-ls-accent">stream</span>
                 </div>
               </div>

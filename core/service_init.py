@@ -97,6 +97,7 @@ class ServiceInitializer:
             account_repo=account_repo,
             config_repo=config_repo,
             config_cache=config_cache,
+            quota_repository=quota_repository,
         )
 
         # Per-provider rate-limit strategies — driven by provider_types table so
@@ -128,6 +129,7 @@ class ServiceInitializer:
         services = {
             "database": database,
             "http_client": http_client,
+            "account_repo": account_repo,
             "quota_repository": quota_repository,
             "mapping_repository": mapping_repository,
             "supplier_model_repo": supplier_model_repo,

@@ -60,8 +60,21 @@
                         </div>
                       </div>
 
+                      <!-- 错误消息 -->
+                      <div v-if="msg.status === 'error'"
+                        class="text-sm font-mono leading-relaxed text-red-500 whitespace-pre-wrap break-words">
+                        <span class="flex items-center gap-1.5 mb-1">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                          </svg>
+                          <span>模型请求失败</span>
+                        </span>
+                        {{ msg.content || formatError(msg.raw) }}
+                      </div>
+
                       <!-- 回复内容 -->
-                      <div v-if="msg.content">
+                      <div v-else-if="msg.content">
                         <MarkdownRender v-if="msg.renderMode !== 'raw'" :source="msg.content" />
                         <div v-else class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
                           {{ msg.content }}
@@ -90,7 +103,19 @@
                 <div v-else class="flex justify-end flex-col items-end gap-2">
                   <div class="max-w-[75%] bg-blue-600 rounded-2xl rounded-br-sm px-4 py-2.5 text-sm font-mono leading-relaxed"
                     style="color: #fff;">
-                    {{ msg.content }}
+                    <div v-if="Array.isArray(msg.content)">
+                      <div class="flex flex-wrap gap-1.5 mb-1.5" v-if="msg.content.some(c => c.type === 'image_url')">
+                        <img v-for="(c, ci) in msg.content.filter(c => c.type === 'image_url')"
+                          :key="ci" :src="c.image_url?.url"
+                          class="rounded-lg max-h-48 max-w-full cursor-pointer hover:opacity-90 transition-opacity"
+                          @click="previewImage(c.image_url?.url)">
+                      </div>
+                      <div v-if="msg.content.some(c => c.type === 'text')"
+                        class="whitespace-pre-wrap break-words">
+                        {{ msg.content.find(c => c.type === 'text')?.text }}
+                      </div>
+                    </div>
+                    <span v-else>{{ msg.content }}</span>
                   </div>
                   <button @click="replayMessage(idx)"
                     class="h-6 w-6 flex items-center justify-center rounded hover:bg-ls-elevated text-ls-dim hover:text-ls-text transition-colors"
@@ -117,20 +142,59 @@
 
         <!-- 输入栏 -->
         <div class="px-3 md:px-6 pb-3">
-          <div class="max-w-none mx-auto">
+          <div class="max-w-none mx-auto" @paste="handlePaste">
+            <!-- 图片预览区 -->
+            <div v-if="pendingImages.length" class="flex flex-wrap gap-2 mb-2 px-1">
+              <div v-for="(img, idx) in pendingImages" :key="idx"
+                class="relative group w-16 h-16 rounded-lg border border-ls-border overflow-hidden flex-shrink-0">
+                <img :src="img.dataUrl" class="w-full h-full object-cover">
+                <button @click="removeImage(idx)"
+                  class="absolute -top-1.5 -right-1.5 h-5 w-5 flex items-center justify-center rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                  type="button" title="移除图片">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
             <div class="chat-input-box rounded-2xl overflow-hidden p-[10px]" @click="focusInput">
               <textarea ref="inputEl" v-model="inputText" rows="1"
                 @keydown.enter.exact.prevent="sendMessage"
                 @input="autoResize"
+                @paste="handlePaste"
                 class="chat-textarea w-full px-2 py-2 text-sm text-ls-text font-mono leading-6 focus:outline-none resize-none placeholder:text-ls-muted bg-transparent overflow-y-hidden"
-                placeholder="输入消息..."></textarea>
-              <div class="flex items-center justify-end">
-                <button @click="sendMessage"
-                  :disabled="sending || !inputText.trim() || !form.model"
-                  class="h-9 w-9 flex items-center justify-center rounded-full bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
-                  style="color: #fff;">
-                  <CIcon name="send" :size="14" />
+                :placeholder="pendingImages.length ? '输入消息（可选）...' : '输入消息...'"></textarea>
+              <div class="flex items-center justify-between gap-2">
+                <input ref="fileInput" type="file" accept="image/*" multiple
+                  @change="handleFileSelect"
+                  class="hidden">
+                <button @click.stop="triggerFileInput"
+                  class="h-8 w-8 flex items-center justify-center rounded-md text-ls-muted hover:text-ls-text hover:bg-ls-elevated transition-colors"
+                  title="添加图片">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect width="18" height="18" x="3" y="3" rx="2"/>
+                    <circle cx="9" cy="9" r="2"/>
+                    <path d="m21 15-3-3L5 21"/>
+                  </svg>
                 </button>
+
+                <div class="flex items-center gap-2">
+                  <InputLevelSelect
+                    :supplier-id="form.supplierId"
+                    :model="form.model"
+                    :suppliers="SUPPLIER_OPTIONS"
+                    :models-by-supplier="supplierModelsMap"
+                  />
+                  <button @click="sendMessage"
+                    :disabled="sending || !inputText.trim() && pendingImages.length === 0 || !form.model"
+                    class="h-9 w-9 flex items-center justify-center rounded-full bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
+                    style="color: #fff;">
+                    <CIcon name="send" :size="14" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -197,12 +261,14 @@ import CSelect from '@/components/CSelect.vue'
 import CCheckbox from '@/components/CCheckbox.vue'
 import CIcon from '@/components/CIcon.vue'
 import MarkdownRender from '@/components/MarkdownRender.vue'
+import InputLevelSelect from '@/components/InputLevelSelect.vue'
 import { getMappings, getSuppliers, getSupplierModels,getClientKeys } from '@/api'
 
 const toast = inject('$toast')
 const sending = ref(false)
 const inputText = ref('')
 const inputEl = ref(null)
+const pendingImages = ref([])  // [{ dataUrl, file }]
 const sidebarCollapsed = ref(false)
 const SIDEBAR_W = 288
 // 折叠时 width → 0 + translateX(288px) 同步动画：视觉上向右滑出，布局空间同时释放
@@ -212,6 +278,69 @@ const sidebarWidth = computed(() => sidebarCollapsed.value ? 0 : SIDEBAR_W)
 // 输入框行数：默认 MIN_ROWS 行，随内容自动扩展，最高 MAX_ROWS 行
 const MIN_ROWS = 1
 const MAX_ROWS = 5
+
+// ── 图片处理 ──
+const readFileAsDataUrl = (file) => new Promise((resolve) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(reader.result)
+  reader.readAsDataURL(file)
+})
+
+const addImages = async (files) => {
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) continue
+    const dataUrl = await readFileAsDataUrl(f)
+    pendingImages.value.push({ dataUrl, file: f })
+  }
+}
+
+const removeImage = (idx) => {
+  pendingImages.value.splice(idx, 1)
+}
+
+const handleFileSelect = (e) => {
+  const files = e.target.files || []
+  addImages(files)
+  // 清空 input，允许重复选择同一文件
+  e.target.value = ''
+}
+
+const handlePaste = (e) => {
+  // 阻止浏览器默认行为（有些浏览器会弹出"是否打开图片"对话框）
+  const items = e.clipboardData?.items || []
+  const files = []
+  for (const item of items) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const f = item.getAsFile()
+      if (f) files.push(f)
+    }
+  }
+  if (files.length) {
+    e.preventDefault()
+    addImages(files)
+  }
+}
+
+const fileInput = ref(null)
+const previewImage = (url) => {
+  if (url) window.open(url, '_blank', 'width=900,height=700')
+}
+
+const triggerFileInput = () => {
+  fileInput.value?.click()
+}
+
+// 格式化错误信息：尝试解析 JSON 响应体，提取 readable message
+const formatError = (raw) => {
+  if (!raw) return '未知错误'
+  try {
+    const p = JSON.parse(raw)
+    const e = p.error || {}
+    return `${e.message || JSON.stringify(p)}`.trim() || raw
+  } catch {
+    return raw.trim() || '未知错误'
+  }
+}
 
 const autoResize = () => {
   nextTick(() => {
@@ -406,29 +535,41 @@ const readStream = async (res, msg) => {
   const decoder = new TextDecoder()
   let buf = ''
   let tokens = null
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const lines = buf.split('\n')
-    buf = lines.pop()
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed.startsWith('data:')) continue
-      const data = trimmed.slice(5).trim()
-      if (data === '[DONE]') continue
-      try {
-        const obj = JSON.parse(data)
-        const choice = (obj.choices || [])[0] || {}
-        const delta = choice.delta || choice.message || {}
-        if (delta.reasoning_content) msg.reasoning += delta.reasoning_content
-        if (delta.content) msg.content += delta.content
-        if (obj.usage) {
-          tokens = obj.usage.total_tokens || ((obj.usage.prompt_tokens || 0) + (obj.usage.completion_tokens || 0))
-        }
-        await nextTick()
-      } catch { /* ignore */ }
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop()
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data:')) continue
+        const data = trimmed.slice(5).trim()
+        if (data === '[DONE]') continue
+        try {
+          const obj = JSON.parse(data)
+          // 流式错误
+          if (obj.error) {
+            msg.content = '模型请求失败: ' + (obj.error.message || JSON.stringify(obj.error))
+            msg.status = 'error'
+            return
+          }
+          const choice = (obj.choices || [])[0] || {}
+          const delta = choice.delta || choice.message || {}
+          if (delta.reasoning_content) msg.reasoning += delta.reasoning_content
+          if (delta.content) msg.content += delta.content
+          if (obj.usage) {
+            tokens = obj.usage.total_tokens || ((obj.usage.prompt_tokens || 0) + (obj.usage.completion_tokens || 0))
+          }
+          await nextTick()
+        } catch { /* ignore non-JSON chunks */ }
+      }
     }
+  } catch (e) {
+    msg.content = '流式传输中断: ' + e.message
+    msg.status = 'error'
+    return
   }
   msg.tokens = tokens != null ? tokens.toLocaleString() : '—'
   msg.status = 'done'
@@ -436,17 +577,29 @@ const readStream = async (res, msg) => {
 
 const sendMessage = async () => {
   const text = inputText.value.trim()
-  if (!text || !form.value.model || sending.value) return
+  if (!text && pendingImages.value.length === 0) return
+  if (!form.value.model || sending.value) return
 
+  // 捕获待发送的图片
+  const images = [...pendingImages.value]
   inputText.value = ''
+  pendingImages.value = []
   autoResize()
 
   // 发送自己的消息：强制回到底部并恢复跟随
   stickToBottom.value = true
 
+  // 构造用户消息：纯文本或图文混合（OpenAI multimodal 格式）
+  const userContent = images.length
+    ? [
+        ...images.map(img => ({ type: 'image_url', image_url: { url: img.dataUrl } })),
+        text ? { type: 'text', text } : null,
+      ].filter(Boolean)
+    : text
+
   messages.value.push({
     role: 'user',
-    content: text,
+    content: userContent,
   })
 
   messages.value.push({
@@ -493,16 +646,22 @@ const sendMessage = async () => {
       await readStream(res, assistantMsg)
     } else {
       const text = await res.text()
-      try {
-        const p = JSON.parse(text)
-        if (p.usage) assistantMsg.tokens = p.usage.total_tokens
-        const msg = (p.choices && p.choices[0] && p.choices[0].message) || {}
-        assistantMsg.content = msg.content || ''
-        assistantMsg.reasoning = msg.reasoning_content || msg.reasoning || ''
-      } catch {
+      if (res.ok) {
+        try {
+          const p = JSON.parse(text)
+          if (p.usage) assistantMsg.tokens = p.usage.total_tokens
+          const msg = (p.choices && p.choices[0] && p.choices[0].message) || {}
+          assistantMsg.content = msg.content || ''
+          assistantMsg.reasoning = msg.reasoning_content || msg.reasoning || ''
+        } catch {
+          assistantMsg.raw = text
+        }
+        assistantMsg.status = 'done'
+      } else {
         assistantMsg.raw = text
+        assistantMsg.content = formatError(text)
+        assistantMsg.status = 'error'
       }
-      assistantMsg.status = res.ok ? 'done' : 'error'
     }
   } catch (e) {
     assistantMsg.content = '请求失败: ' + e.message
@@ -569,16 +728,22 @@ const replayMessage = async (idx) => {
       await readStream(res, lastMsg)
     } else {
       const text = await res.text()
-      try {
-        const p = JSON.parse(text)
-        if (p.usage) lastMsg.tokens = p.usage.total_tokens
-        const msg = (p.choices && p.choices[0] && p.choices[0].message) || {}
-        lastMsg.content = msg.content || ''
-        lastMsg.reasoning = msg.reasoning_content || msg.reasoning || ''
-      } catch {
+      if (res.ok) {
+        try {
+          const p = JSON.parse(text)
+          if (p.usage) lastMsg.tokens = p.usage.total_tokens
+          const msg = (p.choices && p.choices[0] && p.choices[0].message) || {}
+          lastMsg.content = msg.content || ''
+          lastMsg.reasoning = msg.reasoning_content || msg.reasoning || ''
+        } catch {
+          lastMsg.raw = text
+        }
+        lastMsg.status = 'done'
+      } else {
         lastMsg.raw = text
+        lastMsg.content = formatError(text)
+        lastMsg.status = 'error'
       }
-      lastMsg.status = res.ok ? 'done' : 'error'
     }
   } catch (e) {
     const lastMsg = messages.value[messages.value.length - 1]

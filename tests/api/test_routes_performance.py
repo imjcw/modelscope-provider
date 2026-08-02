@@ -47,6 +47,7 @@ def test_refresh_load_balancer_replaces_load_balancer():
     # 创建模拟账户数据
     mock_db_accounts = [
         {
+            "id": 1,
             "account_id": "acc-1",
             "name": "Supplier 1",
             "api_key": "key1",
@@ -54,6 +55,7 @@ def test_refresh_load_balancer_replaces_load_balancer():
             "provider_type": "modelscope",
         },
         {
+            "id": 2,
             "account_id": "acc-2",
             "name": "Supplier 2",
             "api_key": "key2",
@@ -76,6 +78,7 @@ def test_refresh_load_balancer_replaces_load_balancer():
     with patch("repositories.account_repository.AccountRepository") as MockAccountRepo:
         mock_repo_instance = Mock()
         mock_repo_instance.find_active.return_value = mock_db_accounts
+        mock_repo_instance.find_api_keys_by_account_ids.return_value = {}
         MockAccountRepo.return_value = mock_repo_instance
 
         # 调用 refresh_load_balancer

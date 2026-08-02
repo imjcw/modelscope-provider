@@ -6,7 +6,15 @@ logger = logging.getLogger(__name__)
 
 
 class HttpClient:
-    """HTTP client for making requests to ModelScope API."""
+    """HTTP client for making requests to ModelScope API.
+
+    Key rotation is now handled by the router layer (``AliasRouter`` expands
+    each active API key into a separate candidate).  This client receives a
+    pre-selected ``key_string`` and uses it directly — no internal rotation.
+
+    The ``_get_active_keys`` fallback is retained for the legacy ``LoadBalancer``
+    path (no alias bindings), which does not go through key-level expansion.
+    """
 
     def __init__(self, timeout: float = 30.0, read_timeout: float = 3600.0):
         self.timeout = timeout
@@ -40,44 +48,73 @@ class HttpClient:
             await self.client.aclose()
             self.client = None
 
+    async def close_all_clients(self):
+        """Close all HTTP clients (alias for compatibility with shutdown code)."""
+        await self.close()
+
+    def _build_headers(self, api_key: str) -> dict:
+        return {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _get_active_keys(self, account) -> list:
+        """Get active API key strings from account, skipping frozen ones.
+
+        Used as a fallback for the legacy ``LoadBalancer`` path where the
+        router does not pre-select a key.  The main alias-router path passes
+        an explicit ``key_string`` instead.
+        """
+        records = getattr(account, "api_key_records", None)
+        if records:
+            return [
+                r["api_key"]
+                for r in records
+                if r.get("status") != "frozen" and r.get("api_key")
+            ]
+
+        api_keys = getattr(account, "api_keys", None) or [account.api_key]
+        return api_keys
+
     async def request(
         self,
         account,
         method: str,
         url: str,
         stream: bool = False,
+        key_string: str = None,
         **kwargs
     ):
         """Make HTTP request to ModelScope API.
 
+        ``key_string`` is the API key to use, pre-selected by the router.
+        When ``None`` (legacy path), the first active key from the account
+        is used.
+
         When ``stream=True`` the response body is NOT pre-read: the caller
         gets an httpx.Response whose body must be consumed via
-        ``aiter_lines()/aiter_bytes()`` and finally ``aclose()``-d. This is
+        ``aiter_lines()/aiter_bytes()`` and finally ``aclose()``. This is
         required for SSE — otherwise httpx buffers the whole body before
         returning, and the client receives everything at once at the end.
         """
         client = await self.create_client()
 
-        headers = {
-            "Authorization": f"Bearer {account.api_key}",
-            "Content-Type": "application/json"
-        }
+        # Determine the API key to use.
+        if key_string is not None:
+            api_key = key_string
+        else:
+            # Legacy path: pick the first active key.
+            keys = self._get_active_keys(account)
+            api_key = keys[0] if keys else account.api_key
 
-        if stream:
-            # httpx.AsyncClient.request() does not support streaming; use
-            # build_request + send(stream=True) so the body stays unread.
-            req = client.build_request(method, url, headers=headers, **kwargs)
-            return await client.send(req, stream=True)
-
-        response = await client.request(
-            method,
-            url,
-            headers=headers,
-            **kwargs
+        headers = self._build_headers(api_key)
+        key_suffix = api_key[-8:] if len(api_key) > 8 else "***"
+        logger.info(
+            "Request %s %s with key ending ...%s",
+            method, url, key_suffix,
         )
 
-        return response
-
-    async def close_all_clients(self):
-        """Close all HTTP clients."""
-        await self.close()
+        if stream:
+            req = client.build_request(method, url, headers=headers, **kwargs)
+            return await client.send(req, stream=True)
+        return await client.request(method, url, headers=headers, **kwargs)
