@@ -482,7 +482,7 @@ class AdminService:
 
                 existing = self.provider_type_repo.find_by_type_key(type_key)
                 if existing:
-                    if pt.get("built_in") and strategy == "skip":
+                    if strategy == "skip":
                         stats["skipped"] += 1
                         continue
                     if strategy == "overwrite":
