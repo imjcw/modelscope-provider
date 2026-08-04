@@ -14,6 +14,19 @@ class ResponseConverter:
             choices = ms_response.get("choices") or []
             message = choices[0].get("message", {}) if choices else {}
             usage = ms_response.get("usage") or {}
+
+            # Build message dict, preserving tool_calls when present
+            openai_message: Dict[str, Any] = {
+                "role": message.get("role", "assistant"),
+            }
+            # content may be null when tool_calls are present
+            content = message.get("content")
+            if content is not None:
+                openai_message["content"] = content
+            # Preserve tool_calls from upstream response
+            if "tool_calls" in message:
+                openai_message["tool_calls"] = message["tool_calls"]
+
             openai_response = {
                 "id": ms_response.get("id", ""),
                 "object": "chat.completion",
@@ -21,10 +34,7 @@ class ResponseConverter:
                 "model": ms_response.get("model", ""),
                 "choices": [{
                     "index": 0,
-                    "message": {
-                        "role": message.get("role", "assistant"),
-                        "content": message.get("content", "")
-                    },
+                    "message": openai_message,
                     "finish_reason": choices[0].get("finish_reason", "stop") if choices else "stop"
                 }],
                 "usage": {

@@ -30,6 +30,32 @@ class ModelScopeStrategy(RateLimitStrategy):
         # 供应商类型可配置的响应头名称（None 表示使用默认 ModelScope 头）
         self.header_config = header_config
 
+    # 仅瞬态错误触发标记 unavailable；auth_error 和 bad_request 属于
+    # 密钥/配置问题，不应标记模型不可用。
+    _TRANSIENT_ERROR_TYPES = {"server_error", "timeout", "network_error", "rate_limited"}
+
+    def on_circuit_breaker_escalation(
+        self,
+        account_id: str,
+        model_name: str,
+        error_type: Optional[str],
+    ) -> None:
+        """熔断升级：连续 10 次瞬态失败后，标记模型今日不可用，
+        让路由直接跳过该候选，而不是等 1 小时冻结窗口过去再试。
+        """
+        if error_type not in self._TRANSIENT_ERROR_TYPES:
+            logger.debug(
+                "Circuit-breaker escalation skipped (non-transient error): "
+                "%s/%s error_type=%s",
+                account_id, model_name, error_type,
+            )
+            return
+        logger.warning(
+            "Circuit-breaker escalation: marking %s/%s unavailable (error_type=%s)",
+            account_id, model_name, error_type,
+        )
+        self.quota_repository.mark_model_unavailable(account_id, model_name)
+
     def check_rate_limit(self, account_id: str, model_name: str, key_count: int = 1) -> bool:
         """Always allow — ModelScope quota is enforced upstream."""
         return True

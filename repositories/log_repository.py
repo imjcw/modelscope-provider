@@ -609,6 +609,33 @@ class LogRepository:
             ).fetchone()
             return (row["input_tokens"], row["output_tokens"], row["cached_tokens"])
 
+    def query_stats_model_aggregate(
+        self, account_id: str, model: str, start: str, end: str,
+    ) -> tuple:
+        """Aggregate requests + tokens for one account+model over a time range.
+
+        Returns (input_tokens, output_tokens, cached_tokens, requests, success)
+        so callers (e.g. get_model_quotas with a days range) can compute
+        the request success rate and per-range token usage in a single query.
+        """
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                          COALESCE(SUM(requests), 0) AS requests,
+                          COALESCE(SUM(success), 0) AS success
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?
+                     AND account_id = ? AND model = ?""",
+                (s, e, account_id, model),
+            ).fetchone()
+            return (
+                row["input_tokens"], row["output_tokens"], row["cached_tokens"],
+                row["requests"], row["success"],
+            )
+
     # ── (removed dead legacy methods) ──────────────────────────────────
     # aggregate_window, summarize_window, status_code_breakdown, and
     # per_model_stats have been removed. They were all replaced by the

@@ -7,6 +7,7 @@
  */
 import { computed } from 'vue'
 import ProgressBar from '@/components/ProgressBar.vue'
+import { MODEL_TYPE_LABELS } from '@/constants/modelType'
 
 const props = defineProps({
   quotas: { type: Array, default: () => [] },     // /model-quota
@@ -142,7 +143,7 @@ const WINDOW_BADGE = {
                 <span class="text-sm font-medium text-ls-text">{{ row.model }}</span>
               </div>
             </td>
-            <td class="hidden md:table-cell"><span class="text-xs text-ls-dim">{{ row.group }}</span></td>
+            <td class="hidden md:table-cell"><span class="text-xs text-ls-dim">{{ MODEL_TYPE_LABELS[row.group] || row.group || "—" }}</span></td>
             <td class="hidden sm:table-cell">
               <span class="text-xs px-1.5 py-0.5 rounded text-ls-accent bg-ls-accent/10">{{ row.platform }}</span>
             </td>

@@ -33,6 +33,16 @@ const usage = computed(() => data.value?.usage || null)
 
 const fmt = (n) => (n || 0).toLocaleString()
 
+// 模型状态：按请求成功率分级（与「模型用量」抽屉状态列保持一致）
+const statusInfo = (m) => {
+  const rate = (m.requests || 0) > 0
+    ? Math.round(((m.requests - (m.error_count || 0)) / m.requests) * 100)
+    : null
+  if (rate === null) return { cls: 'tag-success', text: '正常' }
+  if (rate < 85) return { cls: 'tag-warning', text: `异常 ${rate}%` }
+  return { cls: 'tag-success', text: `正常 ${rate}%` }
+}
+
 const load = async () => {
   if (!props.alias) return
   loading.value = true
@@ -102,22 +112,22 @@ onBeforeUnmount(() => {
           <tr>
             <th class="text-left">供应商</th>
             <th class="text-left">实际模型</th>
-            <th class="text-right">请求</th>
+            <th class="text-right">请求/错误</th>
+            <th class="text-center">模型状态</th>
             <th class="text-right">输入</th>
             <th class="text-right">缓存命中</th>
             <th class="text-right">输出</th>
-            <th class="text-right">错误</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="m in usage.per_model" :key="m.model">
             <td class="text-ls-dim">{{ m.supplier || '—' }}</td>
             <td class="font-mono text-ls-accent">{{ m.model }}</td>
-            <td class="font-mono text-right text-ls-dim">{{ fmt(m.requests) }}</td>
+            <td class="font-mono text-right text-ls-dim">{{ fmt(m.requests) }}<span class="text-ls-muted">/</span><span :class="m.error_count > 0 ? 'text-red-400' : 'text-ls-muted'">{{ m.error_count }}</span></td>
+            <td class="text-center"><span class="tag" :class="statusInfo(m).cls">{{ statusInfo(m).text }}</span></td>
             <td class="font-mono text-right text-ls-dim">{{ fmt(m.input_tokens) }}</td>
             <td class="font-mono text-right text-ls-dim">{{ fmt(m.cache_tokens || 0) }}</td>
             <td class="font-mono text-right text-ls-dim">{{ fmt(m.output_tokens) }}</td>
-            <td class="font-mono text-right" :class="m.error_count > 0 ? 'text-red-400' : 'text-ls-muted'">{{ m.error_count }}</td>
           </tr>
         </tbody>
       </CTable>

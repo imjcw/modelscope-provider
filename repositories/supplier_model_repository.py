@@ -74,23 +74,33 @@ class SupplierModelRepository:
     def bulk_upsert(
         self, supplier_id: int, models: List[dict]
     ) -> None:
-        """Replace all models for a supplier with the given list.
+        """Upsert the model catalog for a supplier without breaking bindings.
 
-        Each item in models is a dict with keys: model_name, model_type, context_length (optional).
+        Each item in models is a dict with keys: model_name, model_type,
+        context_length (optional).
+
+        Uses ``INSERT ... ON CONFLICT DO UPDATE`` so that rows already
+        referenced by ``mapping_models.supplier_model_id`` are **updated in
+        place** rather than deleted-and-reinserted.  This avoids the FK
+        ``ON DELETE CASCADE`` that would otherwise silently remove routing
+        bindings when a supplier is edited.
         """
         with self.db.get_connection() as conn:
-            # Delete existing models for this supplier first
-            conn.execute(
-                "DELETE FROM supplier_models WHERE supplier_id = ?", (supplier_id,)
-            )
-            # Insert new models
             for m in models:
                 conn.execute(
-                    """INSERT INTO supplier_models (supplier_id, model_name, model_type, context_length)
-                       VALUES (?, ?, ?, ?)""",
+                    """INSERT INTO supplier_models
+                           (supplier_id, model_name, model_type, context_length)
+                       VALUES (?, ?, ?, ?)
+                       ON CONFLICT(supplier_id, model_name)
+                       DO UPDATE SET
+                           model_type = excluded.model_type,
+                           context_length = excluded.context_length""",
                     (supplier_id, m["model_name"], m["model_type"], m.get("context_length")),
                 )
-            logger.info(f"Bulk upserted {len(models)} models for supplier {supplier_id}")
+            logger.info(
+                "Bulk upserted %d models for supplier %d",
+                len(models), supplier_id,
+            )
 
     def find_suppliers_for_model(self, model_name: str) -> List[dict]:
         """Find active suppliers that support a given model name.

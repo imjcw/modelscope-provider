@@ -523,6 +523,10 @@ select.form-input option {
 .tag-success { background: rgba(34,197,94,0.1); color: #22c55e; border-color: rgba(34,197,94,0.3); }
 .tag-warning { background: rgba(234,179,8,0.1); color: #eab308; border-color: rgba(234,179,8,0.3); }
 .tag-danger  { background: rgba(239,68,68,0.1); color: #ef4444; border-color: rgba(239,68,68,0.3); }
+/* 亮色主题下 tag 颜色加深，提升对比度 */
+[data-theme="light"] .tag-success { background: rgba(34,197,94,0.15); color: #15803d; border-color: rgba(34,197,94,0.35); }
+[data-theme="light"] .tag-warning { background: rgba(234,179,8,0.15); color: #a16207; border-color: rgba(234,179,8,0.35); }
+[data-theme="light"] .tag-danger  { background: rgba(239,68,68,0.15); color: #b91c1c; border-color: rgba(239,68,68,0.35); }
 
 /* ── Card ── */
 .card {

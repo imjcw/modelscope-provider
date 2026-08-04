@@ -87,7 +87,7 @@
             <div class="flex items-center justify-between mb-4">
               <div>
                 <h3 class="text-sm uppercase tracking-[0.15em] text-ls-text">请求趋势 // Trend</h3>
-                <p class="text-xs text-ls-muted mt-0.5">// 最近 {{ windowLabel }}请求数变化</p>
+                <p class="text-xs text-ls-muted mt-0.5">// {{ windowLabel }}请求数变化</p>
               </div>
               <div class="flex items-center gap-4 text-xs">
                 <span class="flex items-center gap-1.5">
@@ -95,7 +95,8 @@
                 </span>
               </div>
             </div>
-            <QpsTrendChart :series="series" :window-seconds="windowSeconds" />
+            <QpsTrendChart :series="series" :window-seconds="windowSeconds"
+              :today-mode="windowSeconds === 0" />
           </div>
 
           <StatusDonut :success="kpi.success || 0" :failed="kpi.failed || 0" :status-codes="statusCodes" />
@@ -133,12 +134,14 @@ import RecentAlerts from '@/components/dashboard/RecentAlerts.vue'
 import { getWindowStats, getModelQuotas, getAlerts } from '@/api'
 
 // ── 时间窗 ──
+// value 0 = 今天（自然日 00:00 → 当前时刻，图表 x 轴为当天 24 小时）
 const WINDOW_OPTIONS = [
+  { label: '今天', value: 0 },
   { label: '1 天', value: 86400 },
   { label: '7 天', value: 604800 },
   { label: '30 天', value: 2592000 },
 ]
-const windowSeconds = ref(86400)
+const windowSeconds = ref(0)
 const windowLabel = computed(() => {
   const opt = WINDOW_OPTIONS.find(o => o.value === windowSeconds.value)
   return opt ? opt.label : `${windowSeconds.value}s`

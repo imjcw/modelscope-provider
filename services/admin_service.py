@@ -273,10 +273,13 @@ class AdminService:
 
     def bulk_set_supplier_models(self, supplier_id: int,
                                  models: list) -> list:
-        """Replace a supplier's model catalog.
+        """Upsert a supplier's model catalog (no FK CASCADE — bindings preserved).
 
-        FK CASCADE on mapping_models.supplier_model_id ensures that
-        bindings pointing to removed models are automatically cleaned up.
+        The repository now uses ``INSERT ... ON CONFLICT DO UPDATE`` so that
+        ``supplier_models`` rows already referenced by
+        ``mapping_models.supplier_model_id`` are updated in place rather than
+        deleted-and-reinserted.  Routing bindings are therefore preserved
+        across supplier edits.
         """
         if self.supplier_model_repo is None:
             return []
@@ -1061,11 +1064,16 @@ class AdminService:
         except Exception:
             return {}
 
-    def get_model_quotas(self):
+    def get_model_quotas(self, days: int = 0):
         """Get model-level quota info by supplier + model.
 
         Reads from model_quotas table (populated from modelscope-ratelimit-model-requests-* headers).
         Falls back to request_logs for token usage if no model quota entry exists.
+
+        Args:
+            days: 0 = today only, otherwise past N days. When >0, token usage
+                  and success rate are aggregated from the stats table over the
+                  requested range instead of from model_quotas cumulative fields.
 
         Returns a list of dicts:
         - supplier_id, supplier_name, account_id
@@ -1073,6 +1081,7 @@ class AdminService:
         - quota_remaining, quota_limit (from model_quotas table)
         - today_input_tokens, today_output_tokens (from model_quotas or request_logs)
         - is_unavailable
+        - request_count, success_count, success_rate (from stats table over range)
         - strategy_type, window_seconds, max_requests
           (the "按模型窗口" policy; from the fixed-window strategy counters.
            max_requests == window_quota_limit == the window's request cap)
@@ -1082,6 +1091,14 @@ class AdminService:
         """
         if self.quota_repo is None or self.supplier_model_repo is None:
             return []
+
+        # 计算时间范围（days=0 = 今日，否则过去 N 天）
+        if days and days > 0:
+            from datetime import timedelta
+            _range_end = _tz_now().strftime("%Y-%m-%d %H:%M:%S")
+            _range_start = (_tz_now() - timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
+        else:
+            _range_start, _range_end = today_range()
 
         # Get all suppliers
         suppliers = self.account_repo.find_all()
@@ -1215,6 +1232,25 @@ class AdminService:
                     _inp, _out, _cached = self._get_today_token_usage(account_id, model_name)
                     today_cached = _cached or today_cached
 
+                # 按时间范围查询请求数/成功数/成功率（stats 表）
+                _requests = 0
+                _success = 0
+                _success_rate = None
+                try:
+                    _inp_s, _out_s, _cached_s, _req_s, _suc_s = self.log_repo.query_stats_model_aggregate(
+                        account_id, model_name, _range_start, _range_end,
+                    )
+                    _requests = _req_s
+                    _success = _suc_s
+                    _success_rate = round(_suc_s / _req_s * 100, 1) if _req_s else None
+                except Exception:
+                    pass
+                # days>0 时 token 用量也改为按范围聚合（取代 model_quota 的累计值）
+                if days and days > 0:
+                    today_input = _inp_s
+                    today_output = _out_s
+                    today_cached = _cached_s
+
                 is_unavailable = model_name in supplier_quota_map.get(account_id, {}).get("unavailable_models", set())
 
                 # Per-model window strategy info (from the fixed-window counters in
@@ -1312,6 +1348,9 @@ class AdminService:
                     "today_output_tokens": today_output,
                     "today_cached_tokens": today_cached,
                     "is_unavailable": is_unavailable,
+                    "request_count": _requests,
+                    "success_count": _success,
+                    "success_rate": _success_rate,
                     # ── 按模型窗口策略透出 ──
                     "strategy_type": strategy_type,
                     "window_seconds": win.get("window_seconds"),
@@ -1437,6 +1476,10 @@ class AdminService:
         QPS / avg latency) with previous-window deltas, a bucketed series for
         the trend chart, status-code breakdown and per-model call counts.
 
+        seconds == 0 means "today" mode: the window is the natural calendar day
+        (00:00 → now, Shanghai time) with 24 hourly buckets (00:00 → 23:00,
+        future hours stay 0); the previous window is yesterday's same clock span.
+
         Series buckets are epoch-aligned (bucket_start divisible by
         bucket_seconds) and span the bucket containing `start` through the one
         containing `end` inclusive, so len(series) is seconds // bucket or
@@ -1447,19 +1490,39 @@ class AdminService:
         import time
         from datetime import datetime, timedelta, timezone
 
-        seconds = max(60, min(int(seconds or 300), 2592000))
-        bucket = self._WINDOW_BUCKET_MAP.get(seconds, max(1, seconds // 30))
-
         fmt = "%Y-%m-%d %H:%M:%S"
         now = datetime.now(TZ)
-        start_dt = now - timedelta(seconds=seconds)
+
+        raw_seconds = 300 if seconds is None else int(seconds)
+        is_today = raw_seconds <= 0
+        if is_today:
+            # 今天模式：自然日 00:00 → 当前时刻，每小时一个桶
+            bucket = 3600
+            window_seconds = 0
+            start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            elapsed_seconds = max(1, int((now - start_dt).total_seconds()))
+        else:
+            seconds = max(60, min(raw_seconds, 2592000))
+            bucket = self._WINDOW_BUCKET_MAP.get(seconds, max(1, seconds // 30))
+            window_seconds = seconds
+            start_dt = now - timedelta(seconds=seconds)
+            elapsed_seconds = seconds
+
         start, end = start_dt.strftime(fmt), now.strftime(fmt)
 
         # Current window vs previous window (exclusive right bound: no overlap)
         cur = self.log_repo.query_stats_summarize(start, end)
-        prev = self.log_repo.query_stats_summarize(
-            (start_dt - timedelta(seconds=seconds)).strftime(fmt), start
-        )
+        if is_today:
+            # 较昨日同时段（昨天 00:00 → 昨天同一钟点）
+            prev_start_dt = start_dt - timedelta(days=1)
+            prev_end_dt = prev_start_dt + timedelta(seconds=elapsed_seconds)
+            prev = self.log_repo.query_stats_summarize(
+                prev_start_dt.strftime(fmt), prev_end_dt.strftime(fmt)
+            )
+        else:
+            prev = self.log_repo.query_stats_summarize(
+                (start_dt - timedelta(seconds=seconds)).strftime(fmt), start
+            )
 
         total = cur["total"] or 0
         success = cur["success"] or 0
@@ -1510,6 +1573,10 @@ class AdminService:
             first_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
             first_epoch = int(first_dt.timestamp())
             n_buckets = (end_epoch - first_epoch) // bucket + 1
+        elif is_today:
+            # 今天模式：固定全天 24 个整点（00:00 → 23:00），未到的小时保持 0
+            first_epoch = int(start_dt.timestamp())
+            n_buckets = 24
         else:
             first_epoch = (start_epoch // bucket) * bucket
             n_buckets = (end_epoch // bucket - start_epoch // bucket) + 1
@@ -1582,8 +1649,18 @@ class AdminService:
                 "cache_hit_rate": round(m_cached / m_input * 100, 1) if m_input else 0.0,
             })
 
+        # 过滤掉智能路由别名 —— 模型状态只显示真实供应商模型
+        if self.mapping_repo is not None:
+            alias_names = set()
+            for _m in self.mapping_repo.find_all():
+                _an = _m.get("alias_name", "")
+                if _an:
+                    alias_names.add(_an)
+            if alias_names:
+                models = [m for m in models if m.get("model") not in alias_names]
+
         return {
-            "window_seconds": seconds,
+            "window_seconds": window_seconds,
             "bucket_seconds": bucket,
             "start": start,
             "end": end,
@@ -1597,7 +1674,7 @@ class AdminService:
                 "cached_tokens": cached_tokens,
                 "success_rate": success_rate,
                 "cache_hit_rate": cache_hit_rate,
-                "qps": round(total / seconds, 1),
+                "qps": round(total / elapsed_seconds, 1),
                 "avg_latency_ms": round(avg_latency) if avg_latency is not None else None,
                 "delta": delta,
             },
@@ -1605,7 +1682,7 @@ class AdminService:
                 "total": prev_total,
                 "total_tokens": prev_tokens,
                 "success_rate": prev_rate,
-                "qps": round(prev_total / seconds, 1),
+                "qps": round(prev_total / elapsed_seconds, 1),
                 "avg_latency_ms": round(prev_avg) if prev_avg is not None else None,
             },
             "series": series,

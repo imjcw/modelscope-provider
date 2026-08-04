@@ -78,7 +78,7 @@ export const getWindowStats = (seconds = 300) => api.get('/stats/window', { para
 export const getAlerts = (days = 7) => api.get('/alerts', { params: { days } })
 
 // ── Model Quotas ──
-export const getModelQuotas = () => api.get('/model-quota')
+export const getModelQuotas = (days = 0) => api.get('/model-quota', { params: { days } })
 
 // ── Client API Keys ──
 export const getClientKeys = () => api.get('/client-keys')

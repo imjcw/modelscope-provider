@@ -66,6 +66,7 @@ def build_rate_limit_strategies(provider_types, db, quota_updater, quota_reposit
                 window_seconds=int(cfg.get("window_seconds", 18000)),
                 max_requests=int(cfg.get("max_requests", 1500)),
                 rate_limit_cache=rate_limit_cache,
+                quota_repository=quota_repository,
             )
         elif stype == "fixed_window_per_model":
             model_configs = cfg.get("models", {})
@@ -76,6 +77,7 @@ def build_rate_limit_strategies(provider_types, db, quota_updater, quota_reposit
                 max_requests=int(cfg.get("max_requests", 1500)),
                 model_configs=model_configs,
                 rate_limit_cache=rate_limit_cache,
+                quota_repository=quota_repository,
             )
         else:
             # header_based（被动限流）：响应头名称可由 provider type 的

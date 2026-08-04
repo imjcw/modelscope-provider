@@ -74,7 +74,7 @@ def _extract_cache_usage(usage) -> tuple:
         return 0, 0
 
 
-async def _safe_read_response_body(response, max_len: int = 2000) -> str:
+async def _safe_read_response_body(response, max_len: int = 50000) -> str:
     """安全读取上游 HTTP 响应的 body 文本，失败时返回空字符串。
     body 超过 max_len 时截断并标注。
 
@@ -473,7 +473,9 @@ async def stream_response_with_logging(
 
         # Circuit-breaker success is recorded here (not at response-creation
         # time) so half-finished streams aren't counted as OK.
-        if not stream_failed and circuit_breaker is not None:
+        # 0-chunk 响应不记为成功——上游返回了空 body（或 JSON/SSE 不匹配），
+        # 熔断器不应因此误判恢复。
+        if not stream_failed and len(raw_chunks) > 0 and circuit_breaker is not None:
             try:
                 circuit_breaker.record_success(
                     key_id, actual_model_id or model_name,
@@ -485,11 +487,30 @@ async def stream_response_with_logging(
         # streams (client disconnect / upstream failure) get status -1 so they
         # stay visible in the admin request logs instead of silently vanishing.
         end_time = datetime.now(timezone.utc).isoformat()
-        log_status = -1 if stream_interrupted else stream_status_code
+        _stream_ended = stream_interrupted or stream_failed
+        _is_empty = len(raw_chunks) == 0
+        log_status = -1 if (_stream_ended or _is_empty) else stream_status_code
         log_error = (
             f"Streaming interrupted: {interrupt_reason}"
-            if stream_interrupted else None
+            if stream_interrupted
+            else f"Empty stream: upstream returned 0 chunks (status={stream_status_code})"
+            if _is_empty
+            else None
         )
+        # 0 chunk 但 stream 未报异常：上游可能返回了非 SSE / 空 body，
+        # 尝试读取并记录 body，避免信息丢失（修复 req_1e5dfec6 这类历史问题）。
+        raw_response_fallback = None
+        if len(raw_chunks) == 0 and not stream_failed and not stream_interrupted:
+            try:
+                _lost_body = await _safe_read_response_body(response, max_len=50000)
+                if _lost_body:
+                    logger.warning(
+                        "Stream produced 0 chunks for %s/%s — captured body: %s",
+                        account.account_id, actual_model_id or model_name, _lost_body,
+                    )
+                    raw_response_fallback = _lost_body
+            except Exception:
+                raw_response_fallback = None
         logger.info(
             f"Streaming finished for {account.account_id}: "
             f"status={log_status} input={input_tokens} output={output_tokens} "
@@ -510,7 +531,7 @@ async def stream_response_with_logging(
                     latency_ms=None,
                     error_message=log_error,
                     raw_request=json.dumps(request_body, ensure_ascii=False),
-                    raw_response="".join(raw_chunks),
+                    raw_response=raw_response_fallback or "".join(raw_chunks),
                     request_start=request_start,
                     first_response=first_response,
                     end_time=end_time,
@@ -798,7 +819,7 @@ async def _try_candidate(
         # 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 500+ (Server Error)
         # are all candidates for fallback to next supplier
         if response.status_code >= 400:
-            _upstream_err_body = await _safe_read_response_body(response, max_len=2000)
+            _upstream_err_body = await _safe_read_response_body(response, max_len=50000)
             await _safe_aclose(response)
             logger.warning(
                 "Upstream error: %s/%s → %s body=%s",
@@ -834,6 +855,59 @@ async def _try_candidate(
                         "code": f"upstream_{response.status_code}"
                     }
                 }
+            )
+
+        # 检测上游是否在 stream=True 时返回了非 SSE 响应（如 application/json +
+        # Content-Length）。这种情况下 stream_response() 会 yield 0 个 chunk，
+        # 客户端收到空 SSE 表现为"无响应"，且 token 始终为 0、上游 body 丢失。
+        # 捕获此情况，记录 body 并 fallback 到下一个候选。
+        _ct = response.headers.get("content-type", "") or ""
+        _cl = response.headers.get("content-length", None)
+        _is_json_response = (
+            "application/json" in _ct and "text/event-stream" not in _ct
+        )
+        if _is_json_response or _cl:
+            _json_body = await _safe_read_response_body(response, max_len=50000)
+            await _safe_aclose(response)
+            logger.warning(
+                "Upstream returned non-SSE response for streaming request: "
+                "%s/%s content-type=%s content-length=%s body=%s",
+                selected_account.account_id,
+                actual_model_id or request.model,
+                _ct, _cl,
+                _json_body or "(empty)",
+            )
+            if circuit_breaker:
+                circuit_breaker.record_failure(
+                    key_id,
+                    selected_account.account_id,
+                    actual_model_id or request.model,
+                    502,
+                    strategy,
+                )
+            await _log_error_request(
+                admin_service, request.model, actual_model_id,
+                selected_account, client_key_name,
+                502,
+                f"供应商 {selected_account.name or selected_account.account_id} "
+                f"返回非流式响应（期望 SSE）",
+                request_body, request_start, first_response,
+                raw_response=_json_body,
+                is_stream=True, key_id=key_id,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": {
+                        "message": (
+                            f"供应商 {selected_account.name or selected_account.account_id} "
+                            f"返回非流式响应"
+                        ),
+                        "type": "upstream_error",
+                        "param": None,
+                        "code": "upstream_non_sse",
+                    }
+                },
             )
 
         # Request successful — return streaming response. Circuit-breaker
@@ -920,7 +994,7 @@ async def _try_candidate(
     # 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 500+ (Server Error)
     # are all candidates for fallback to next supplier
     if response.status_code >= 400:
-        _upstream_err_body = await _safe_read_response_body(response, max_len=2000)
+        _upstream_err_body = await _safe_read_response_body(response, max_len=50000)
         logger.warning(
             "Upstream error: %s/%s → %s body=%s",
             selected_account.account_id,

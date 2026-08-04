@@ -681,9 +681,13 @@ def get_window_stats(seconds: int = 300, service=Depends(get_admin_service)):
 # ── Model Quotas ──────────────────────────────────────────────────────────────
 
 @router.get("/model-quota")
-def get_model_quotas(service=Depends(get_admin_service)):
-    """Get model-level quota info aggregated by supplier + model."""
-    return service.get_model_quotas()
+def get_model_quotas(days: int = 0, service=Depends(get_admin_service)):
+    """Get model-level quota info aggregated by supplier + model.
+
+    days (default 0 = today) controls the time range used for the
+    request success rate and per-range token usage.
+    """
+    return service.get_model_quotas(days=days)
 
 
 # ── Alerts ──────────────────────────────────────────────────────────────────

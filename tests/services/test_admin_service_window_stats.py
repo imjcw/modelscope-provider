@@ -158,6 +158,86 @@ def test_single_row_lands_in_correct_bucket(database):
     assert nonzero[0]["success_rate"] == 100.0
 
 
+def test_today_mode_returns_24_hourly_buckets(database):
+    """seconds=0 mode returns 24 hourly buckets aligned to today's 00:00–23:00,
+    with window_seconds=0 and bucket_seconds=3600."""
+    svc = _make_service(database)
+    today = datetime.now(TZ).replace(microsecond=0)
+    today_midnight = today.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    out = svc.get_window_stats(0)
+
+    assert out["window_seconds"] == 0
+    assert out["bucket_seconds"] == 3600
+    assert len(out["series"]) == 24
+
+    # First bucket must be today 00:00:00
+    first = out["series"][0]
+    assert first["t"] == today_midnight.strftime(FMT)
+
+    # Last bucket must be today 23:00:00
+    last = out["series"][-1]
+    assert last["t"] == today_midnight.replace(hour=23).strftime(FMT)
+
+    # All buckets share today's date
+    today_date = today_midnight.strftime("%Y-%m-%d")
+    for cell in out["series"]:
+        assert cell["t"].startswith(today_date)
+
+
+def test_today_mode_data_in_current_hour_bucket(database):
+    """A request inserted 'now' lands in the current hour bucket of the
+    today-mode series."""
+    svc = _make_service(database)
+    now = datetime.now(TZ).replace(microsecond=0)
+    _insert(database, now, input_tokens=100, output_tokens=50)
+
+    out = svc.get_window_stats(0)
+    current_hour = now.replace(minute=0, second=0, microsecond=0)
+    expected_t = current_hour.strftime(FMT)
+
+    cell = next((c for c in out["series"] if c["t"] == expected_t), None)
+    assert cell is not None, f"expected hour bucket {expected_t} in series"
+    assert cell["total"] == 1
+    assert cell["total_tokens"] == 150
+    assert cell["success_rate"] == 100.0
+
+
+def test_today_mode_delta_vs_yesterday_same_span(database):
+    """Today-mode delta compares against yesterday's same clock span."""
+    svc = _make_service(database)
+    now = datetime.now(TZ).replace(microsecond=0)
+    # One request today
+    _insert(database, now - timedelta(seconds=60), input_tokens=50, output_tokens=25)
+    # Two requests yesterday at same clock time
+    yesterday = now - timedelta(days=1)
+    _insert(database, yesterday - timedelta(seconds=30), input_tokens=30, output_tokens=10)
+    _insert(database, yesterday - timedelta(seconds=60), input_tokens=20, output_tokens=5)
+
+    out = svc.get_window_stats(0)
+    kpi = out["kpi"]
+    # total=1, prev_total=2 → (1-2)/2*100 = -50.0
+    assert kpi["total"] == 1
+    assert out["prev"]["total"] == 2
+    assert kpi["delta"]["total_pct"] == -50.0
+
+
+def test_today_mode_qps_uses_elapsed_seconds(database):
+    """Today-mode QPS is computed over the elapsed seconds since midnight."""
+    svc = _make_service(database)
+    now = datetime.now(TZ).replace(microsecond=0)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed = max(1, int((now - today_start).total_seconds()))
+
+    # Insert 10 requests spread across the current window
+    for i in range(10):
+        _insert(database, today_start + timedelta(seconds=i * 60))
+
+    out = svc.get_window_stats(0)
+    expected_qps = round(10 / elapsed, 1)
+    assert out["kpi"]["qps"] == expected_qps
+
+
 def test_window_and_bucket_clamping(database):
     svc = _make_service(database)
 

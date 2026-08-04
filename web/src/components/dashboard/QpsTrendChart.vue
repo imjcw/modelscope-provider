@@ -14,6 +14,9 @@ import { niceMax, smoothLinePath } from '@/utils/chart'
 const props = defineProps({
   series: { type: Array, default: () => [] },
   windowSeconds: { type: Number, default: 300 },
+  // 今天模式：系列固定为当天 24 个整点（00:00 → 23:00），
+  // 末点不再是"现在"，需将当前点/标签定位到当前小时
+  todayMode: { type: Boolean, default: false },
 })
 
 // 用 ResizeObserver 监听容器宽度变化，驱动 SVG 重新拉伸
@@ -52,10 +55,14 @@ const areaD = computed(() => {
   return `${qpsLineD.value} L${X1},${Y1} L${X0},${Y1} Z`
 })
 
+// 当前点：默认是系列末点；今天模式下末点为 23:00，定位到当前小时 bucket
 const lastPoint = computed(() => {
   if (!n.value) return null
-  const last = props.series[n.value - 1]
-  return { x: xAt(n.value - 1), y: yQps(last.total || 0) }
+  const idx = props.todayMode
+    ? Math.min(new Date().getHours(), n.value - 1)
+    : n.value - 1
+  const last = props.series[idx]
+  return { x: xAt(idx), y: yQps(last.total || 0) }
 })
 
 // y 轴刻度：满量程四分位（整数，如 32 / 24 / 16 / 8 / 0）
@@ -74,12 +81,17 @@ const xTicks = computed(() => {
   const n = series.length
   const label = (idx) => {
     if (idx >= n || idx < 0) return ''
-    // 最后一点始终显示"现在"
-    if (idx === n - 1) return '现在'
     const t = series[idx]?.t
     if (!t) return ''
     const d = new Date(t.replace(' ', 'T'))
     if (isNaN(d.getTime())) return ''
+    // 今天模式：当前小时刻度显示"现在"，其余显示整点
+    if (props.todayMode) {
+      if (d.getHours() === new Date().getHours()) return '现在'
+      return `${String(d.getHours()).padStart(2, '0')}:00`
+    }
+    // 最后一点始终显示"现在"
+    if (idx === n - 1) return '现在'
     if (w <= 86400) {
       // 1 天窗：显示时:分
       const h = String(d.getHours()).padStart(2, '0')

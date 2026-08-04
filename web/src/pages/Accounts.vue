@@ -313,8 +313,15 @@
             <td class="text-right text-xs font-mono" :class="(m.today_cached_tokens || 0) > 0 ? 'text-green-400' : 'text-ls-muted'">{{ (m.today_cached_tokens || 0).toLocaleString() }}</td>
             <td class="text-right text-xs font-mono text-ls-dim">{{ (m.today_output_tokens || 0).toLocaleString() }}</td>
             <td class="text-center">
-              <span v-if="m.is_unavailable" class="tag tag-danger">不可用</span>
-              <span v-else class="tag tag-success">正常</span>
+              <template v-if="m.is_unavailable">
+                <span class="tag tag-danger">不可用</span>
+              </template>
+              <template v-else-if="m.success_rate !== null && m.success_rate < 85">
+                <span class="tag tag-warning">异常 {{ m.success_rate }}%</span>
+              </template>
+              <template v-else>
+                <span class="tag tag-success">正常{{ m.success_rate !== null ? ' ' + m.success_rate + '%' : '' }}</span>
+              </template>
             </td>
           </tr>
         </tbody>
@@ -328,7 +335,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, inject } from 'vue'
+import { ref, computed, watch, onMounted, nextTick, inject } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import PageState from '@/components/PageState.vue'
 import Drawer from '@/components/Drawer.vue'
@@ -397,6 +404,9 @@ const modelInfoRows = computed(() => {
       today_output_tokens: q.today_output_tokens || 0,
       today_cached_tokens: q.today_cached_tokens || 0,
       is_unavailable: q.is_unavailable || false,
+      success_rate: q.success_rate ?? null,
+      request_count: q.request_count || 0,
+      success_count: q.success_count || 0,
       strategy_type: q.strategy_type || '',
       window_seconds: q.window_seconds || 0,
       window_quota_remaining: q.window_quota_remaining || 0,
@@ -637,23 +647,33 @@ const loadData = async () => {
         ? (modelResults[i].value.data || [])
         : []
     })
-    // Load model-level quotas and group by supplier_id
-    try {
-      const mqRes = await getModelQuotas()
-      const map = {}
-      for (const mq of (mqRes.data || [])) {
-        if (!map[mq.supplier_id]) map[mq.supplier_id] = []
-        map[mq.supplier_id].push(mq)
-      }
-      modelQuotaMap.value = map
-    } catch (e) {
-      console.error('Failed to load model quotas:', e)
-    }
+    // Load model-level quotas (今日) and group by supplier_id
+    await loadModelQuotas(0)
   } catch (e) {
     error.value = e.message || 'Failed to load suppliers'
   }
   loading.value = false
 }
+
+// ── 模型用量数据加载（支持时间范围） ──
+const loadModelQuotas = async (days = 0) => {
+  try {
+    const mqRes = await getModelQuotas(days)
+    const map = {}
+    for (const mq of (mqRes.data || [])) {
+      if (!map[mq.supplier_id]) map[mq.supplier_id] = []
+      map[mq.supplier_id].push(mq)
+    }
+    modelQuotaMap.value = map
+  } catch (e) {
+    console.error('Failed to load model quotas:', e)
+  }
+}
+
+// 时间范围变化时重新加载模型用量数据
+watch(modelInfoDays, (days) => {
+  if (showModelInfoDrawer.value) loadModelQuotas(days)
+})
 
 // ── Add (drawer) ──
 const openAdd = async () => {

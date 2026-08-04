@@ -1,9 +1,10 @@
 <script setup>
 /**
  * RateLimitCard — 限流状态卡（demo「限流状态 // Rate Limit」区块）。
- * demo 展示的是 per-key req/min，本项目的真实限流数据是 /model-quota 的
- * per-model 请求配额（来自 modelscope-ratelimit-model-requests-* 响应头），
- * 取使用率 top 5 展示。
+ * 数据源为 /model-quota 的 per-model 配额，包含两种来源：
+ * 1. 被动配额（来自 modelscope-ratelimit-* 响应头 → quota_* 字段）
+ * 2. 窗口计数（fixed_window 策略 → window_quota_* 字段，用于 sensetime、per-model 等）
+ * 优先使用窗口计数，退回被动配额，取使用率 top 5 展示。
  */
 import { computed } from 'vue'
 import ProgressBar from '@/components/ProgressBar.vue'
@@ -25,18 +26,23 @@ const GRAD = {
 
 const rows = computed(() => {
   return (props.quotas || [])
-    .filter(q => (q.quota_limit || 0) > 0)
     .map(q => {
-      const used = Math.max(0, (q.quota_limit || 0) - (q.quota_remaining || 0))
-      const pct = Math.round((used / q.quota_limit) * 100)
+      // 限流以窗口计数优先，退回 token 配额（对齐 ModelStatusTable）
+      const winLimit = q.window_quota_limit
+      const winRem = q.window_quota_remaining
+      const limit = (winLimit != null ? winLimit : q.quota_limit) || 0
+      const remaining = (winLimit != null ? winRem : q.quota_remaining) || 0
+      const used = Math.max(0, limit - remaining)
+      const pct = limit > 0 ? Math.round((used / limit) * 100) : 0
       return {
         name: q.model_name,
         used,
-        limit: q.quota_limit,
+        limit,
         pct,
         tone: pct >= 100 ? 'red' : pct >= 70 ? 'yellow' : 'green',
       }
     })
+    .filter(r => r.limit > 0)
     .sort((a, b) => b.pct - a.pct)
     .slice(0, 5)
 })
