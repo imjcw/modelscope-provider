@@ -390,20 +390,10 @@ const conversationMessages = computed(() => {
       }
     }
 
-    // Filter out empty assistant messages from the request history — their
-    // actual content already appears in the raw_response Assistant card below.
-    out = out.filter((m) => {
-      if (m.role !== 'assistant') return true
-      const hasContent = typeof m.content === 'string'
-        ? m.content.length > 0
-        : Array.isArray(m.content) && m.content.some((c) => c.type === 'text' && c.text)
-      return hasContent || !!m.reasoning || m.toolCalls?.length > 0
-    })
-
     // Pass 2: merge tool results into matching tool_call entries by tool_call_id.
-    // assistant 单轮可能并发多个 tool_calls，展平后顺序为
-    // [call A, call B, result A, result B]，结果与调用并不相邻，
-    // 因此需跨整个列表按 id 匹配，而不是只看紧邻消息。
+    // assistant 单轮可能并发多个 tool_calls,展平后顺序为
+    // [call A, call B, result A, result B],结果与调用并不相邻,
+    // 因此需跨整个列表按 id 匹配,而不是只看紧邻消息。
     const consumed = new Set()
     for (const msg of out) {
       if (msg.role !== 'tool_call' || !msg.toolId) continue
@@ -417,7 +407,17 @@ const conversationMessages = computed(() => {
       }
     }
 
-    return out.filter((_, idx) => !consumed.has(idx))
+    // Filter out empty assistant messages from the request history — their
+    // actual content already appears in the raw_response Assistant card below.
+    return out
+      .filter((_, idx) => !consumed.has(idx))
+      .filter((m) => {
+        if (m.role !== 'assistant') return true
+        const hasContent = typeof m.content === 'string'
+          ? m.content.length > 0
+          : Array.isArray(m.content) && m.content.some((c) => c.type === 'text' && c.text)
+        return hasContent || !!m.reasoning || m.toolCalls?.length > 0
+      })
   } catch (e) {
     return []
   }
