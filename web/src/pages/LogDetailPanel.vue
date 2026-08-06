@@ -20,8 +20,13 @@
         <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
           <!-- Left: Conversation Flow -->
-          <div class="flex-1 overflow-y-auto p-3 lg:p-5">
-            <div class="space-y-2">
+          <div class="flex-1 overflow-y-auto p-3 lg:p-5 relative">
+            <!-- 遮罩：Stats 展开时覆盖左侧内容，点击关闭 -->
+            <div v-if="statsExpanded"
+                 @click="statsExpanded = false"
+                 class="lg:hidden absolute inset-0 bg-black/50 z-20 animate-fade-in cursor-pointer" />
+
+            <div class="space-y-2 relative">
 
               <!-- Request header -->
               <div class="bg-ls-card rounded-lg border border-ls-border p-3">
@@ -110,7 +115,7 @@
           <div class="w-full lg:w-80 flex-shrink-0 border-t lg:border-t-0 lg:border-l border-ls-border overflow-y-auto bg-ls-card"
                :class="statsExpanded ? 'max-h-[60vh]' : 'max-h-[52px] lg:max-h-none'">
             <button @click="statsExpanded = !statsExpanded"
-                    class="lg:hidden w-full flex items-center justify-between p-3 text-left">
+                    class="lg:hidden w-full flex items-center justify-between p-3 text-left sticky top-0 z-10 bg-ls-card border-b border-ls-border">
               <div class="flex items-center gap-4 text-xs">
                 <span class="text-ls-dim">延迟: <span class="text-ls-text font-mono">{{ modelValue.latency_ms ? formatDuration(modelValue.latency_ms) : '-' }}</span></span>
                 <span class="text-ls-dim">Token: <span class="text-ls-text font-mono">{{ ((modelValue.input_tokens || 0) + (modelValue.output_tokens || 0)).toLocaleString() }}</span></span>
