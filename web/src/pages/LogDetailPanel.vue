@@ -120,7 +120,7 @@
                 <span class="text-ls-dim">延迟: <span class="text-ls-text font-mono">{{ modelValue.latency_ms ? formatDuration(modelValue.latency_ms) : '-' }}</span></span>
                 <span class="text-ls-dim">Token: <span class="text-ls-text font-mono">{{ ((modelValue.input_tokens || 0) + (modelValue.output_tokens || 0)).toLocaleString() }}</span></span>
               </div>
-              <CIcon name="chevron-down" :size="16" class="text-ls-dim transition-transform" :class="statsExpanded ? 'rotate-180' : ''" />
+              <CIcon name="chevron-down" :size="16" class="text-ls-dim transition-transform" :class="statsExpanded ? '' : 'rotate-180'" />
             </button>
             <div :class="statsExpanded ? 'block' : 'hidden lg:block'">
 
