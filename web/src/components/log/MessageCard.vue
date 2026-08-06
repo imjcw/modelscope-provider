@@ -9,11 +9,12 @@
  *     :highlight="i === 0" :input-badge="i === 0 && msg.role === 'user'"
  *     @toggle-expand="..." @toggle-render="..." />
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import MarkdownRender from '@/components/MarkdownRender.vue'
 import RoleBadge from './RoleBadge.vue'
 import ToolIO from './ToolIO.vue'
 import ToolCallCard from './ToolCallCard.vue'
+import CIcon from '@/components/CIcon.vue'
 
 const props = defineProps({
   msg: { type: Object, required: true },
@@ -33,6 +34,34 @@ const toolOutput = computed(() =>
   : props.msg.role === 'tool' ? props.msg.content
   : ''
 )
+// Multimodal content: array of {type, text, image_url} or string
+const contentArray = computed(() =>
+  Array.isArray(props.msg.content) ? props.msg.content : []
+)
+const hasImages = computed(() =>
+  contentArray.value.some(c => c.type === 'image_url' && c.image_url?.url)
+)
+const hasText = computed(() => {
+  if (Array.isArray(props.msg.content)) return contentArray.value.some(c => c.type === 'text')
+  // 普通字符串内容(标准 OpenAI 格式)也算有文本
+  return typeof props.msg.content === 'string' && props.msg.content.length > 0
+})
+const reasoning = computed(() => props.msg.reasoning || '')
+const showReasoning = ref(false)
+
+// Extract text from multimodal content array
+const getTextContent = computed(() => {
+  if (!Array.isArray(props.msg.content)) return props.msg.content || ''
+  return props.msg.content
+    .filter(c => c.type === 'text')
+    .map(c => c.text || '')
+    .join('\n')
+})
+
+function previewImage(url) {
+  if (!url) return
+  window.open(url, '_blank')
+}
 </script>
 
 <template>
@@ -42,7 +71,7 @@ const toolOutput = computed(() =>
       <RoleBadge :role="msg.role" :tool-name="msg.toolName" :tool-id="msg.toolId" />
       <span v-if="inputBadge"
         class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] bg-green-500/20 text-green-300 border border-green-500/30">本次输入</span>
-      <button v-if="msg.content || msg.toolArguments || msg.toolResult" @click.stop="$emit('toggle-render')"
+      <button v-if="msg.content || msg.toolArguments || msg.toolResult || hasImages || reasoning" @click.stop="$emit('toggle-render')"
         class="text-xs text-ls-muted px-1.5 py-0.5 rounded transition-colors"
         :class="isRaw ? 'bg-ls-accent/10 text-ls-accent' : 'hover:bg-ls-accent/10 hover:text-ls-accent'">
         {{ isRaw ? 'RAW' : 'MD' }}
@@ -60,16 +89,39 @@ const toolOutput = computed(() =>
         </div>
       </template>
       <!-- 普通消息内容 -->
-      <div v-if="!isTool && msg.content && !isRaw">
-        <MarkdownRender :source="msg.content" />
-      </div>
-      <div v-if="!isTool && msg.content && isRaw" class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{{ msg.content }}</div>
-      <!-- assistant 内联 toolCalls -->
-      <div v-if="msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0"
-        class="mt-3 pt-3 border-t border-ls-border space-y-2">
-        <ToolCallCard v-for="(tc, ti) in msg.toolCalls" :key="ti" :tc="tc" />
-      </div>
-      <span v-if="!msg.content && !msg.toolCalls && !isTool" class="text-gray-600 text-xs italic">—</span>
+      <template v-if="!isTool">
+        <!-- 多模态图片 -->
+        <div v-if="hasImages" class="flex flex-wrap gap-1.5 mb-2">
+          <img v-for="(c, ci) in contentArray.filter(c => c.type === 'image_url')"
+            :key="ci" :src="c.image_url?.url"
+            class="rounded-lg max-h-48 max-w-full cursor-pointer hover:opacity-90 transition-opacity"
+            @click="previewImage(c.image_url?.url)">
+        </div>
+        <!-- 文本内容 -->
+        <div v-if="hasText && !isRaw">
+          <MarkdownRender :source="getTextContent" />
+        </div>
+        <div v-if="hasText && isRaw" class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{{ getTextContent }}</div>
+        <!-- 无文本无图片的占位 -->
+        <span v-if="!hasText && !hasImages && !(Array.isArray(msg.content) && msg.content.length)" class="text-gray-600 text-xs italic">—</span>
+        <!-- assistant 思考过程 -->
+        <div v-if="msg.role === 'assistant' && reasoning" class="mt-2 pt-2 border-t border-ls-border">
+          <button @click="showReasoning = !showReasoning"
+            class="flex items-center gap-1.5 text-xs text-ls-muted hover:text-ls-text transition-colors mb-1">
+            <CIcon name="lightbulb" :size="12" class="text-ls-muted" />
+            <span>思考过程</span>
+            <CIcon :name="showReasoning ? 'chevron-up' : 'chevron-down'" :size="11" />
+          </button>
+          <div v-if="showReasoning" class="text-ls-dim leading-relaxed bg-ls-elevated rounded-lg px-3 py-2">
+            {{ reasoning }}
+          </div>
+        </div>
+        <!-- assistant 内联 toolCalls -->
+        <div v-if="msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0"
+          class="mt-3 pt-3 border-t border-ls-border space-y-2">
+          <ToolCallCard v-for="(tc, ti) in msg.toolCalls" :key="ti" :tc="tc" />
+        </div>
+      </template>
     </div>
   </div>
 </template>
