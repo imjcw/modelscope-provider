@@ -69,9 +69,6 @@
               </div>
             </td>
           </tr>
-          <tr v-if="clientKeys.length === 0">
-            <td colspan="9" class="py-8 text-center text-ls-muted">暂无 API Key，点击上方按钮生成第一个 Key</td>
-          </tr>
         </tbody>
       </CTable>
 
