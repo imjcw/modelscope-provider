@@ -63,7 +63,7 @@
                 @toggle-render="toggleRender(currentStartIndex + i)" />
 
               <!-- Assistant response (concatenated) -->
-              <div v-if="responseContentText" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
+              <div v-if="responseContentText || responseToolCalls.length || responseReasoning" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
                 <button @click="toggleResponseExpanded"
                   class="flex items-center gap-2 px-4 py-2.5 w-full text-left hover:bg-ls-elevated transition-colors">
                   <span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs bg-yellow-500/10 text-yellow-400">Assistant</span>
@@ -76,8 +76,30 @@
                   <span class="ml-auto text-ls-muted text-xs transition-transform" :class="responseExpanded ? 'rotate-90' : ''">▶</span>
                 </button>
                 <div v-if="responseExpanded" class="px-4 pt-3 pb-3 text-xs text-ls-dim">
-                  <MarkdownRender v-if="responseRenderMode !== 'raw'" :source="responseContentText" />
-                  <div v-else class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{{ responseContentText }}</div>
+                  <!-- Reasoning -->
+                  <div v-if="responseReasoning" class="mb-3">
+                    <button @click.stop="toggleResponseReasoning"
+                      class="flex items-center gap-1.5 text-xs text-ls-muted hover:text-ls-text transition-colors mb-1">
+                      <CIcon name="lightbulb" :size="12" class="text-ls-muted" />
+                      <span>思考过程</span>
+                      <CIcon :name="responseReasoningExpanded ? 'chevron-up' : 'chevron-down'" :size="11" />
+                    </button>
+                    <div v-if="responseReasoningExpanded" class="text-ls-dim leading-relaxed bg-ls-elevated rounded-lg px-3 py-2 mb-2">
+                      {{ responseReasoning }}
+                    </div>
+                  </div>
+                  <!-- Tool calls -->
+                  <div v-if="responseToolCalls.length > 0" class="mb-3">
+                    <div class="text-xs text-ls-muted mb-1.5">工具调用</div>
+                    <div class="space-y-2">
+                      <ToolCallCard v-for="(tc, ti) in responseToolCalls" :key="ti" :tc="tc" />
+                    </div>
+                  </div>
+                  <!-- Content -->
+                  <div v-if="responseContentText">
+                    <MarkdownRender v-if="responseRenderMode !== 'raw'" :source="responseContentText" />
+                    <div v-else class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{{ responseContentText }}</div>
+                  </div>
                 </div>
               </div>
 
@@ -188,6 +210,7 @@ import CIcon from '@/components/CIcon.vue'
 import StatusCodeBadge from '@/components/StatusCodeBadge.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import MessageCard from '@/components/log/MessageCard.vue'
+import ToolCallCard from '@/components/log/ToolCallCard.vue'
 import StatsSection from '@/components/log/StatsSection.vue'
 import { formatTime, formatDuration } from '@/utils/format'
 
@@ -248,6 +271,7 @@ const collapsedMsgs = ref({})
 const historyCollapsed = ref({})
 const responseExpanded = ref(true)
 const responseRenderMode = ref('md')
+const responseReasoningExpanded = ref(false)
 const renderModes = ref({})
 
 const close = () => {
@@ -264,6 +288,7 @@ watch(() => props.modelValue, (val) => {
   renderModes.value = {}
   responseExpanded.value = true
   responseRenderMode.value = 'md'
+  responseReasoningExpanded.value = false
   showHistory.value = false
 
   if (val) {
@@ -307,6 +332,10 @@ function toggleResponseRender() {
   responseRenderMode.value = responseRenderMode.value === 'raw' ? 'md' : 'raw'
 }
 
+function toggleResponseReasoning() {
+  responseReasoningExpanded.value = !responseReasoningExpanded.value
+}
+
 // ── Parse raw_request to extract conversation messages ──
 // Strategy:
 //   1. assistant with tool_calls → split into individual "tool_call" cards
@@ -322,12 +351,18 @@ const conversationMessages = computed(() => {
 
     // Pass 1: flatten all messages, split assistant tool_calls into individual entries
     for (const msg of messages) {
-      const content = typeof msg.content === 'string' ? msg.content : ''
+      // Keep original content (string or array for multimodal) as-is
+      const content = msg.content
+      const reasoning = msg.reasoning_content || msg.reasoning || msg.thinking || ''
       const calls = msg.tool_calls || msg.toolCalls
 
       if (msg.role === 'assistant' && calls && Array.isArray(calls)) {
-        if (content) {
-          out.push({ role: 'assistant', content, toolCalls: null })
+        // Check if there's anything to display (text content, reasoning, or images)
+        const hasContent = typeof content === 'string' ? !!content
+          : Array.isArray(content) && content.some(c => c.type === 'text' && c.text)
+        const hasImages = Array.isArray(content) && content.some(c => c.type === 'image_url' && c.image_url?.url)
+        if (hasContent || reasoning || hasImages) {
+          out.push({ role: 'assistant', content, reasoning, toolCalls: null })
         }
         for (const tc of calls) {
           let args = tc.function?.arguments || '{}'
@@ -335,6 +370,7 @@ const conversationMessages = computed(() => {
           out.push({
             role: 'tool_call',
             content: '',
+            reasoning: '',
             toolName: tc.function?.name || 'unknown',
             toolId: tc.id || '',
             toolArguments: typeof args === 'string' ? args : JSON.stringify(args, null, 2),
@@ -345,6 +381,7 @@ const conversationMessages = computed(() => {
         out.push({
           role: msg.role,
           content,
+          reasoning,
           toolCalls: null,
           toolResult: '',
           // Preserve tool_call_id on tool role messages so Pass 2 can match
@@ -352,6 +389,16 @@ const conversationMessages = computed(() => {
         })
       }
     }
+
+    // Filter out empty assistant messages from the request history — their
+    // actual content already appears in the raw_response Assistant card below.
+    out = out.filter((m) => {
+      if (m.role !== 'assistant') return true
+      const hasContent = typeof m.content === 'string'
+        ? m.content.length > 0
+        : Array.isArray(m.content) && m.content.some((c) => c.type === 'text' && c.text)
+      return hasContent || !!m.reasoning || m.toolCalls?.length > 0
+    })
 
     // Pass 2: merge tool results into matching tool_call entries by tool_call_id.
     // assistant 单轮可能并发多个 tool_calls，展平后顺序为
@@ -403,79 +450,73 @@ function toggleHistoryCollapsed(i) {
   }
 }
 
+// ── Shared response-stream parser ──
+import { parseResponseStreams } from '@/composables/useResponseParser'
+
 // ── Parse raw_response into chunks ──
 const responseChunks = computed(() => {
   const raw = props.modelValue?.raw_response
   if (!raw) return []
+  const parsed = parseResponseStreams(raw)
+  if (!parsed) return [raw]
   const chunks = []
-  try {
-    const parsed = JSON.parse(raw)
-    const choices = parsed.choices || []
-    if (choices.length > 0) {
-      for (const choice of choices) {
-        const message = choice.message || {}
-        const delta = choice.delta || {}
-        const c = message.content || delta.content || ''
-        if (c) chunks.push(c)
-      }
-    }
-    return chunks
-  } catch (e) {}
-  if (raw.startsWith('data:')) {
-    const lines = raw.split('\n')
-    for (const line of lines) {
-      if (!line.startsWith('data:')) continue
-      const dataStr = line.slice(5).trim()
-      if (dataStr === '[DONE]' || !dataStr) continue
-      try {
-        const obj = JSON.parse(dataStr)
-        const choices = obj.choices || []
-        for (const choice of choices) {
-          const msg = choice.message || {}
-          const delta = choice.delta || {}
-          const c = msg.content || delta.content || ''
-          if (c) chunks.push(c)
-        }
-      } catch {}
-    }
-    return chunks
+  for (const c of parsed.choices) {
+    const content = c.message?.content || c.delta?.content || ''
+    if (content) chunks.push(content)
   }
-  try {
-    let pos = 0
-    while (pos < raw.length) {
-      let start = pos
-      let depth = 0, inString = false, escape = false, end = start
-      for (let i = start; i < raw.length; i++) {
-        const ch = raw[i]
-        if (inString) {
-          if (escape) { escape = false }
-          else if (ch === '\\') { escape = true }
-          else if (ch === '"') { inString = false }
-        } else {
-          if (ch === '"') { inString = true }
-          else if (ch === '{') { depth++ }
-          else if (ch === '}') { depth--; if (depth === 0) { end = i + 1; break } }
-        }
-      }
-      if (end <= start) break
-      const obj = JSON.parse(raw.slice(start, end))
-      const choices = obj.choices || []
-      if (choices.length > 0) {
-        for (const choice of choices) {
-          const msg = choice.message || {}
-          const delta = choice.delta || {}
-          const c = msg.content || delta.content || ''
-          if (c) chunks.push(c)
-        }
-      }
-      pos = end
-    }
-    return chunks
-  } catch (e) {}
-  return [raw]
+  return chunks
 })
 
 const responseContentText = computed(() => responseChunks.value.join(''))
+
+// ── Extract tool_calls from raw_response (response-side, not history) ──
+const responseToolCalls = computed(() => {
+  const raw = props.modelValue?.raw_response
+  if (!raw) return []
+  const parsed = parseResponseStreams(raw)
+  if (!parsed) return []
+  const out = []
+  for (const c of parsed.choices) {
+    // Streamed: use merged tool_calls
+    if (c._mergedToolCalls) {
+      for (const t of c._mergedToolCalls) {
+        out.push({
+          id: t.id || '',
+          type: t.type || 'function',
+          name: t.name || 'unknown',
+          arguments: t.arguments || '{}',
+        })
+      }
+      continue
+    }
+    // Non-streamed: use message.tool_calls
+    const tc = c.message?.tool_calls || []
+    if (!Array.isArray(tc)) continue
+    for (const t of tc) {
+      out.push({
+        id: t.id || '',
+        type: t.type || 'function',
+        name: t.function?.name || 'unknown',
+        arguments: t.function?.arguments || '{}',
+      })
+    }
+  }
+  return out
+})
+
+// ── Extract reasoning_content from raw_response ──
+const responseReasoning = computed(() => {
+  const raw = props.modelValue?.raw_response
+  if (!raw) return ''
+  const parsed = parseResponseStreams(raw)
+  if (!parsed) return ''
+  const parts = []
+  for (const c of parsed.choices) {
+    const r = c.message?.reasoning_content || c.delta?.reasoning_content || ''
+    if (r) parts.push(r)
+  }
+  return parts.join('')
+})
 
 const fmtMsTime = (ts) => formatTime(ts, { ms: true })
 
