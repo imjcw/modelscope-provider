@@ -53,15 +53,31 @@ class DatabaseManager:
         # short-lived child connection while the outer transaction is in flight
         # (e.g. SELECT inside a write block, or nested repository calls).
         conn.execute("PRAGMA busy_timeout = 5000")
-        # Enable WAL (Write-Ahead Logging) for better concurrent read/write
-        # performance. WAL allows readers to proceed concurrently with a single
-        # writer, which is critical for the proxy's read-heavy workload where
-        # every request reads config/quotas while writes update usage stats.
-        conn.execute("PRAGMA journal_mode = WAL")
-        # synchronous=NORMAL (1) is safe with WAL and ~2x faster than FULL (2).
-        conn.execute("PRAGMA synchronous = NORMAL")
-        # Larger cache reduces disk I/O for the hot path (accounts, mappings).
-        conn.execute("PRAGMA cache_size = -2000")  # 2MB page cache
+
+        # ── Write PRAGMAs (best-effort) ──────────────────────────────────
+        # All three PRAGMAs below modify the database header. In WSL's /mnt/d/
+        # mount, any write to the SQLite file can fail with
+        # "unable to open database file" (fs translation layer issue).
+        # Also, WAL may report success but fail to create .db-wal/.db-shm,
+        # making subsequent writes fail — so we catch all of them and fall
+        # back to SQLite defaults silently.
+
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError:
+            logger.warning("WAL journal mode unavailable — using default journal mode")
+
+        try:
+            # synchronous=NORMAL (1) is safe with WAL and ~2x faster than FULL (2).
+            conn.execute("PRAGMA synchronous = NORMAL")
+        except sqlite3.OperationalError:
+            logger.warning("synchronous=NORMAL unavailable — using default (FULL)")
+
+        try:
+            # Larger cache reduces disk I/O for the hot path (accounts, mappings).
+            conn.execute("PRAGMA cache_size = -2000")  # 2MB page cache
+        except sqlite3.OperationalError:
+            logger.warning("custom cache_size unavailable — using SQLite default")
         return conn
 
     @contextmanager
@@ -130,7 +146,10 @@ class DatabaseManager:
             # Wait for concurrent writers instead of failing immediately.
             conn.execute("PRAGMA busy_timeout = 10000")
             conn.execute("VACUUM")
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            # WAL checkpoint only valid when WAL mode is active.
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            if mode == "wal":
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             logger.info("Database VACUUM completed — free pages reclaimed")
         finally:
             conn.close()
@@ -310,7 +329,9 @@ class DatabaseManager:
                     request_start TEXT,
                     first_response TEXT,
                     end_time TEXT,
-                    client_key_name TEXT
+                    client_key_name TEXT,
+                    api_key_id INTEGER DEFAULT 0,
+                    error_source TEXT
                 )
             """)
 
