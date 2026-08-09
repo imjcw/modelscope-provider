@@ -261,11 +261,22 @@
 
     <!-- ── 模型用量详情 抽屉 ── -->
     <Drawer v-model="showModelInfoDrawer" :title="`${modelInfoSupplier?.name || ''} · 模型用量`" width="1080px">
-      <!-- 时间范围 -->
-      <div class="flex items-center justify-between mb-4">
-        <span class="text-xs text-ls-muted">
-          共 {{ modelInfoRows.length }} 个模型
-        </span>
+      <!-- 时间范围 + 按 key 筛选 -->
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div class="flex items-center gap-3 flex-wrap">
+          <span class="text-xs text-ls-muted">
+            共 {{ modelInfoRows.length }} 个模型
+          </span>
+          <div v-if="modelInfoSupplier?.api_key_records && modelInfoSupplier.api_key_records.length >= 1"
+               class="flex items-center gap-1">
+            <span class="text-xs text-ls-muted whitespace-nowrap">按 Key</span>
+            <CSelect v-model="modelInfoKeyFilter"
+                     :options="keyFilterOptions"
+                     placeholder="全部 Key"
+                     size="sm"
+                     class="w-40" />
+          </div>
+        </div>
         <SegmentedControl v-model="modelInfoDays" :options="MODEL_INFO_DAYS_OPTIONS" size="sm" />
       </div>
 
@@ -484,6 +495,13 @@ const usedPctRow = (m) => {
   return limit > 0 ? Math.round(((limit - remaining) / limit) * 100) : null
 }
 const modelInfoDays = ref(0)
+const keyFilterOptions = computed(() => {
+  const records = modelInfoSupplier.value?.api_key_records || []
+  return [
+    { label: '全部 Key', value: null },
+    ...records.map(k => ({ label: k.alias || maskKey(k.api_key), value: k.id })),
+  ]
+})
 const fmt = (n) => (n || 0).toLocaleString()
 
 const modelInfoTotalInput = computed(() =>
@@ -517,7 +535,9 @@ const formatCircuitBreakerTime = (seconds) => {
 
 const openModelInfo = (acc) => {
   modelInfoSupplier.value = acc
+  modelInfoKeyFilter.value = null
   showModelInfoDrawer.value = true
+  loadModelQuotas(modelInfoDays.value, null)
 }
 
 // ── Add drawer ──
@@ -698,10 +718,11 @@ const loadData = async () => {
   loading.value = false
 }
 
-// ── 模型用量数据加载（支持时间范围） ──
-const loadModelQuotas = async (days = 0) => {
+// ── 模型用量数据加载（支持时间范围 + 按 key 筛选） ──
+const modelInfoKeyFilter = ref(null) // account_api_keys.id；null = 全部 key
+const loadModelQuotas = async (days = 0, keyId = null) => {
   try {
-    const mqRes = await getModelQuotas(days)
+    const mqRes = await getModelQuotas(days, keyId)
     const map = {}
     for (const mq of (mqRes.data || [])) {
       if (!map[mq.supplier_id]) map[mq.supplier_id] = []
@@ -727,6 +748,9 @@ const loadCircuitBreaker = async () => {
 watch(modelInfoDays, (days) => {
   if (showModelInfoDrawer.value) loadModelQuotas(days)
 })
+watch(modelInfoKeyFilter, () => {
+  if (showModelInfoDrawer.value) loadModelQuotas(modelInfoDays.value, modelInfoKeyFilter.value)
+})
 
 // ── Add (drawer) ──
 const openAdd = async () => {
@@ -741,29 +765,24 @@ const closeAdd = () => {
 }
 
 const addSupplier = async () => {
-  if (!newSupplier.value.name || !newSupplier.value.api_key) {
+  const records = newSupplier.value.api_key_records.filter(r => r.api_key)
+  if (!newSupplier.value.name || records.length === 0) {
     toast('请填写别名和 API Key', 'error')
     return
   }
   adding.value = true
   try {
-    // Ensure primary key is the first record
-    const records = [{ alias: '主密钥', api_key: newSupplier.value.api_key, status: 'active' }]
-    for (const r of newSupplier.value.api_key_records) {
-      if (r.api_key && r.api_key !== newSupplier.value.api_key) {
-        records.push({
-          alias: r.alias || '',
-          api_key: r.api_key,
-          status: r._enabled ? 'active' : 'frozen',
-        })
-      }
-    }
+    // Mark the primary key; keep user-supplied alias, only default to '主密钥' when empty
+    const normalized = records.map((r, i) => ({
+      alias: r.alias || (i === 0 ? '主密钥' : ''),
+      api_key: r.api_key,
+      status: r._enabled ? 'active' : 'frozen',
+    }))
     const res = await apiCreateSupplier({
       name: newSupplier.value.name,
-      api_key: newSupplier.value.api_key,
       base_url: newSupplier.value.base_url,
       provider_type: newSupplier.value.provider_type,
-      api_key_records: records,
+      api_key_records: normalized,
     })
     const supplierId = res.data.id
     // Add models if any

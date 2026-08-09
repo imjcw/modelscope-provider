@@ -641,3 +641,38 @@ class LogRepository:
     # aggregate_window, summarize_window, status_code_breakdown, and
     # per_model_stats have been removed. They were all replaced by the
     # request_stats_minute-based query_* methods above.
+
+    def query_stats_model_aggregate_by_key(
+        self,
+        account_id: str,
+        model: str,
+        key_id: int,
+        start: str,
+        end: str,
+    ) -> tuple:
+        """Aggregate requests + tokens from request_logs filtered by api_key_id.
+
+        ``request_stats_minute`` is not partitioned by key, so per-key stats
+        must be aggregated from the raw log table.
+
+        Returns (input_tokens, output_tokens, cached_tokens, requests, success)
+        consistent with :meth:`query_stats_model_aggregate`.
+        """
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                          COUNT(*) AS requests,
+                          COALESCE(SUM(CASE WHEN status_code IS NOT NULL
+                                            AND status_code < 400 THEN 1 ELSE 0 END), 0) AS success
+                   FROM request_logs
+                   WHERE timestamp >= ? AND timestamp <= ?
+                     AND account_id = ? AND actual_model_id = ?
+                     AND api_key_id = ?""",
+                (start, end, account_id, model, key_id),
+            ).fetchone()
+            return (
+                row["input_tokens"], row["output_tokens"], row["cached_tokens"],
+                row["requests"], row["success"],
+            )

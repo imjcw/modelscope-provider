@@ -79,7 +79,7 @@ class ModelAliasResolver:
 
     async def _fetch_model_id(self, account: ModelScopeAccount, alias: str) -> str:
         """Fetch model ID from ModelScope API."""
-        url = f"{account.base_url}/models/{alias}"
+        url = f"{account.base_url.rstrip('/')}/models/{alias}"
         logger.info(f"Fetching model ID for alias '{alias}' from {account.account_id}")
         try:
             response = await self.http_client.get(
@@ -88,16 +88,32 @@ class ModelAliasResolver:
             )
             response.raise_for_status()
             data = response.json()
-            models = data.get("data", [])
+            # Some providers (e.g. Vercel AI Gateway) return a single model
+            # object instead of OpenAI-standard {"data": [...]}.
+            if isinstance(data, list):
+                models = data
+            elif isinstance(data, dict) and data.get("data"):
+                models = data["data"]
+            elif isinstance(data, dict) and "id" in data:
+                # Single object response
+                return data["id"]
+            else:
+                models = []
             if not models:
                 raise ValueError(f"No models found for alias '{alias}'")
             actual_id = models[0]["id"]
             logger.info(f"Resolved alias '{alias}' to model ID '{actual_id}'")
             return actual_id
         except httpx.HTTPStatusError as e:
-            # If model alias API doesn't exist or returns 404, just use the alias as-is
-            if e.response.status_code == 404:
-                logger.warning(f"Model alias API not found for '{alias}', using as-is")
+            # If model alias API doesn't exist, returns 404, or is blocked
+            # by WAF/Cloudflare (403), just use the alias as-is. Some upstream
+            # providers (e.g. routeway.ai) don't expose a /models/{id} lookup
+            # endpoint at all.
+            if e.response.status_code in (403, 404):
+                logger.warning(
+                    f"Model alias API not available for '{alias}' "
+                    f"({e.response.status_code}), using as-is"
+                )
                 return alias
             logger.error(f"Failed to fetch model ID: {e}")
             raise ValueError(f"Failed to resolve model alias '{alias}': {e.response.status_code}")

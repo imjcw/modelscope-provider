@@ -268,7 +268,6 @@ def refresh_load_balancer(request: Request):
                 accounts.append(ModelScopeAccount(
                     account_id=a["account_id"],
                     name=a.get("name", ""),
-                    api_key=a["api_key"],
                     base_url=a["base_url"],
                     provider_type=a.get("provider_type", DEFAULT_PROVIDER_TYPE),
                     api_key_records=keys_by_id.get(a["id"]) or None,
@@ -634,7 +633,7 @@ async def _try_candidate(
         else:
             body["stream_options"] = {"include_usage": True}
 
-    url = f"{account.base_url.rstrip('/')}/v1/chat/completions"
+    url = f"{account.base_url.rstrip('/')}/chat/completions"
 
     # Make upstream request via the injected http_client service (pooled,
     # handles auth + base_url). stream=... is essential: without it httpx
@@ -647,6 +646,7 @@ async def _try_candidate(
             url,
             json=body,
             stream=request.stream,
+            key_string=api_key,
         )
         first_response = datetime.now(timezone.utc).isoformat()
     except Exception as exc:
@@ -838,18 +838,7 @@ async def chat_completions(data: ChatCompletionRequest, fastapi_request: Request
         model_name = data.model
         request_start = datetime.now(timezone.utc).isoformat()
 
-        # ── Quota pre-check ──
         quota_updater = services.get("quota_updater")
-        if quota_updater is not None and admin_service is not None:
-            try:
-                quota_repo = admin_service.quota_repo
-                has_balance = quota_updater.check_balance(
-                    model_name, quota_repo, fastapi_request, admin_service
-                )
-                if not has_balance:
-                    raise HTTPException(status_code=402, detail="Insufficient balance")
-            except Exception:
-                logger.warning("Failed to check quota", exc_info=True)
 
         circuit_breaker = services.get("circuit_breaker")
         alias_router = services.get("alias_router")

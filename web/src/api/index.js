@@ -79,7 +79,7 @@ export const getAlerts = (days = 7, extra = {}) =>
   api.get('/alerts', { params: { days, ...extra } })
 
 // ── Model Quotas ──
-export const getModelQuotas = (days = 0) => api.get('/model-quota', { params: { days } })
+export const getModelQuotas = (days = 0, keyId = null) => api.get('/model-quota', { params: { days, key_id: keyId } })
 
 // ── Client API Keys ──
 export const getClientKeys = () => api.get('/client-keys')

@@ -267,12 +267,25 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     account_id TEXT NOT NULL UNIQUE,
                     name TEXT NOT NULL DEFAULT '',
-                    api_key TEXT NOT NULL,
                     base_url TEXT NOT NULL,
                     provider_type TEXT NOT NULL DEFAULT 'modelscope',
                     status TEXT NOT NULL DEFAULT 'active',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS account_api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    api_key TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    alias TEXT NOT NULL DEFAULT '',
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(account_id, api_key)
                 )
             """)
 

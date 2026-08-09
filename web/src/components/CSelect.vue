@@ -16,7 +16,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
 const props = defineProps({
   options: { type: Array, required: true },
-  modelValue: { type: [String, Number, Boolean], default: '' },
+  modelValue: { type: [String, Number, Boolean], default: '' }, // null allowed via v-model: "全部 Key" 用 value=null
   placeholder: { type: String, default: '请选择' },
   size: { type: String, default: 'md' },
 })

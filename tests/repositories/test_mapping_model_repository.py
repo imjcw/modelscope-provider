@@ -26,8 +26,8 @@ def test_db():
     sm_repo = SupplierModelRepository(db)
     mapping_repo = MappingRepository(db)
 
-    acc1 = acc_repo.create('Supplier1', 'key1', 'https://api1.test.com')
-    acc2 = acc_repo.create('Supplier2', 'key2', 'https://api2.test.com')
+    acc1 = acc_repo.create('Supplier1', 'https://api1.test.com', api_keys=['key1'])
+    acc2 = acc_repo.create('Supplier2', 'https://api2.test.com', api_keys=['key2'])
     # Verify accounts exist
     assert acc1 is not None
     assert acc2 is not None

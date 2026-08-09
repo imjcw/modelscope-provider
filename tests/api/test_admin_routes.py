@@ -27,7 +27,7 @@ def _list(client):
 def _create(client, name="test-supplier", api_key="ms-test-key",
             base_url="https://api.modelscope.test/v1"):
     return client.post("/api/admin/suppliers", json={
-        "name": name, "api_key": api_key,
+        "name": name, "api_keys": [api_key],
         "base_url": base_url,
     }).json()
 
@@ -42,7 +42,7 @@ def test_list_suppliers(client):
 def test_create_supplier(client):
     name = _tid("create")
     r = client.post("/api/admin/suppliers", json={
-        "name": name, "api_key": "ms-test-key",
+        "name": name, "api_keys": ["ms-test-key"],
         "base_url": "https://api.modelscope.test/v1",
     })
     assert r.status_code == 200
@@ -56,7 +56,7 @@ def test_create_supplier(client):
 def test_create_supplier_duplicate_name_returns_409(client):
     name = _tid("dup")
     payload = {
-        "name": name, "api_key": "k1", "base_url": "https://u/v1",
+        "name": name, "api_keys": ["k1"], "base_url": "https://u/v1",
     }
     client.post("/api/admin/suppliers", json=payload)
     r = client.post("/api/admin/suppliers", json=payload)

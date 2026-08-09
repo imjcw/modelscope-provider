@@ -1,6 +1,7 @@
 """Admin service for the management panel."""
 import datetime
-from datetime import timezone as _utc
+from datetime import timezone as _UTC_TZ
+_UTC = _UTC_TZ.utc
 import logging
 import uuid
 
@@ -71,19 +72,16 @@ class AdminService:
         return s
 
     def _enrich_api_keys(self, supplier: dict) -> None:
-        """Add api_keys list and api_key_records to supplier dict from account_api_keys table."""
+        """Add api_keys list and api_key_records to supplier dict from account_api_keys table.
+
+        The legacy ``accounts.api_key`` column no longer exists (migration 023);
+        all keys live in ``account_api_keys`` and are returned as-is.
+        """
         if self.account_repo is None:
-            supplier["api_keys"] = [supplier.get("api_key", "")]
-            supplier["api_key_records"] = [
-                {"id": 0, "account_id": supplier["id"], "api_key": supplier.get("api_key", ""), "status": "active", "alias": "主密钥", "created_at": None, "updated_at": None}
-            ]
+            supplier["api_keys"] = []
+            supplier["api_key_records"] = []
             return
         records = self.account_repo.find_all_api_keys(supplier["id"])
-        # Ensure the primary api_key is always first in records
-        primary = supplier.get("api_key", "")
-        primary_in_records = any(r["api_key"] == primary for r in records)
-        if primary and not primary_in_records:
-            records.insert(0, {"id": 0, "account_id": supplier["id"], "api_key": primary, "status": "active", "alias": "主密钥", "created_at": None, "updated_at": None})
         supplier["api_keys"] = [r["api_key"] for r in records]
         supplier["api_key_records"] = records
 
@@ -108,19 +106,46 @@ class AdminService:
             supplier.setdefault("quota_remaining", 0)
             supplier.setdefault("quota_limit", 0)
 
-    def create_supplier(self, name: str, api_key: str,
-                        base_url: str, provider_type: str = DEFAULT_PROVIDER_TYPE,
+    @staticmethod
+    def _extract_keys(entry: dict) -> list:
+        """Extract the list of API key strings from a supplier dict.
+
+        Prefers the structured ``api_key_records`` (preserves status/alias),
+        then ``api_keys``, then falls back to a single legacy ``api_key`` for
+        backward compatibility with older exports.
+        """
+        records = entry.get("api_key_records")
+        if records:
+            return [r.get("api_key", "").strip() for r in records
+                    if r.get("api_key", "").strip()]
+        keys = [k.strip() for k in (entry.get("api_keys") or []) if k and k.strip()]
+        if keys:
+            return keys
+        single = (entry.get("api_key") or "").strip()
+        return [single] if single else []
+
+    def create_supplier(self, name: str, base_url: str,
+                        provider_type: str = DEFAULT_PROVIDER_TYPE,
                         api_keys: list = None, api_key_records: list = None) -> dict:
-        created = self.account_repo.create(name, api_key, base_url,
-                                           provider_type=provider_type)
-        if api_key_records is not None and self.account_repo is not None:
-            self.account_repo.replace_api_keys_with_records(created["id"], api_key_records)
-        elif api_keys is not None and self.account_repo is not None:
-            all_keys = [api_key] + api_keys
-            self.account_repo.replace_api_keys(created["id"], all_keys)
-        else:
-            self.account_repo.replace_api_keys(created["id"], [api_key])
-        return created
+        """Create a supplier. Requires at least one API key (stored in account_api_keys)."""
+        if api_key_records:
+            keys = [r.get("api_key", "").strip() for r in api_key_records
+                    if r.get("api_key", "").strip()]
+            created = self.account_repo.create(
+                name, base_url, provider_type=provider_type, api_keys=keys
+            )
+            if self.account_repo is not None:
+                self.account_repo.replace_api_keys_with_records(
+                    created["id"], api_key_records
+                )
+            return created
+
+        keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
+        if not keys:
+            raise ValueError("At least one API key is required")
+        return self.account_repo.create(
+            name, base_url, provider_type=provider_type, api_keys=keys
+        )
 
     def update_supplier(self, supplier_id: int, **kwargs) -> dict:
         api_keys = kwargs.pop("api_keys", None)
@@ -307,7 +332,7 @@ class AdminService:
                 key_records = self.account_repo.find_api_keys(sup["id"])
             result.append({
                 "name": sup.get("name", ""),
-                "api_key": sup.get("api_key", ""),
+                "api_key": (key_records[0]["api_key"] if key_records else ""),
                 "base_url": sup.get("base_url", ""),
                 "provider_type": sup.get("provider_type", DEFAULT_PROVIDER_TYPE),
                 "status": sup.get("status", "active"),
@@ -340,7 +365,7 @@ class AdminService:
                 key_records = self.account_repo.find_api_keys(sup["id"])
             supplier_list.append({
                 "name": sup.get("name", ""),
-                "api_key": sup.get("api_key", ""),
+                "api_key": (key_records[0]["api_key"] if key_records else ""),
                 "base_url": sup.get("base_url", ""),
                 "provider_type": sup.get("provider_type", DEFAULT_PROVIDER_TYPE),
                 "status": sup.get("status", "active"),
@@ -411,15 +436,16 @@ class AdminService:
             try:
                 # ── Validate required fields ──
                 name = entry.get("name", "").strip()
-                api_key = entry.get("api_key", "").strip()
                 base_url = entry.get("base_url", "").strip()
-                if not name or not api_key or not base_url:
-                    raise ValueError("缺少必填字段 name / api_key / base_url")
+                # Keys can come from api_key_records / api_keys / legacy api_key.
+                api_key_records = entry.get("api_key_records")
+                keys = self._extract_keys(entry)
+                if not name or not base_url or not keys:
+                    raise ValueError("缺少必填字段 name / base_url / 至少一个 api_key")
 
                 status = entry.get("status", "active")
                 provider_type = entry.get("provider_type", DEFAULT_PROVIDER_TYPE)
                 models = entry.get("models", [])
-                api_key_records = entry.get("api_key_records")
 
                 # ── Check for duplicate by name ──
                 existing = self.account_repo.find_by_name(name)
@@ -430,7 +456,6 @@ class AdminService:
                     elif strategy == "overwrite":
                         self.account_repo.update(
                             existing["id"],
-                            api_key=api_key,
                             base_url=base_url,
                             status=status,
                             provider_type=provider_type,
@@ -438,7 +463,7 @@ class AdminService:
                         if api_key_records and self.account_repo is not None:
                             self.account_repo.replace_api_keys_with_records(existing["id"], api_key_records)
                         elif self.account_repo is not None:
-                            self.account_repo.replace_api_keys(existing["id"], [api_key])
+                            self.account_repo.replace_api_keys(existing["id"], keys)
                         if self.supplier_model_repo is not None and isinstance(models, list):
                             self._safe_bulk_models(existing["id"], models)
                         stats["suppliers"]["updated"] += 1
@@ -448,13 +473,12 @@ class AdminService:
 
                 # ── Create new supplier ──
                 created = self.account_repo.create(
-                    name=name, api_key=api_key, base_url=base_url,
+                    name=name, base_url=base_url,
                     status=status, provider_type=provider_type,
+                    api_keys=keys,
                 )
                 if api_key_records and self.account_repo is not None:
                     self.account_repo.replace_api_keys_with_records(created["id"], api_key_records)
-                elif self.account_repo is not None:
-                    self.account_repo.replace_api_keys(created["id"], [api_key])
                 if self.supplier_model_repo is not None and isinstance(models, list):
                     self._safe_bulk_models(created["id"], models)
                 stats["suppliers"]["created"] += 1
@@ -683,7 +707,7 @@ class AdminService:
         # project timezone (Asia/Shanghai) here would shift the cutoff +8h and
         # wrongly delete all logs from the last 8 hours.
         cutoff = (
-            datetime.datetime.now(_utc)
+            datetime.datetime.now(_UTC)
             - datetime.timedelta(hours=hours)
         ).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -692,6 +716,11 @@ class AdminService:
             logger.info(
                 "Cleaned up %d log entries older than %s (retention=%sh)",
                 deleted, cutoff, raw,
+            )
+        else:
+            logger.info(
+                "Log cleanup: nothing to clean (cutoff=%s, retention=%sh)",
+                cutoff, raw,
             )
             # SQLite DELETE 只把页标记为空闲，文件不会变小；
             # 删除后执行 VACUUM 才能真正回收磁盘空间。
@@ -1067,7 +1096,7 @@ class AdminService:
         except Exception:
             return {}
 
-    def get_model_quotas(self, days: int = 0):
+    def get_model_quotas(self, days: int = 0, key_id: int | None = None):
         """Get model-level quota info by supplier + model.
 
         Reads from model_quotas table (populated from modelscope-ratelimit-model-requests-* headers).
@@ -1077,6 +1106,10 @@ class AdminService:
             days: 0 = today only, otherwise past N days. When >0, token usage
                   and success rate are aggregated from the stats table over the
                   requested range instead of from model_quotas cumulative fields.
+            key_id: when truthy, filter request stats by this api_key_id (from
+                    ``account_api_keys``). Quota / window / unavailability data
+                    remain per-model; only token counts, request counts and
+                    success rate are key-scoped.
 
         Returns a list of dicts:
         - supplier_id, supplier_name, account_id
@@ -1235,20 +1268,32 @@ class AdminService:
                     _inp, _out, _cached = self._get_today_token_usage(account_id, model_name)
                     today_cached = _cached or today_cached
 
-                # 按时间范围查询请求数/成功数/成功率（stats 表）
+                # 按时间范围查询请求数/成功数/成功率（stats 表）；
+                # 当指定 key_id 时改用 request_logs 按该 key 聚合
+                # （request_stats_minute 不区分 key）。
                 _requests = 0
                 _success = 0
                 _success_rate = None
+                _inp_s = _out_s = _cached_s = 0
                 try:
-                    _inp_s, _out_s, _cached_s, _req_s, _suc_s = self.log_repo.query_stats_model_aggregate(
-                        account_id, model_name, _range_start, _range_end,
-                    )
+                    if key_id:
+                        _inp_s, _out_s, _cached_s, _req_s, _suc_s = \
+                            self.log_repo.query_stats_model_aggregate_by_key(
+                                account_id, model_name, key_id,
+                                _range_start, _range_end,
+                            )
+                    else:
+                        _inp_s, _out_s, _cached_s, _req_s, _suc_s = \
+                            self.log_repo.query_stats_model_aggregate(
+                                account_id, model_name, _range_start, _range_end,
+                            )
                     _requests = _req_s
                     _success = _suc_s
                     _success_rate = round(_suc_s / _req_s * 100, 1) if _req_s else None
                 except Exception:
                     pass
-                # days>0 时 token 用量也改为按范围聚合（取代 model_quota 的累计值）
+                # 指定 key 时：token 用量永远取按 key 聚合的结果（忽略 model_quotas 累计值）
+                # days>0 时：token 用量也改为按范围聚合（取代 model_quota 的累计值）
                 if days and days > 0:
                     today_input = _inp_s
                     today_output = _out_s

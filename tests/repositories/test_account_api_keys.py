@@ -17,13 +17,13 @@ def repo(database):
 
 def test_no_extra_keys_returns_one(repo):
     """An account with only its primary key counts as 1."""
-    acc = repo.create(name="Single", api_key="k1", base_url="http://x")
+    acc = repo.create(name="Single", api_keys=["k1"], base_url="http://x")
     assert repo.count_active_keys(acc["account_id"]) == 1
 
 
 def test_counts_active_keys(repo):
     """Extra active keys increase the count."""
-    acc = repo.create(name="Multi", api_key="k1", base_url="http://x")
+    acc = repo.create(name="Multi", api_keys=["k1"], base_url="http://x")
     repo.add_api_key(acc["id"], "k2")
     repo.add_api_key(acc["id"], "k3")
     assert repo.count_active_keys(acc["account_id"]) == 3
@@ -31,7 +31,7 @@ def test_counts_active_keys(repo):
 
 def test_frozen_keys_not_counted(repo):
     """Frozen keys are excluded from the multiplier."""
-    acc = repo.create(name="Frozen", api_key="k1", base_url="http://x")
+    acc = repo.create(name="Frozen", api_keys=["k1"], base_url="http://x")
     k2 = repo.add_api_key(acc["id"], "k2")
     repo.update_api_key_status(k2["id"], "frozen")
     assert repo.count_active_keys(acc["account_id"]) == 1
@@ -44,8 +44,8 @@ def test_unknown_account_returns_one(repo):
 
 def test_accounts_isolated(repo):
     """Key counts are per-account, not global."""
-    a = repo.create(name="A", api_key="ka", base_url="http://x")
-    b = repo.create(name="B", api_key="kb", base_url="http://x")
+    a = repo.create(name="A", api_keys=["ka"], base_url="http://x")
+    b = repo.create(name="B", api_keys=["kb"], base_url="http://x")
     repo.add_api_key(a["id"], "ka2")
     assert repo.count_active_keys(a["account_id"]) == 2
     assert repo.count_active_keys(b["account_id"]) == 1

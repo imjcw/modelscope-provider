@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # When imported as a module (e.g. via uvicorn), use 'provider.' prefix;
@@ -26,18 +26,25 @@ except ImportError:
     from api.openai_routes import router
     from api.admin_routes import router as admin_router
 import logging
+import logging.handlers
 
-# Configure logging: write to file (append) + console.
-# Log directory / file / level are overridable via env vars (LOG_DIR, LOG_FILE,
-# LOG_LEVEL) so the process can run in read-only or containerized environments.
+# Configure logging: write to file (rotating, max 5MB per file, keep 5 backups)
+# + console. Log directory / file / level are overridable via env vars (LOG_DIR,
+# LOG_FILE, LOG_LEVEL) so the process can run in read-only or containerized
+# environments.
 log_dir = Path(os.getenv("LOG_DIR", str(Path(__file__).parent / "logs")))
 log_dir.mkdir(exist_ok=True)
+_log_file = os.getenv("LOG_FILE", str(log_dir / "ai_router.log"))
+_log_max_bytes = int(os.getenv("LOG_MAX_BYTES", "5242880"))  # 5 MB
+_log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))  # keep 5 archives
 logging.basicConfig(
     level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.FileHandler(
-            os.getenv("LOG_FILE", str(log_dir / "modelscope_provider.log")),
+        logging.handlers.RotatingFileHandler(
+            _log_file,
+            maxBytes=_log_max_bytes,
+            backupCount=_log_backup_count,
             encoding="utf-8",
         ),
         logging.StreamHandler(sys.stdout),
@@ -226,6 +233,9 @@ def create_app():
 
     # Include API routes
     app.include_router(router, prefix="/openai", tags=["OpenAI"])
+    # Backward-compatible mount: the pre-2026-08 API used the /api prefix
+    # (e.g. /api/v1/chat/completions). Keep it working for existing clients.
+    app.include_router(router, prefix="/api", tags=["OpenAI-legacy"])
     app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 
     # Disable cache for static assets (dev convenience — prevents browser caching old JS)
@@ -253,6 +263,12 @@ def create_app():
             )
         return await call_next(request)
 
+    # Root redirect to frontend
+    @app.get("/")
+    def root_redirect():
+        """Redirect root to the web dashboard."""
+        return RedirectResponse(url="/web/")
+
     # Health check — root-level endpoint
     @app.get("/health")
     def health_check():
@@ -260,7 +276,10 @@ def create_app():
         return {"status": "healthy", "version": "0.2.0"}
 
     # Serve static frontend files (no cache in dev for hot refresh)
-    dist_dir = Path(__file__).parent / "web" / "dist"
+    if getattr(sys, "frozen", False):
+        dist_dir = Path(sys._MEIPASS) / "web" / "dist"
+    else:
+        dist_dir = Path(__file__).parent / "web" / "dist"
     if dist_dir.exists():
         # SPA fallback: in history mode, unknown paths should render index.html
         # so refreshing /web/logs etc. doesn't 404. Static assets under

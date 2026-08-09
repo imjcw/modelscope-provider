@@ -28,8 +28,26 @@ class MockAccountRepo:
         return {id: self._accounts[id] for id in ids if id in self._accounts}
 
     def find_api_keys_by_account_ids(self, ids):
-        """Batch multi-key mock — returns dict mapping id -> [records]."""
-        return {id: self._api_keys[id] for id in ids if id in self._api_keys}
+        """Batch multi-key mock — returns dict mapping id -> [records].
+
+        Records come from the explicitly provided ``api_keys`` map, or are
+        derived from each account's ``api_key`` (simulating the account_api_keys
+        table) so accounts without keys are correctly skipped.
+        """
+        result = {}
+        for id in ids:
+            if id in self._api_keys:
+                result[id] = self._api_keys[id]
+            elif id in self._accounts:
+                ak = self._accounts[id].get("api_key")
+                if ak:
+                    # Mirror the legacy primary-key record (id=0) so inflight
+                    # tracking keyed on key_id=0 still lines up in tests.
+                    result[id] = [{
+                        "id": 0, "account_id": id, "api_key": ak,
+                        "status": "active", "alias": "主密钥",
+                    }]
+        return result
 
 
 class MockQuotaRepo:

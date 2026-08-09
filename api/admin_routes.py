@@ -58,16 +58,14 @@ def _refresh_after_account_change(request: Request):
 
 class SupplierCreate(BaseModel):
     name: str = Field(..., description="Supplier display name")
-    api_key: str = Field(..., description="API key")
     base_url: str = Field(..., description="Provider base URL")
     provider_type: str = Field(default=DEFAULT_PROVIDER_TYPE, description="Provider type: modelscope, sensetime")
-    api_keys: List[str] = Field(default_factory=list, description="Additional API keys for rotation")
+    api_keys: List[str] = Field(default_factory=list, description="API keys (stored in account_api_keys)")
     api_key_records: List[dict] = Field(default_factory=list, description="API key records with status (id, api_key, status)")
 
 
 class SupplierUpdate(BaseModel):
     name: Optional[str] = None
-    api_key: Optional[str] = None
     base_url: Optional[str] = None
     status: Optional[str] = None
     provider_type: Optional[str] = None
@@ -277,9 +275,10 @@ def get_supplier(supplier_id: int, service=Depends(get_admin_service)):
 @router.post("/suppliers")
 def create_supplier(body: SupplierCreate, request: Request, service=Depends(get_admin_service)):
     try:
+        if not body.api_keys and not body.api_key_records:
+            raise HTTPException(status_code=422, detail="至少需要提供一个 API key（api_keys 或 api_key_records）")
         result = service.create_supplier(
             name=body.name,
-            api_key=body.api_key,
             base_url=body.base_url,
             provider_type=body.provider_type,
             api_keys=body.api_keys,
@@ -287,6 +286,8 @@ def create_supplier(body: SupplierCreate, request: Request, service=Depends(get_
         )
         _refresh_after_account_change(request)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         if "UNIQUE constraint" in str(e):
             raise HTTPException(status_code=409, detail=f"供应商 {body.name} 已存在")
@@ -681,13 +682,21 @@ def get_window_stats(seconds: int = 300, service=Depends(get_admin_service)):
 # ── Model Quotas ──────────────────────────────────────────────────────────────
 
 @router.get("/model-quota")
-def get_model_quotas(days: int = 0, service=Depends(get_admin_service)):
+def get_model_quotas(
+    days: int = 0,
+    key_id: int | None = None,
+    service=Depends(get_admin_service),
+):
     """Get model-level quota info aggregated by supplier + model.
 
-    days (default 0 = today) controls the time range used for the
-    request success rate and per-range token usage.
+    days (default 0 = today) controls the time range used for the request
+    success rate and per-range token usage.
+
+    key_id: when set, scope request stats (token counts, request counts and
+    success rate) to a single ``account_api_keys.id`` within the supplier.
+    Quota/window/unavailability data remain per-model.
     """
-    return service.get_model_quotas(days=days)
+    return service.get_model_quotas(days=days, key_id=key_id)
 
 
 # ── Alerts ──────────────────────────────────────────────────────────────────
@@ -878,9 +887,13 @@ def get_client_key_stats(key_id: int, days: int = 30, service=Depends(get_admin_
 
 @router.get("/client-keys/{key_id}/docs")
 def get_client_key_docs(key_id: int, request: Request, service=Depends(get_admin_service)):
-    """Return integration meta-data for a specific client API key (rendered in frontend)."""
+    """Return integration meta-data for a specific client API key (rendered in frontend).
+
+    The canonical proxy prefix is ``/openai`` (e.g. ``/openai/v1/chat/completions``).
+    ``/api`` remains mounted as a backward-compatible alias for existing clients.
+    """
     prefix = f"{request.url.scheme}://{request.url.netloc}"
-    base_url = prefix + "/api/v1"
+    base_url = prefix + "/openai/v1"
     docs = service.get_key_docs(key_id=key_id, base_url=base_url)
     if not docs:
         raise HTTPException(status_code=404, detail="Client key not found")

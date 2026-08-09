@@ -16,7 +16,7 @@ def sample_supplier(database, supplier_model_repo):
     acc_repo = AccountRepository(database)
     return acc_repo.create(
         name="test-supplier",
-        api_key="ms-test-key",
+        api_keys=["ms-test-key"],
         base_url="https://api.modelscope.test/v1",
     )
 

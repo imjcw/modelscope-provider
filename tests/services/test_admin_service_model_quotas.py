@@ -43,7 +43,7 @@ def svc(database):
 
     acc = account_repo.create(
         name="Supplier A",
-        api_key="k",
+        api_keys=["k"],
         base_url="http://x",
         provider_type="pt-per-model",
     )
@@ -104,7 +104,7 @@ def test_no_strategy_instance_yields_none_window_fields(svc, database):
     supplier_model_repo = SupplierModelRepository(database)
     acc = account_repo.create(
         name="Supplier B",
-        api_key="k2",
+        api_keys=["k2"],
         base_url="http://y",
         provider_type="modelscope",
     )
@@ -125,7 +125,7 @@ def test_multi_key_scales_window_limit(svc, database):
     supplier_model_repo = SupplierModelRepository(database)
     acc = account_repo.create(
         name="Supplier MultiKey",
-        api_key="k1",
+        api_keys=["k1"],
         base_url="http://x",
         provider_type="pt-per-model",
     )
@@ -160,7 +160,7 @@ def test_frozen_keys_not_counted(svc, database):
     supplier_model_repo = SupplierModelRepository(database)
     acc = account_repo.create(
         name="Supplier Frozen",
-        api_key="k1",
+        api_keys=["k1"],
         base_url="http://x",
         provider_type="pt-per-model",
     )

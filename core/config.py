@@ -83,7 +83,6 @@ class ConfigManager:
             accounts.append(ModelScopeAccount(
                 account_id=a["account_id"],
                 name=a.get("name", ""),
-                api_key=a["api_key"],
                 base_url=a["base_url"],
                 provider_type=a.get("provider_type", DEFAULT_PROVIDER_TYPE),
                 api_key_records=keys_by_id.get(a["id"]) or None,

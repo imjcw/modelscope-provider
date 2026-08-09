@@ -69,24 +69,45 @@ class AccountRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    def create(self, name: str, api_key: str, base_url: str,
-               status: str = "active", provider_type: str = DEFAULT_PROVIDER_TYPE) -> dict:
-        """Create a new account. account_id is auto-generated as UUID."""
+    def create(self, name: str, base_url: str,
+               status: str = "active", provider_type: str = DEFAULT_PROVIDER_TYPE,
+               api_keys: Optional[List[str]] = None) -> dict:
+        """Create a new account. account_id is auto-generated as UUID.
+
+        All API keys are stored in ``account_api_keys`` (the legacy single
+        ``accounts.api_key`` column was dropped in migration 023). At least one
+        key is required; the first key is flagged as the primary ("主密钥").
+        """
+        keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
+        if not keys:
+            raise ValueError("At least one API key is required")
         account_id = uuid.uuid4().hex
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                """INSERT INTO accounts (account_id, name, api_key, base_url, provider_type, status)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (account_id, name, api_key, base_url, provider_type, status),
+                """INSERT INTO accounts (account_id, name, base_url, provider_type, status)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (account_id, name, base_url, provider_type, status),
             )
+            new_id = cursor.lastrowid
+            for sort_order, key in enumerate(keys):
+                conn.execute(
+                    "INSERT INTO account_api_keys "
+                    "(account_id, api_key, status, alias, sort_order) VALUES (?, ?, 'active', ?, ?)",
+                    (new_id, key, "主密钥" if sort_order == 0 else "", sort_order),
+                )
             conn.commit()
-            result = self.find_by_id(cursor.lastrowid)
-            logger.info(f"Created account {account_id} (name={name}, id={cursor.lastrowid})")
+            result = self.find_by_id(new_id)
+            logger.info(f"Created account {account_id} (name={name}, id={new_id})")
             return result
 
     def update(self, account_id: int, **kwargs) -> Optional[dict]:
-        """Update account fields."""
-        allowed = {"api_key", "base_url", "status", "account_id", "name", "provider_type"}
+        """Update account fields.
+
+        API keys are managed via the dedicated account_api_keys endpoints
+        (add/update/delete API key), not through this method.
+        """
+        # NOTE: "api_key" removed — the column no longer exists (migration 023).
+        allowed = {"base_url", "status", "account_id", "name", "provider_type"}
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
             return None
@@ -118,50 +139,25 @@ class AccountRepository:
     # ── Account API Keys (multi-key support) ──
 
     def find_api_keys(self, account_id: int) -> List[dict]:
-        """Get all API keys for an account, including the primary key from accounts table."""
+        """Get all API keys for an account from account_api_keys."""
         with self.db.get_connection() as conn:
-            # Get the primary key from accounts table
-            row = conn.execute("SELECT api_key, id FROM accounts WHERE id = ?", (account_id,)).fetchone()
-            primary_key = row["api_key"] if row else None
-            # Get all keys from account_api_keys table, preserving user-defined order
             cursor = conn.execute(
                 "SELECT * FROM account_api_keys WHERE account_id = ? ORDER BY sort_order, id",
                 (account_id,),
             )
-            keys = [dict(r) for r in cursor.fetchall()]
-            # Ensure the primary key is always included
-            if primary_key:
-                primary_in_keys = any(k["api_key"] == primary_key for k in keys)
-                if not primary_in_keys:
-                    keys.insert(0, {
-                        "id": 0,
-                        "account_id": account_id,
-                        "api_key": primary_key,
-                        "status": "active",
-                        "alias": "主密钥",
-                        "created_at": None,
-                        "updated_at": None,
-                    })
-            return keys
+            return [dict(r) for r in cursor.fetchall()]
 
     def find_api_keys_by_account_ids(self, ids: List[int]) -> Dict[int, List[dict]]:
         """Batch variant of :meth:`find_api_keys` for multiple accounts.
 
-        Returns ``{id(int): [key_record, ...]}`` with the primary key injected at
-        the front when missing, matching ``find_api_keys`` semantics. Uses two
-        queries (accounts + account_api_keys) instead of N to avoid per-candidate
-        round-trips on the request hot path.
+        Returns ``{id(int): [key_record, ...]}`` from account_api_keys, using two
+        queries instead of N to avoid per-candidate round-trips on the request
+        hot path.
         """
         if not ids:
             return {}
         with self.db.get_connection() as conn:
             placeholders = ",".join("?" * len(ids))
-            primaries: Dict[int, str] = {}
-            for row in conn.execute(
-                f"SELECT id, api_key FROM accounts WHERE id IN ({placeholders})", ids
-            ):
-                primaries[row["id"]] = row["api_key"]
-
             keys_by_acc: Dict[int, List[dict]] = {i: [] for i in ids}
             cursor = conn.execute(
                 f"SELECT * FROM account_api_keys WHERE account_id IN ({placeholders}) "
@@ -170,23 +166,7 @@ class AccountRepository:
             )
             for row in cursor.fetchall():
                 keys_by_acc.setdefault(row["account_id"], []).append(dict(row))
-
-        result: Dict[int, List[dict]] = {}
-        for acc_id in ids:
-            keys = keys_by_acc.get(acc_id, [])
-            primary = primaries.get(acc_id)
-            if primary and not any(k["api_key"] == primary for k in keys):
-                keys.insert(0, {
-                    "id": 0,
-                    "account_id": acc_id,
-                    "api_key": primary,
-                    "status": "active",
-                    "alias": "主密钥",
-                    "created_at": None,
-                    "updated_at": None,
-                })
-            result[acc_id] = keys
-        return result
+        return keys_by_acc
 
     def replace_api_keys(self, account_id: int, keys: List[str]) -> None:
         """Replace all API keys for an account.
@@ -265,28 +245,13 @@ class AccountRepository:
         return max(1, sum(1 for k in keys if k.get("status", "active") != "frozen"))
 
     def find_all_api_keys(self, account_id: int) -> List[dict]:
-        """Get all API keys (including frozen) for an account, including the primary key."""
+        """Get all API keys (including frozen) for an account from account_api_keys."""
         with self.db.get_connection() as conn:
-            row = conn.execute("SELECT api_key, id FROM accounts WHERE id = ?", (account_id,)).fetchone()
-            primary_key = row["api_key"] if row else None
             cursor = conn.execute(
                 "SELECT * FROM account_api_keys WHERE account_id = ? ORDER BY sort_order, id",
                 (account_id,),
             )
-            keys = [dict(r) for r in cursor.fetchall()]
-            if primary_key:
-                primary_in_keys = any(k["api_key"] == primary_key for k in keys)
-                if not primary_in_keys:
-                    keys.insert(0, {
-                        "id": 0,
-                        "account_id": account_id,
-                        "api_key": primary_key,
-                        "status": "active",
-                        "alias": "主密钥",
-                        "created_at": None,
-                        "updated_at": None,
-                    })
-            return keys
+            return [dict(r) for r in cursor.fetchall()]
 
     def add_api_key(self, account_id: int, api_key: str) -> dict:
         """Add a new API key for an account."""

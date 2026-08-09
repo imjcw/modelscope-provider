@@ -110,17 +110,12 @@ class AliasRouter:
             if model_name in unavailable_map.get(account_dict["account_id"], set()):
                 continue
 
-            # 获取该账号的 Key 记录；若无则用主 Key 构造虚拟记录
+            # 获取该账号的 Key 记录（全部来自 account_api_keys 表）
             key_records = keys_by_id.get(entry["supplier_id"])
             if not key_records:
-                # 没有 account_api_keys 记录 → 用主 Key 作为唯一候选
-                key_records = [{
-                    "id": 0,
-                    "account_id": entry["supplier_id"],
-                    "api_key": account_dict["api_key"],
-                    "status": "active",
-                    "alias": "主密钥",
-                }]
+                # 没有 account_api_keys 记录 → 该账号无可用 Key，跳过
+                # （accounts.api_key 列已废弃并删除，主键统一存于 account_api_keys）
+                continue
 
             # 每个活跃 Key 展开为一个独立候选
             for kr in key_records:
@@ -164,7 +159,6 @@ class AliasRouter:
         return ModelScopeAccount(
             account_id=account_dict["account_id"],
             name=account_dict.get("name", ""),
-            api_key=account_dict["api_key"],
             base_url=account_dict["base_url"],
             provider_type=account_dict.get("provider_type", DEFAULT_PROVIDER_TYPE),
             api_key_records=key_records,

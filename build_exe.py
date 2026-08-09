@@ -74,12 +74,15 @@ def build_exe():
         "--add-data", add_data_migrations,
         "--collect-all", "uvicorn",
         "--collect-all", "PIL",
+        "--collect-all", "pywin32",
+        "--collect-all", "win32com",
         "--collect-submodules", "core.migrations.migrations",
         "--hidden-import", "main",
         "--hidden-import", "multiprocessing",
         "--hidden-import", "win32gui",
         "--hidden-import", "win32api",
         "--hidden-import", "win32con",
+        "--hidden-import", "yaml",
         str(ROOT / "run.py"),
     ]
 
