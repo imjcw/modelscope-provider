@@ -56,8 +56,8 @@
               <!-- 操作 -->
               <td>
                 <div class="flex items-center justify-end gap-1">
-                  <IconButton icon="edit" title="编辑" padded @click="openEdit(m)" />
-                  <IconButton icon="trash" title="删除" tone="danger" padded @click="openDeleteConfirm(m)" />
+                  <IconButton icon="edit" title="编辑" aria-label="编辑" padded @click="openEdit(m)" />
+                  <IconButton icon="trash" title="删除" aria-label="删除" tone="danger" padded @click="openDeleteConfirm(m)" />
                 </div>
               </td>
             </tr>

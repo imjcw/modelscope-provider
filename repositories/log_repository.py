@@ -63,7 +63,8 @@ class LogRepository:
                cached_tokens: int = 0, prompt_partial_cached: int = 0,
                client_key_name: str = None,
                response_headers: str = None,
-               api_key_id: int = 0) -> int:
+               api_key_id: int = 0,
+               error_source: str = None) -> int:
         """Insert a log entry."""
         with self.db.get_connection() as conn:
             cursor = conn.execute(
@@ -73,14 +74,14 @@ class LogRepository:
                     error_message, raw_request, raw_response,
                     request_start, first_response, end_time,
                     cached_tokens, prompt_partial_cached,
-                    client_key_name, response_headers, api_key_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    client_key_name, response_headers, api_key_id, error_source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (request_id, model, actual_model_id, account_id, account_name, status_code,
                  input_tokens, output_tokens, latency_ms, is_stream,
                  error_message, raw_request, raw_response,
                  request_start, first_response, end_time,
                  cached_tokens, prompt_partial_cached,
-                 client_key_name, response_headers, api_key_id),
+                 client_key_name, response_headers, api_key_id, error_source),
             )
             return cursor.lastrowid
 

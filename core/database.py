@@ -42,6 +42,11 @@ class DatabaseManager:
         self._conn_pool: "Queue[sqlite3.Connection]" = Queue(maxsize=10)
         self._pool_max = 10
 
+        # Decide journal mode once up-front via a real write probe (see
+        # _probe_journal_mode). Trusting the reported PRAGMA result alone is
+        # not enough on WSL /mnt/ DrvFs mounts, so this runs a real write.
+        self._journal_mode = self._probe_journal_mode()
+
     def _new_connection(self) -> sqlite3.Connection:
         """Open a new sqlite3 connection with the project's PRAGMAs applied."""
         conn = sqlite3.connect(self.db_url, check_same_thread=False)
@@ -54,24 +59,33 @@ class DatabaseManager:
         # (e.g. SELECT inside a write block, or nested repository calls).
         conn.execute("PRAGMA busy_timeout = 5000")
 
-        # ── Write PRAGMAs (best-effort) ──────────────────────────────────
+        # ── Write PRAGMAs (best-effort, WAL probed up-front) ────────────────
         # All three PRAGMAs below modify the database header. In WSL's /mnt/d/
         # mount, any write to the SQLite file can fail with
         # "unable to open database file" (fs translation layer issue).
         # Also, WAL may report success but fail to create .db-wal/.db-shm,
-        # making subsequent writes fail — so we catch all of them and fall
-        # back to SQLite defaults silently.
+        # making subsequent writes fail — so the journal mode was already
+        # verified with a real write probe in __init__, and every write here
+        # falls back to SQLite defaults silently.
 
-        try:
-            conn.execute("PRAGMA journal_mode = WAL")
-        except sqlite3.OperationalError:
-            logger.warning("WAL journal mode unavailable — using default journal mode")
-
-        try:
-            # synchronous=NORMAL (1) is safe with WAL and ~2x faster than FULL (2).
-            conn.execute("PRAGMA synchronous = NORMAL")
-        except sqlite3.OperationalError:
-            logger.warning("synchronous=NORMAL unavailable — using default (FULL)")
+        if self._journal_mode == "wal":
+            try:
+                conn.execute("PRAGMA journal_mode = WAL")
+            except sqlite3.OperationalError:
+                logger.warning("WAL journal mode unavailable — using default journal mode")
+            try:
+                # synchronous=NORMAL (1) is safe with WAL and ~2x faster than FULL (2).
+                conn.execute("PRAGMA synchronous = NORMAL")
+            except sqlite3.OperationalError:
+                logger.warning("synchronous=NORMAL unavailable — using default (FULL)")
+        else:
+            # File lives on a mount where WAL is unreliable (e.g. WSL DrvFs).
+            # Make sure we're in DELETE mode, not a leftover half-WAL header.
+            try:
+                if conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+                    conn.execute("PRAGMA journal_mode = DELETE")
+            except sqlite3.OperationalError:
+                logger.warning("journal_mode query failed — leaving SQLite default")
 
         try:
             # Larger cache reduces disk I/O for the hot path (accounts, mappings).
@@ -79,6 +93,44 @@ class DatabaseManager:
         except sqlite3.OperationalError:
             logger.warning("custom cache_size unavailable — using SQLite default")
         return conn
+
+    def _probe_journal_mode(self) -> str:
+        """Return 'wal' if this DB file can *really* use WAL, else 'delete'.
+
+        On WSL's /mnt/ DrvFs mounts, ``PRAGMA journal_mode=WAL`` can report
+        success while failing to create its .db-wal/.db-shm sidecar files —
+        leaving the file in a half-WAL state where every subsequent write
+        raises "unable to open database file". So instead of trusting the
+        reported mode, we verify with a real write. If the probe fails, we
+        convert the file back to DELETE mode so the app stays usable.
+        """
+        logger.info(f"Probing journal mode for {self.db_url}")
+        try:
+            conn = sqlite3.connect(self.db_url, check_same_thread=False, timeout=10)
+            try:
+                conn.execute("PRAGMA busy_timeout = 10000")
+                conn.execute("PRAGMA journal_mode = WAL")
+                conn.execute("PRAGMA synchronous = NORMAL")
+                # Real write probe — reading the reported mode isn't enough.
+                conn.execute("CREATE TABLE IF NOT EXISTS __journal_probe (x)")
+                conn.execute("INSERT INTO __journal_probe VALUES (1)")
+                conn.commit()
+                conn.execute("DROP TABLE __journal_probe")
+                conn.commit()
+                return "wal"
+            except sqlite3.OperationalError:
+                # Don't leave the file half-WAL: force it back to DELETE mode.
+                try:
+                    conn.execute("PRAGMA journal_mode = DELETE")
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    logger.warning("could not restore journal mode to DELETE")
+                return "delete"
+            finally:
+                conn.close()
+        except sqlite3.OperationalError:
+            logger.warning("journal-mode probe failed — using DELETE")
+            return "delete"
 
     @contextmanager
     def get_connection(self) -> Generator[sqlite3.Connection, None, None]:

@@ -348,7 +348,7 @@ class TestIntegrationCircuitBreaker:
             mock_resolve.return_value = "test-model"
 
             resp = client.post(
-                "/api/v1/chat/completions",
+                "/openai/v1/chat/completions",
                 json={
                     "model": "test-model",
                     "messages": [{"role": "user", "content": "hi"}],

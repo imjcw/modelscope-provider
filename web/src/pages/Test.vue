@@ -255,6 +255,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, inject, watch, nextTick } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import FormField from '@/components/FormField.vue'
 import CSelect from '@/components/CSelect.vue'
@@ -415,6 +416,7 @@ const loadModels = async () => {
 
   for (const s of suppliers) {
     const supplierOpts = []
+    const seen = new Set()
     try {
       const mres = await getSupplierModels(s.id)
       for (const mm of (mres.data || [])) {
@@ -597,12 +599,9 @@ const sendMessage = async () => {
       ].filter(Boolean)
     : text
 
-  messages.value.push({
-    role: 'user',
-    content: userContent,
-  })
+  messages.value.push({ role: 'user', content: userContent })
 
-  messages.value.push({
+  const assistantMsg = {
     role: 'assistant',
     content: '',
     reasoning: '',
@@ -611,64 +610,10 @@ const sendMessage = async () => {
     renderMode: 'md',
     _copied: false,
     _copyKey: 'msg-' + Date.now(),
-  })
-  // 通过响应式代理读取，保证流式更新 content 时能触发视图刷新与跟随滚动
-  const assistantMsg = messages.value[messages.value.length - 1]
-
-  const headers = { 'Content-Type': 'application/json' }
-  if (form.value.apiKey) headers['Authorization'] = 'Bearer ' + form.value.apiKey
-
-  const body = {
-    model: form.value.model,
-    messages: [
-      ...(form.value.systemPrompt ? [{ role: 'system', content: form.value.systemPrompt }] : []),
-      ...messages.value.map(m => ({ role: m.role, content: m.content })),
-    ],
   }
-  if (form.value.stream) body.stream = true
-  if (form.value.temperature !== null) body.temperature = form.value.temperature
-  if (form.value.maxTokens !== null) body.max_tokens = form.value.maxTokens
+  messages.value.push(assistantMsg)
 
-  sending.value = true
-
-  try {
-    const res = await fetch('/api/v1/chat/completions', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    })
-
-    assistantMsg.account = res.headers.get('x-upstream-account') || '—'
-    assistantMsg.model = res.headers.get('x-upstream-model') || ''
-
-    const ctype = res.headers.get('content-type') || ''
-    if (res.ok && form.value.stream && ctype.includes('text/event-stream')) {
-      await readStream(res, assistantMsg)
-    } else {
-      const text = await res.text()
-      if (res.ok) {
-        try {
-          const p = JSON.parse(text)
-          if (p.usage) assistantMsg.tokens = p.usage.total_tokens
-          const msg = (p.choices && p.choices[0] && p.choices[0].message) || {}
-          assistantMsg.content = msg.content || ''
-          assistantMsg.reasoning = msg.reasoning_content || msg.reasoning || ''
-        } catch {
-          assistantMsg.raw = text
-        }
-        assistantMsg.status = 'done'
-      } else {
-        assistantMsg.raw = text
-        assistantMsg.content = formatError(text)
-        assistantMsg.status = 'error'
-      }
-    }
-  } catch (e) {
-    assistantMsg.content = '请求失败: ' + e.message
-    assistantMsg.status = 'error'
-  }
-
-  sending.value = false
+  await sendChatRequest(assistantMsg)
 }
 
 const replayMessage = async (idx) => {
@@ -682,10 +627,9 @@ const replayMessage = async (idx) => {
   }
   if (next > idx + 1) messages.value.splice(idx + 1, next - idx - 1)
 
-  // 重发：强制回到底部并恢复跟随
   stickToBottom.value = true
 
-  messages.value.push({
+  const lastMsg = {
     role: 'assistant',
     content: '',
     reasoning: '',
@@ -694,8 +638,17 @@ const replayMessage = async (idx) => {
     renderMode: 'md',
     _copied: false,
     _copyKey: 'msg-' + Date.now(),
-  })
+  }
+  messages.value.push(lastMsg)
 
+  await sendChatRequest(lastMsg)
+}
+
+/**
+ * 公共发送函数：构造 headers / body、发起 POST 请求、解析响应。
+ * 供 sendMessage / replayMessage 复用。
+ */
+const sendChatRequest = async (msg) => {
   const headers = { 'Content-Type': 'application/json' }
   if (form.value.apiKey) headers['Authorization'] = 'Bearer ' + form.value.apiKey
 
@@ -713,42 +666,40 @@ const replayMessage = async (idx) => {
   sending.value = true
 
   try {
-    const res = await fetch('/api/v1/chat/completions', {
+    const res = await fetch('/openai/v1/chat/completions', {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
     })
 
-    const lastMsg = messages.value[messages.value.length - 1]
-    lastMsg.account = res.headers.get('x-upstream-account') || '—'
-    lastMsg.model = res.headers.get('x-upstream-model') || ''
+    msg.account = res.headers.get('x-upstream-account') || '—'
+    msg.model = res.headers.get('x-upstream-model') || ''
 
     const ctype = res.headers.get('content-type') || ''
     if (res.ok && form.value.stream && ctype.includes('text/event-stream')) {
-      await readStream(res, lastMsg)
+      await readStream(res, msg)
     } else {
       const text = await res.text()
       if (res.ok) {
         try {
           const p = JSON.parse(text)
-          if (p.usage) lastMsg.tokens = p.usage.total_tokens
-          const msg = (p.choices && p.choices[0] && p.choices[0].message) || {}
-          lastMsg.content = msg.content || ''
-          lastMsg.reasoning = msg.reasoning_content || msg.reasoning || ''
+          if (p.usage) msg.tokens = p.usage.total_tokens
+          const reply = (p.choices && p.choices[0] && p.choices[0].message) || {}
+          msg.content = reply.content || ''
+          msg.reasoning = reply.reasoning_content || reply.reasoning || ''
         } catch {
-          lastMsg.raw = text
+          msg.raw = text
         }
-        lastMsg.status = 'done'
+        msg.status = 'done'
       } else {
-        lastMsg.raw = text
-        lastMsg.content = formatError(text)
-        lastMsg.status = 'error'
+        msg.raw = text
+        msg.content = formatError(text)
+        msg.status = 'error'
       }
     }
   } catch (e) {
-    const lastMsg = messages.value[messages.value.length - 1]
-    lastMsg.content = '请求失败: ' + e.message
-    lastMsg.status = 'error'
+    msg.content = '请求失败: ' + e.message
+    msg.status = 'error'
   }
 
   sending.value = false
@@ -784,6 +735,11 @@ onBeforeUnmount(() => {
     el.removeEventListener('wheel', cancelAutoScroll)
     el.removeEventListener('touchstart', cancelAutoScroll)
   }
+})
+
+// SPA 路由切换时（不触发 unmount）也断开 ResizeObserver
+onBeforeRouteLeave(() => {
+  contentRO?.disconnect()
 })
 </script>
 

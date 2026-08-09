@@ -1,9 +1,8 @@
 """Integration tests: full migration flow end-to-end."""
 
 import pytest
-from pathlib import Path
-from core.database import DatabaseManager
-from core.migrations import Migrator, get_all_migrations
+from provider.core.database import DatabaseManager
+from provider.core.migrations import Migrator, get_all_migrations
 
 
 @pytest.fixture
@@ -20,7 +19,7 @@ class TestFreshInstall:
         migrator.run()
 
         status = migrator.status()
-        assert len(status) == 15
+        assert len(status) == 22
         assert all(s["applied"] for s in status)
 
     def test_idempotent_on_fresh_install(self, db):
@@ -30,7 +29,7 @@ class TestFreshInstall:
         migrator.run()  # second run no-op
 
         status = migrator.status()
-        assert len(status) == 15
+        assert len(status) == 22
         assert all(s["applied"] for s in status)
 
 
@@ -38,7 +37,6 @@ class TestOldDatabaseUpgrade:
     """Migrator upgrades a simulated old database (schema before migration system)."""
 
     def test_upgrades_fully(self, db):
-        # Simulate an old database by manually creating tables with minimal schema
         with db.get_connection() as conn:
             conn.execute("""
                 CREATE TABLE account_quotas (
@@ -92,10 +90,9 @@ class TestOldDatabaseUpgrade:
         migrator.run()
 
         status = migrator.status()
-        assert len(status) == 15
+        assert len(status) == 22
         assert all(s["applied"] for s in status)
 
-        # Verify the schema was actually upgraded
         with db.get_connection() as conn:
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(account_quotas)")]
             assert "total_input_tokens" in cols
@@ -111,8 +108,8 @@ class TestOldDatabaseUpgrade:
 
 
 class TestMigrationCount:
-    def test_thirteen_plus_one_migrations_registered(self):
+    def test_all_migrations_registered(self):
         migrations = get_all_migrations()
-        assert len(migrations) == 15
+        assert len(migrations) == 21
         versions = [m.version for m in migrations]
-        assert versions == list(range(1, 16))
+        assert versions == list(range(1, 22))

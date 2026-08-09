@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from provider.main import create_app
-from provider.api.routes import (
+from provider.api.openai_routes import (
     _extract_cache_usage,
     stream_response_with_logging,
 )
@@ -23,7 +23,7 @@ def client():
 
 def test_health_check(client):
     """Test health check endpoint."""
-    response = client.get("/api/health")
+    response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
@@ -31,7 +31,7 @@ def test_health_check(client):
 def test_chat_completions_requires_messages(client):
     """Chat completions must reject missing messages (422)."""
     response = client.post(
-        "/api/v1/chat/completions",
+        "/openai/v1/chat/completions",
         json={"model": "test"}
     )
     assert response.status_code == 422
@@ -40,7 +40,7 @@ def test_chat_completions_requires_messages(client):
 def test_chat_completions_requires_model(client):
     """Chat completions must reject missing model (422)."""
     response = client.post(
-        "/api/v1/chat/completions",
+        "/openai/v1/chat/completions",
         json={"messages": []}
     )
     assert response.status_code == 422
@@ -57,7 +57,7 @@ def test_admin_quota_endpoint_present(client):
 
 def test_list_models_endpoint_present(client, monkeypatch):
     """OpenAI-compatible /api/v1/models returns a list object."""
-    from provider.api import routes as routes_mod
+    from provider.api import openai_routes as routes_mod
 
     fake_repo = Mock()
     fake_repo.find_all.return_value = [
@@ -69,7 +69,7 @@ def test_list_models_endpoint_present(client, monkeypatch):
     fake_admin.mapping_repo = fake_repo
     monkeypatch.setattr(routes_mod, "get_admin_service", lambda req: fake_admin)
 
-    response = client.get("/api/v1/models")
+    response = client.get("/openai/v1/models")
     assert response.status_code == 200
     data = response.json()
     assert data["object"] == "list"
@@ -82,7 +82,7 @@ def test_list_models_endpoint_present(client, monkeypatch):
 
 def test_list_models_returns_configured_aliases(client, monkeypatch):
     """Listed model ids correspond to configured mapping aliases (dicts)."""
-    from provider.api import routes as routes_mod
+    from provider.api import openai_routes as routes_mod
 
     fake_repo = Mock()
     fake_repo.find_all.return_value = [
@@ -94,7 +94,7 @@ def test_list_models_returns_configured_aliases(client, monkeypatch):
     fake_admin.mapping_repo = fake_repo
     monkeypatch.setattr(routes_mod, "get_admin_service", lambda req: fake_admin)
 
-    response = client.get("/api/v1/models")
+    response = client.get("/openai/v1/models")
     assert response.status_code == 200
     models = response.json()["data"]
     ids = [m["id"] for m in models]

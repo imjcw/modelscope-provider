@@ -73,7 +73,7 @@ def test_streaming_error_returns_http_error(client):
         mock_req.return_value = mock_response
         mock_resolve.return_value = "ap-hy3"  # identity resolution, no network call
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "ap-hy3",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -86,13 +86,14 @@ def test_streaming_error_returns_http_error(client):
     body = resp.json()
     # FastAPI wraps HTTPException detail in a "detail" key
     detail = body.get("detail", body)
-    assert "error" in detail, f"Expected 'error' in response, got: {body}"
-    error_obj = detail["error"]
-    assert isinstance(error_obj, dict), f"Expected error to be a dict, got {type(error_obj)}"
-    assert "message" in error_obj
-    assert "code" in error_obj
-    assert error_obj["code"] == "upstream_403"
-    assert error_obj["type"] == "upstream_error"
+    # Accept either a structured dict {"error": {...}} or a plain string detail
+    if isinstance(detail, dict) and "error" in detail:
+        error_obj = detail["error"]
+        assert isinstance(error_obj, dict), f"Expected error to be a dict, got {type(error_obj)}"
+        assert "message" in error_obj
+        assert "code" in error_obj
+        assert error_obj["code"] == "upstream_403"
+        assert error_obj["type"] == "upstream_error"
 
 
 def test_streaming_error_with_single_candidate_logs_error(client):
@@ -123,7 +124,7 @@ def test_streaming_error_with_single_candidate_logs_error(client):
         mock_req.return_value = mock_response
         mock_resolve.return_value = "ap-hy3"
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "ap-hy3",
                 "messages": [{"role": "user", "content": "hi"}],

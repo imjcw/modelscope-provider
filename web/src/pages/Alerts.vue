@@ -11,7 +11,7 @@
       </template>
     </PageHeader>
 
-    <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6">
+    <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6 flex flex-col">
       <PageState :loading="loading">
       <!-- Summary cards -->
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -93,12 +93,15 @@
         </tbody>
       </CTable>
       </PageState>
+
+      <!-- Pagination -->
+      <Pagination v-model:page="page" :total="total" :page-size="pageSize" class="mt-4" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import PageState from '@/components/PageState.vue'
 import StatCard from '@/components/StatCard.vue'
@@ -108,6 +111,7 @@ import AlertLevelIcon from '@/components/AlertLevelIcon.vue'
 import { getAlerts } from '@/api'
 import CSelect from '@/components/CSelect.vue'
 import ViewToggle from '@/components/ViewToggle.vue'
+import Pagination from '@/components/Pagination.vue'
 import { useViewPreference } from '@/composables/useViewPreference'
 
 const ALERT_TYPE_OPTIONS = [
@@ -123,17 +127,21 @@ const viewMode = useViewPreference('alerts_view_mode', 'row')
 const alertFilter = ref('all')
 const loading = ref(true)
 const alerts = ref([])
+const total = ref(0)
+const page = ref(0)
+const pageSize = 20
 
 const loadData = async () => {
   loading.value = true
   try {
-    const res = await getAlerts(7)
-    const list = res.data || []
-    // Generate ID and map to our format
-    alerts.value = list.map((a, i) => ({ id: i, ...a }))
+    const res = await getAlerts(7, { page: page.value, page_size: pageSize })
+    const data = res.data || {}
+    alerts.value = (data.records || []).map((a, i) => ({ id: i, ...a }))
+    total.value = data.total || 0
   } catch (e) {
     console.error('Failed to load alerts:', e)
     alerts.value = []
+    total.value = 0
   }
   loading.value = false
 }
@@ -190,4 +198,11 @@ const levelLabel = (level) => ({
 }[level] || level)
 
 onMounted(() => loadData())
+
+watch(alertFilter, () => {
+  page.value = 0
+  loadData()
+})
+
+watch(page, () => loadData())
 </script>

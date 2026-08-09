@@ -18,7 +18,7 @@ from pathlib import Path
 # 允许直接以脚本方式运行时导入 api.routes
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from api.routes import _extract_cache_usage  # noqa: E402
+from api.openai_routes import _extract_cache_usage  # noqa: E402
 
 USAGE_RE = re.compile(r'"usage"\s*:\s*')
 

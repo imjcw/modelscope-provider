@@ -1,55 +1,44 @@
 import os
 import pytest
-import sqlite3
 from pathlib import Path
 from provider.core.database import DatabaseManager
 from provider.core.migrations import Migrator
 
-BASE_DIR = Path(__file__).resolve().parent
 
-# ── 确保 pytest 测试不影响 .env 指向的数据库 ──
-# 在导入任何会读 .env 的模块之前，覆盖 DATABASE_URL
-_test_db_path = str(BASE_DIR / "modelscope_proxy_test.db")
-_original_db_url = os.environ.get("DATABASE_URL")
-os.environ["DATABASE_URL"] = f"sqlite:///{_test_db_path}"
+BASE_DIR = Path(__file__).resolve().parent
 
 
 @pytest.fixture(autouse=True)
-def set_test_db_url():
-    """确保每个测试都使用测试数据库，并在测试后恢复 original。
+def _clean_db_file(tmp_path, request):
+    """每个测试自动清理/重建独立测试数据库。
 
-    仅靠模块级别的 os.environ 设置是不够的：cleanup 测试之后
-    的下一个测试会拿到被恢复的 original URL（或删除后的状态），
-    从而错误地指向生产数据库。这个 fixture 在每个测试开始前
-    重新设置测试 DB URL。
+    核心逻辑：
+    1. 每个测试使用 tmp_path 下的独立 DB 文件，避免跨测试 UNIQUE 冲突。
+    2. autouse=True 确保所有测试（含不显式使用 database fixture 的）都获得隔离环境。
+    3. tmp_path 由 pytest 在 fixture teardown 时自动删除，无需手动清理。
     """
-    os.environ["DATABASE_URL"] = f"sqlite:///{_test_db_path}"
-    yield
-    if _original_db_url is not None:
-        os.environ["DATABASE_URL"] = _original_db_url
-    elif "DATABASE_URL" in os.environ:
-        del os.environ["DATABASE_URL"]
+    db_path = tmp_path / "test.db"
+    test_url = f"sqlite:///{db_path}"
+    os.environ["DATABASE_URL"] = test_url
 
-
-@pytest.fixture
-def test_db_url():
-    """Test database URL (isolated from .env)."""
-    return f"sqlite:///{_test_db_path}"
-
-
-@pytest.fixture
-def database(test_db_url):
-    """Database manager fixture — uses isolated test DB, cleaned up after."""
-    db = DatabaseManager(test_db_url)
+    # 初始化表 + 运行迁移（幂等，每次从零开始）
+    db = DatabaseManager(test_url)
     db.initialize_tables()
     Migrator(db).run()
-    yield db
-    # Close pooled connections first — on Windows the DB file cannot be
-    # deleted while any connection is open (PermissionError: WinError 32).
     db.close()
-    db_path = Path(_test_db_path)
-    if db_path.exists():
-        db_path.unlink()
+
+    yield test_url
+
+    # tmp_path 由 pytest 自动清理，无需手动操作
+
+
+@pytest.fixture
+def database(_clean_db_file):
+    """Database manager fixture — 每个测试独立 SQLite 文件。"""
+    url = _clean_db_file
+    db = DatabaseManager(url)
+    yield db
+    db.close()
 
 
 @pytest.fixture

@@ -227,10 +227,16 @@ const showDetail = (log) => {
 
 watch(page, () => loadLogs())
 
+// 防抖变量（非时间筛选变化时延迟加载，避免级联选择连续触发）
+let filterDebounceTimer = null
+
 // 非时间筛选变化时，回到第一页并重新加载
 watch(
   () => [filters.value.model, filters.value.accountId, filters.value.statusCode, filters.value.isStream],
-  () => resetAndLoad(),
+  () => {
+    if (filterDebounceTimer) clearTimeout(filterDebounceTimer)
+    filterDebounceTimer = setTimeout(resetAndLoad, 300)
+  },
 )
 
 const loadFilterOptions = async () => {

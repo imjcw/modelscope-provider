@@ -1,7 +1,7 @@
 """Performance tests for optimized API routes."""
 import pytest
 from unittest.mock import Mock, patch
-from provider.api.routes import get_services, refresh_load_balancer
+from provider.api.openai_routes import get_services, refresh_load_balancer
 
 
 def test_get_services_returns_services_without_rebuilding_load_balancer():

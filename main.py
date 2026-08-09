@@ -11,18 +11,19 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # When imported as a module (e.g. via uvicorn), use 'provider.' prefix;
 # when run as a script from the provider/ dir, bare imports work.
 try:
     from provider.core.config import ConfigManager
     from provider.core.service_init import ServiceInitializer
-    from provider.api.routes import router
+    from provider.api.openai_routes import router
     from provider.api.admin_routes import router as admin_router
 except ImportError:
     from core.config import ConfigManager
     from core.service_init import ServiceInitializer
-    from api.routes import router
+    from api.openai_routes import router
     from api.admin_routes import router as admin_router
 import logging
 
@@ -184,9 +185,9 @@ async def lifespan(app: FastAPI):
         log_cleanup_interval, rl_flush_interval, config_sync_interval,
     )
 
-    logger.info("ModelScope Proxy started")
+    logger.info("AI Provider started")
     yield
-    logger.info("ModelScope Proxy shutting down")
+    logger.info("AI Provider shutting down")
 
     # Cancel background tasks
     cleanup_task.cancel()
@@ -217,14 +218,14 @@ def create_app():
     """Create and configure FastAPI application."""
     # Create FastAPI app with lifespan
     app = FastAPI(
-        title="ModelScope Proxy API",
-        description="OpenAI-compatible proxy for ModelScope API with quota management",
+        title="AI Provider API",
+        description="OpenAI-compatible AI provider gateway with multi-vendor load balancing, quota management, and circuit breaking",
         version="0.2.0",
         lifespan=lifespan
     )
 
     # Include API routes
-    app.include_router(router, prefix="/api", tags=["API"])
+    app.include_router(router, prefix="/openai", tags=["OpenAI"])
     app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 
     # Disable cache for static assets (dev convenience — prevents browser caching old JS)
@@ -252,10 +253,36 @@ def create_app():
             )
         return await call_next(request)
 
+    # Health check — root-level endpoint
+    @app.get("/health")
+    def health_check():
+        """Health check endpoint."""
+        return {"status": "healthy", "version": "0.2.0"}
+
     # Serve static frontend files (no cache in dev for hot refresh)
     dist_dir = Path(__file__).parent / "web" / "dist"
     if dist_dir.exists():
-        app.mount("/", StaticFiles(directory=str(dist_dir), html=True, check_dir=False), name="static")
+        # SPA fallback: in history mode, unknown paths should render index.html
+        # so refreshing /web/logs etc. doesn't 404. Static assets under
+        # web/dist/assets/* still resolve normally because they exist on disk.
+        class SPAStaticFiles(StaticFiles):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            async def get_response(self, path: str, scope):
+                try:
+                    return await super().get_response(path, scope)
+                except StarletteHTTPException as exc:
+                    if exc.status_code == 404 and not path.startswith("assets/"):
+                        # History-mode deep link → serve the SPA entry point.
+                        return await super().get_response("index.html", scope)
+                    raise
+
+        app.mount(
+            "/web",
+            SPAStaticFiles(directory=str(dist_dir), html=True, check_dir=False),
+            name="static",
+        )
         logger.info(f"Serving static files from {dist_dir}")
     else:
         logger.warning("Frontend dist directory not found, static files not served")

@@ -119,7 +119,7 @@ function previewImage(url) {
         <!-- assistant 内联 toolCalls -->
         <div v-if="msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0"
           class="mt-3 pt-3 border-t border-ls-border space-y-2">
-          <ToolCallCard v-for="(tc, ti) in msg.toolCalls" :key="ti" :tc="tc" />
+          <ToolCallCard v-for="(tc, ti) in msg.toolCalls" :key="tc.id || ti" :tc="tc" />
         </div>
       </template>
     </div>

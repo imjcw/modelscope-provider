@@ -1,6 +1,6 @@
-# ModelScope Proxy 使用手册
+# AI Provider 使用手册
 
-> 兼容 OpenAI API 格式的 ModelScope 代理服务，支持多账户负载均衡、动态模型别名解析和 Web 管理后台。
+> 兼容 OpenAI API 格式的 AI Provider 网关，支持多供应商账户负载均衡、动态模型别名解析和管理后台。
 >
 > 版本：0.2.0 | 数据库：SQLite
 

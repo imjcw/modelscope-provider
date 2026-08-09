@@ -210,12 +210,31 @@ def test_get_stats_days_param(client):
 def test_list_alerts(client):
     r = client.get("/api/admin/alerts")
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    data = r.json()
+    assert isinstance(data, dict)
+    assert "records" in data
+    assert "total" in data
+    assert "page" in data
+    assert "page_size" in data
+    assert isinstance(data["records"], list)
 
 
 def test_list_alerts_days_param(client):
     r = client.get("/api/admin/alerts?days=14")
     assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, dict)
+    assert isinstance(data["records"], list)
+
+
+def test_list_alerts_pagination(client):
+    """Test alerts pagination works."""
+    r = client.get("/api/admin/alerts?page=0&page_size=5")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["page_size"] == 5
+    assert data["page"] == 0
+    assert len(data["records"]) <= 5
 
 
 # ── Mapping usage ──────────────────────────────────────────────────────────

@@ -58,13 +58,14 @@ export function parseResponseStreams(raw) {
     }
     if (allChoices.length > 0 || Object.keys(mergedToolCalls).length > 0) {
       const choices = allChoices.map(normalizeChoice)
-      // Attach merged tool_calls as a convenient convenience field
-      if (Object.keys(mergedToolCalls).length > 0) {
-        for (const c of choices) {
-          c._mergedToolCalls = Object.values(mergedToolCalls)
-        }
+      // Attach merged tool_calls once at the top level so callers don't
+      // duplicate them when iterating over choices.
+      return {
+        choices,
+        _mergedToolCalls: Object.keys(mergedToolCalls).length > 0
+          ? Object.values(mergedToolCalls)
+          : undefined,
       }
-      return { choices }
     }
   }
 
@@ -111,12 +112,12 @@ export function parseResponseStreams(raw) {
     }
     if (allChoices.length > 0) {
       const choices = allChoices.map(normalizeChoice)
-      if (Object.keys(mergedToolCalls).length > 0) {
-        for (const c of choices) {
-          c._mergedToolCalls = Object.values(mergedToolCalls)
-        }
+      return {
+        choices,
+        _mergedToolCalls: Object.keys(mergedToolCalls).length > 0
+          ? Object.values(mergedToolCalls)
+          : undefined,
       }
-      return { choices }
     }
   } catch {}
 

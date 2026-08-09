@@ -75,7 +75,8 @@ export const getStats = (days = 30) => api.get('/stats', { params: { days } })
 export const getWindowStats = (seconds = 300) => api.get('/stats/window', { params: { seconds } })
 
 // ── Alerts ──
-export const getAlerts = (days = 7) => api.get('/alerts', { params: { days } })
+export const getAlerts = (days = 7, extra = {}) =>
+  api.get('/alerts', { params: { days, ...extra } })
 
 // ── Model Quotas ──
 export const getModelQuotas = (days = 0) => api.get('/model-quota', { params: { days } })
@@ -96,3 +97,7 @@ export const updateApiKeyStatus = (supplierId, keyId, data) =>
   api.put(`/suppliers/${supplierId}/api-keys/${keyId}/status`, data)
 export const deleteApiKey = (supplierId, keyId) =>
   api.delete(`/suppliers/${supplierId}/api-keys/${keyId}`)
+
+// ── Circuit Breaker ──
+export const getCircuitBreakerStates = () => api.get('/circuit-breaker')
+export const resetCircuitBreaker = (body) => api.post('/circuit-breaker/reset', body)

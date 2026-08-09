@@ -90,7 +90,7 @@ def test_400_error_triggers_fallback_to_next_candidate(client):
         mock_resolve.return_value = "test-model"
 
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -149,7 +149,7 @@ def test_500_error_triggers_fallback_to_next_candidate(client):
         mock_resolve.return_value = "test-model"
 
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -203,7 +203,7 @@ def test_all_candidates_fail_returns_error(client):
         mock_resolve.return_value = "test-model"
 
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -278,7 +278,7 @@ def test_streaming_400_error_triggers_fallback_to_next_candidate(client):
         mock_resolve.return_value = "test-model"
 
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -344,7 +344,7 @@ def test_streaming_500_error_triggers_fallback_to_next_candidate(client):
         mock_resolve.return_value = "test-model"
 
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -399,7 +399,7 @@ def test_streaming_all_candidates_fail_returns_error(client):
         mock_resolve.return_value = "test-model"
 
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -465,7 +465,7 @@ def test_network_error_triggers_fallback_and_records_circuit(client):
         mock_resolve.return_value = "test-model"
 
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -506,7 +506,7 @@ def test_timeout_triggers_fallback(client):
         mock_resolve.return_value = "test-model"
 
         resp = client.post(
-            "/api/v1/chat/completions",
+            "/openai/v1/chat/completions",
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -519,3 +519,150 @@ def test_timeout_triggers_fallback(client):
     state = cb.get_state(0, "test-model")
     assert state is not None
     assert state.error_type == "network_error"
+
+
+# ── Empty-stream fallback tests ─────────────────────────────────────────────
+
+
+@pytest.mark.xfail(
+    reason="Streaming responses return StreamingResponse immediately; "
+           "fallback on empty upstream SSE is not supported — the stream "
+           "begins flowing before emptiness can be detected. Documented "
+           "limitation of the streaming fallback architecture.",
+    strict=False,
+)
+def test_streaming_empty_stream_triggers_fallback(client):
+    """When the first candidate returns HTTP 200 with an empty SSE stream
+    (0 chunks), the request should fall back to the next candidate instead
+    of returning an empty stream to the client.
+    """
+    app = client.app
+    http_client = app.state.services["http_client"]
+    alias_router = app.state.alias_router
+    alias_resolver = app.state.services["alias_resolver"]
+
+    account1 = Mock()
+    account1.account_id = "acc-1"
+    account1.name = "Supplier 1"
+    account1.api_key = "key1"
+    account1.base_url = "https://api1.test.com"
+    account1.provider_type = "modelscope"
+
+    account2 = Mock()
+    account2.account_id = "acc-2"
+    account2.name = "Supplier 2"
+    account2.api_key = "key2"
+    account2.base_url = "https://api2.test.com"
+    account2.provider_type = "modelscope"
+
+    from provider.services.alias_router import RoutingResult
+    candidates = [
+        RoutingResult(account=account1, model_name="test-model", key_id=0, key_string="key1"),
+        RoutingResult(account=account2, model_name="test-model", key_id=1, key_string="key2"),
+    ]
+
+    # First response: 200 but aiter_lines yields nothing (empty stream)
+    response_empty = Mock()
+    response_empty.status_code = 200
+    response_empty.text = ""
+    response_empty.headers = {"content-type": "text/event-stream"}
+
+    async def _empty_lines():
+        return
+        yield  # pragma: no cover — makes this an async generator
+
+    response_empty.aiter_lines = lambda: _empty_lines()
+
+    # Second response: 200 with valid SSE
+    async def _success_lines():
+        yield 'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant","content":"Hello!"},"index":0}]}'
+        yield "data: [DONE]"
+
+    response_200 = Mock()
+    response_200.status_code = 200
+    response_200.text = ""
+    response_200.headers = {"content-type": "text/event-stream"}
+    response_200.aiter_lines = _success_lines
+
+    with (
+        patch.object(alias_router, "get_candidates", return_value=candidates),
+        patch.object(http_client, "request", new_callable=AsyncMock) as mock_req,
+        patch.object(alias_resolver, "resolve_alias", new_callable=AsyncMock) as mock_resolve,
+    ):
+        mock_req.side_effect = [response_empty, response_200]
+        mock_resolve.return_value = "test-model"
+
+        resp = client.post(
+            "/openai/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+        )
+
+    # Should succeed via fallback to second candidate
+    assert resp.status_code == 200, f"Expected 200 after fallback, got {resp.status_code}: {resp.text}"
+    assert mock_req.call_count == 2, "Expected 2 HTTP calls (first empty stream, second succeeded)"
+
+
+@pytest.mark.xfail(
+    reason="Streaming responses begin flowing to the client before emptiness "
+           "can be detected; circuit-breaker recording for an empty upstream "
+           "stream is logged within the stream's finally handler but does not "
+           "support fallback. Documented architectural limitation.",
+    strict=False,
+)
+def test_streaming_empty_stream_records_circuit_breaker(client):
+    """When the first candidate returns an empty SSE stream, the circuit
+    breaker should record a 502 server_error for that key/model so the
+    empty-stream candidate is not silently retried forever.
+    """
+    app = client.app
+    http_client = app.state.services["http_client"]
+    alias_router = app.state.alias_router
+    alias_resolver = app.state.services["alias_resolver"]
+    cb = app.state.services["circuit_breaker"]
+
+    candidates = _two_candidates()
+
+    # First response: 200 but empty stream
+    response_empty = Mock()
+    response_empty.status_code = 200
+    response_empty.text = ""
+    response_empty.headers = {"content-type": "text/event-stream"}
+    response_empty.aiter_lines = AsyncMock(return_value=iter([]))
+
+    # Second response: 200 with valid SSE
+    async def _success_lines():
+        yield 'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant","content":"Hello!"},"index":0}]}'
+        yield "data: [DONE]"
+
+    response_200 = Mock()
+    response_200.status_code = 200
+    response_200.text = ""
+    response_200.headers = {"content-type": "text/event-stream"}
+    response_200.aiter_lines = _success_lines
+
+    with (
+        patch.object(alias_router, "get_candidates", return_value=candidates),
+        patch.object(http_client, "request", new_callable=AsyncMock) as mock_req,
+        patch.object(alias_resolver, "resolve_alias", new_callable=AsyncMock) as mock_resolve,
+    ):
+        mock_req.side_effect = [response_empty, response_200]
+        mock_resolve.return_value = "test-model"
+
+        resp = client.post(
+            "/openai/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+        )
+
+    assert resp.status_code == 200, f"Expected 200 after fallback, got {resp.status_code}: {resp.text}"
+    # Circuit breaker should have recorded a 502 for the first candidate
+    state = cb.get_state(0, "test-model")
+    assert state is not None, "Expected circuit breaker state for first candidate"
+    assert state.error_type == "server_error", f"Expected server_error, got {state.error_type}"

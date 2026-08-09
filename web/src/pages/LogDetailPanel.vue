@@ -48,24 +48,32 @@
                   <span class="text-ls-muted">{{ historyMessages.length }} 条</span>
                 </button>
                 <div v-if="showHistory" class="space-y-2">
-                  <MessageCard v-for="(msg, i) in historyMessages" :key="'hist-' + i"
+                  <MessageCard
+                    v-for="(msg, i) in historyMessages"
+                    :key="'hist-' + i"
                     :msg="msg"
-                    :expanded="!historyCollapsed[String(i)]"
+                    :expanded="isHistoryExpanded(i)"
                     :render-mode="renderModes[String(i)] || 'md'"
                     @toggle-expand="toggleHistoryCollapsed(i)"
-                    @toggle-render="toggleHistoryRender(i)" />
+                    @toggle-render="toggleHistoryRender(i)"
+                    v-memo="[msg, historyCollapsed[String(i)]]"
+                  />
                 </div>
               </template>
 
               <!-- ── Current conversation (from the last user message onwards) ── -->
-              <MessageCard v-for="(msg, i) in currentMessages" :key="'cur-' + i"
+              <MessageCard
+                v-for="(msg, i) in currentMessages"
+                :key="'cur-' + i"
                 :msg="msg"
-                :expanded="expandedMap.get(currentStartIndex + i)"
+                :expanded="isExpanded(currentStartIndex + i)"
                 :render-mode="renderModes[String(currentStartIndex + i)] || 'md'"
                 :highlight="i === 0"
                 :input-badge="i === 0 && msg.role === 'user'"
                 @toggle-expand="toggleExpanded(currentStartIndex + i)"
-                @toggle-render="toggleRender(currentStartIndex + i)" />
+                @toggle-render="toggleRender(currentStartIndex + i)"
+                v-memo="[msg, collapsedMsgs[String(currentStartIndex + i)]]"
+              />
 
               <!-- Assistant response (concatenated) -->
               <div v-if="responseContentText || responseToolCalls.length || responseReasoning" class="bg-ls-card rounded-lg border border-ls-border overflow-hidden">
@@ -97,7 +105,11 @@
                   <div v-if="responseToolCalls.length > 0" class="mb-3">
                     <div class="text-xs text-ls-muted mb-1.5">工具调用</div>
                     <div class="space-y-2">
-                      <ToolCallCard v-for="(tc, ti) in responseToolCalls" :key="ti" :tc="tc" />
+                      <ToolCallCard
+                        v-for="(tc, ti) in responseToolCalls"
+                        :key="tc.id || ti"
+                        :tc="tc"
+                      />
                     </div>
                   </div>
                   <!-- Content -->
@@ -428,14 +440,8 @@ const conversationMessages = computed(() => {
   }
 })
 
-const expandedMap = computed(() => {
-  const map = new Map()
-  const msgs = conversationMessages.value
-  for (let i = 0; i < msgs.length; i++) {
-    map.set(i, !collapsedMsgs.value[String(i)])
-  }
-  return map
-})
+const isExpanded = (idx) => collapsedMsgs.value[String(idx)] !== true
+const isHistoryExpanded = (idx) => historyCollapsed.value[String(idx)] !== true
 
 function toggleExpanded(i) {
   const key = String(i)
@@ -455,15 +461,18 @@ function toggleHistoryCollapsed(i) {
   }
 }
 
-// ── Shared response-stream parser ──
+// ── Shared response-stream parser (single parse, multiple derived results) ──
 import { parseResponseStreams } from '@/composables/useResponseParser'
 
-// ── Parse raw_response into chunks ──
-const responseChunks = computed(() => {
+const parsedResponse = computed(() => {
   const raw = props.modelValue?.raw_response
-  if (!raw) return []
-  const parsed = parseResponseStreams(raw)
-  if (!parsed) return [raw]
+  if (!raw) return null
+  return parseResponseStreams(raw)
+})
+
+const responseChunks = computed(() => {
+  const parsed = parsedResponse.value
+  if (!parsed) return []
   const chunks = []
   for (const c of parsed.choices) {
     const content = c.message?.content || c.delta?.content || ''
@@ -474,27 +483,26 @@ const responseChunks = computed(() => {
 
 const responseContentText = computed(() => responseChunks.value.join(''))
 
-// ── Extract tool_calls from raw_response (response-side, not history) ──
+// ── Extract tool_calls from raw_response (response-side) ──
 const responseToolCalls = computed(() => {
-  const raw = props.modelValue?.raw_response
-  if (!raw) return []
-  const parsed = parseResponseStreams(raw)
+  const parsed = parsedResponse.value
   if (!parsed) return []
   const out = []
-  for (const c of parsed.choices) {
-    // Streamed: use merged tool_calls
-    if (c._mergedToolCalls) {
-      for (const t of c._mergedToolCalls) {
-        out.push({
-          id: t.id || '',
-          type: t.type || 'function',
-          name: t.name || 'unknown',
-          arguments: t.arguments || '{}',
-        })
-      }
-      continue
+  // Streamed: merged tool_calls live once at the top level (one per choice
+  // would have duplicated them — N SSE lines × same merged array).
+  if (parsed._mergedToolCalls) {
+    for (const t of parsed._mergedToolCalls) {
+      out.push({
+        id: t.id || '',
+        type: t.type || 'function',
+        name: t.name || 'unknown',
+        arguments: t.arguments || '{}',
+      })
     }
-    // Non-streamed: use message.tool_calls
+    return out
+  }
+  // Non-streamed / single JSON object: use message.tool_calls
+  for (const c of parsed.choices) {
     const tc = c.message?.tool_calls || []
     if (!Array.isArray(tc)) continue
     for (const t of tc) {
@@ -511,9 +519,7 @@ const responseToolCalls = computed(() => {
 
 // ── Extract reasoning_content from raw_response ──
 const responseReasoning = computed(() => {
-  const raw = props.modelValue?.raw_response
-  if (!raw) return ''
-  const parsed = parseResponseStreams(raw)
+  const parsed = parsedResponse.value
   if (!parsed) return ''
   const parts = []
   for (const c of parsed.choices) {

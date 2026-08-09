@@ -40,7 +40,7 @@ def _refresh_after_account_change(request: Request):
     Ensures the LoadBalancer picks up new/removed accounts and the
     alias resolver cache is invalidated.
     """
-    from api.routes import refresh_load_balancer
+    from api.openai_routes import refresh_load_balancer
     refresh_load_balancer(request)
 
     # Clear alias resolver cache
@@ -693,11 +693,15 @@ def get_model_quotas(days: int = 0, service=Depends(get_admin_service)):
 # ── Alerts ──────────────────────────────────────────────────────────────────
 
 @router.get("/alerts")
-def list_alerts(days: int = 7, service=Depends(get_admin_service)):
-    """Get alerts from the past N days (derived from logs)."""
+def list_alerts(days: int = 7, page: int = 0, page_size: int = 50, service=Depends(get_admin_service)):
+    """Get alerts from the past N days (derived from logs), with pagination."""
     from datetime import timedelta
 
     from core.timezone import now as _tz_now
+
+    if page < 0 or page_size < 1:
+        raise HTTPException(status_code=400, detail="page and page_size must be positive")
+    page_size = min(page_size, 200)
 
     cutoff = (_tz_now() - timedelta(days=days)).isoformat()
     records, _ = service.get_logs(start_time=cutoff, page_size=500)
@@ -705,25 +709,60 @@ def list_alerts(days: int = 7, service=Depends(get_admin_service)):
     alerts = []
     for r in records:
         sc = r.get("status_code")
+        src = (r.get("error_source") or "").strip()
         display_name = r.get("account_name") or r.get("account_id") or "未知"
         if sc == 429:
-            alerts.append({
-                "timestamp": r.get("timestamp"),
-                "type": "quota_exhausted",
-                "level": "warning",
-                "account_id": r.get("account_id"),
-                "model": r.get("model"),
-                "message": f"供应商 {display_name} 的 {r.get('model')} 模型配额耗尽",
-            })
+            if src in ("rate_limit", "circuit_open", "internal"):
+                alerts.append({
+                    "timestamp": r.get("timestamp"),
+                    "type": "rate_limited",
+                    "level": "warning",
+                    "account_id": r.get("account_id"),
+                    "model": r.get("model"),
+                    "error_source": src,
+                    "message": f"供应商 {display_name} 的 {r.get('model')} 模型被限流(策略)",
+                })
+            else:
+                alerts.append({
+                    "timestamp": r.get("timestamp"),
+                    "type": "quota_exhausted",
+                    "level": "warning",
+                    "account_id": r.get("account_id"),
+                    "model": r.get("model"),
+                    "error_source": src,
+                    "message": f"供应商 {display_name} 的 {r.get('model')} 模型配额耗尽(上游返回)",
+                })
         elif sc and sc >= 500:
-            alerts.append({
-                "timestamp": r.get("timestamp"),
-                "type": "api_error",
-                "level": "error",
-                "account_id": r.get("account_id"),
-                "model": r.get("model"),
-                "message": f"供应商 {display_name} 调用 {r.get('model')} 返回 {sc} 错误",
-            })
+            if src in ("circuit_open",):
+                alerts.append({
+                    "timestamp": r.get("timestamp"),
+                    "type": "circuit_open",
+                    "level": "error",
+                    "account_id": r.get("account_id"),
+                    "model": r.get("model"),
+                    "error_source": src,
+                    "message": f"供应商 {display_name} 的 {r.get('model')} 模型被熔断器冻结(策略拒绝)",
+                })
+            elif src in ("rate_limit", "internal"):
+                alerts.append({
+                    "timestamp": r.get("timestamp"),
+                    "type": "api_error",
+                    "level": "error",
+                    "account_id": r.get("account_id"),
+                    "model": r.get("model"),
+                    "error_source": src,
+                    "message": f"供应商 {display_name} 调用 {r.get('model')} 返回 {sc} 错误(策略)",
+                })
+            else:
+                alerts.append({
+                    "timestamp": r.get("timestamp"),
+                    "type": "api_error",
+                    "level": "error",
+                    "account_id": r.get("account_id"),
+                    "model": r.get("model"),
+                    "error_source": src,
+                    "message": f"供应商 {display_name} 调用 {r.get('model')} 返回 {sc} 错误(上游返回)",
+                })
         elif sc and sc >= 400:
             alerts.append({
                 "timestamp": r.get("timestamp"),
@@ -731,10 +770,15 @@ def list_alerts(days: int = 7, service=Depends(get_admin_service)):
                 "level": "warning",
                 "account_id": r.get("account_id"),
                 "model": r.get("model"),
+                "error_source": src,
                 "message": f"请求失败: {sc} - {r.get('error_message', '')}",
             })
 
-    return alerts
+    # Pagination
+    total = len(alerts)
+    start = page * page_size
+    end = start + page_size
+    return {"records": alerts[start:end], "total": total, "page": page, "page_size": page_size}
 
 
 # ── Client API Keys ─────────────────────────────────────────────────────────
@@ -940,3 +984,31 @@ def reset_circuit_breaker(
     before = len(circuit_breaker.get_all_states())
     circuit_breaker.clear()
     return {"ok": True, "cleared": before, "scope": "all"}
+
+
+@router.get("/quota")
+def admin_quota_info(request: Request, service=Depends(get_admin_service)):
+    """Get quota information for all suppliers."""
+    admin_svc = service
+    if admin_svc is None or admin_svc.quota_repo is None:
+        return {"total_suppliers": 0, "quota_status": []}
+
+    suppliers = admin_svc.account_repo.find_all()
+    quota_status = []
+    total_suppliers = len(suppliers)
+
+    for s in suppliers:
+        info = admin_svc.quota_repo.get_account_info(s["account_id"])
+        quota_status.append({
+            "supplier_id": s["id"],
+            "supplier_name": s.get("name", ""),
+            "account_id": s["account_id"],
+            "quota_remaining": info["quota_remaining"] if info else 0,
+            "quota_limit": info["quota_limit"] if info else 0,
+            "unavailable_models": list(info.get("unavailable_models", [])) if info else [],
+        })
+
+    return {
+        "total_suppliers": total_suppliers,
+        "quota_status": quota_status,
+    }

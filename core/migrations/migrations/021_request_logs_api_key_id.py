@@ -20,6 +20,8 @@ class RequestLogsApiKeyId(Migration):
     description = "Add api_key_id column to request_logs for key-level auditing"
 
     def up(self, conn: sqlite3.Connection) -> None:
-        conn.execute("""
-            ALTER TABLE request_logs ADD COLUMN api_key_id INTEGER DEFAULT 0
-        """)
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(request_logs)")]
+        if "api_key_id" not in cols:
+            conn.execute("""
+                ALTER TABLE request_logs ADD COLUMN api_key_id INTEGER DEFAULT 0
+            """)

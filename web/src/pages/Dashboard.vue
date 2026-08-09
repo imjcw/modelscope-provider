@@ -204,13 +204,17 @@ async function loadAll() {
     getModelQuotas(),
     getAlerts(7),
   ])
+  const allFailed = s.status !== 'fulfilled' && q.status !== 'fulfilled' && a.status !== 'fulfilled'
+
   if (s.status === 'fulfilled') {
     stats.value = s.value.data
   } else if (!stats.value) {
-    error.value = s.reason?.message || '加载统计数据失败'
+    error.value = allFailed
+      ? '统计、配额和告警全部加载失败，请检查服务端'
+      : s.reason?.message || '加载统计数据失败'
   }
   if (q.status === 'fulfilled') quotas.value = q.value.data || []
-  if (a.status === 'fulfilled') alertsRaw.value = a.value.data || []
+  if (a.status === 'fulfilled') alertsRaw.value = (a.value.data || {}).records || []
   loading.value = false
 }
 

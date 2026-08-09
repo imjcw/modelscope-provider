@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 import './assets/main.css'
 
@@ -19,20 +19,21 @@ import './assets/main.css'
 
 // ── Router ──
 const routes = [
-  { path: '/', name: 'dashboard', component: () => import('./pages/Dashboard.vue') },
-  { path: '/suppliers', name: 'suppliers', component: () => import('./pages/Accounts.vue') },
-  { path: '/provider-types', name: 'provider-types', component: () => import('./pages/ProviderTypes.vue') },
-  { path: '/mappings', name: 'mappings', component: () => import('./pages/Mappings.vue') },
-  { path: '/logs', name: 'logs', component: () => import('./pages/Logs.vue') },
-  { path: '/alerts', name: 'alerts', component: () => import('./pages/Alerts.vue') },
-  { path: '/test', name: 'test', component: () => import('./pages/Test.vue') },
-  { path: '/config', name: 'config', component: () => import('./pages/Config.vue') },
-  { path: '/guide', name: 'guide', component: () => import('./pages/Guide.vue') },
-  { path: '/keys', name: 'keys', component: () => import('./pages/ApiKeys.vue') },
+  { path: '/web', name: 'dashboard', component: () => import('./pages/Dashboard.vue') },
+  { path: '/web/suppliers', name: 'suppliers', component: () => import('./pages/Accounts.vue') },
+  { path: '/web/provider-types', name: 'provider-types', component: () => import('./pages/ProviderTypes.vue') },
+  { path: '/web/mappings', name: 'mappings', component: () => import('./pages/Mappings.vue') },
+  { path: '/web/logs', name: 'logs', component: () => import('./pages/Logs.vue') },
+  { path: '/web/alerts', name: 'alerts', component: () => import('./pages/Alerts.vue') },
+  { path: '/web/test', name: 'test', component: () => import('./pages/Test.vue') },
+  { path: '/web/config', name: 'config', component: () => import('./pages/Config.vue') },
+  { path: '/web/guide', name: 'guide', component: () => import('./pages/Guide.vue') },
+  { path: '/web/keys', name: 'keys', component: () => import('./pages/ApiKeys.vue') },
+  { path: '/:pathMatch(.*)*', redirect: '/web' },
 ]
 
 const router = createRouter({
-  history: createWebHashHistory(),
+  history: createWebHistory(),
   routes,
 })
 

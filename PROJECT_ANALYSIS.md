@@ -1,13 +1,13 @@
-# ModelScope 代理服务 — 项目深度分析
+# AI Provider — 项目深度分析
 
 > 分析对象：`d:/workspace/ai/modelscope-provider`（分支 `batch-task-5-8`）
-> 分析时间：2026-07-26
+> 分析时间：2026-08-05
 
 ---
 
 ## 一、项目定位与概览
 
-这是一个**兼容 OpenAI API 格式的 ModelScope 代理服务**，核心价值是把多个 ModelScope 供应商账户聚合成一个统一的、OpenAI SDK 可直接调用的推理端点，并配有一套完整的 Web 管理后台（账户/模型映射/日志/统计/告警/配额/客户端 Key/配置）。
+这是一个**兼容 OpenAI API 格式的 AI Provider 网关**，核心价值是把多个 AI 供应商账户（内置 ModelScope / SenseTime，可 DB 自定义）聚合成一个统一的、OpenAI SDK 可直接调用的推理端点，并配有一套完整的 Web 管理后台（账户/模型映射/日志/统计/告警/配额/客户端 Key/配置）。
 
 关键能力：
 
@@ -16,7 +16,7 @@
 - ✅ 多供应商类型抽象（内置 `modelscope` / `sensetime`，可 DB 自定义）
 - ✅ 多种限流策略（header 被动式、固定窗口、按模型固定窗口）
 - ✅ 额度/配额监控、熔断（Circuit Breaker）、自动标记不可用
-- ✅ SQLite 持久化 + 自研数据库迁移框架（14 个版本）
+- ✅ SQLite 持久化 + 自研数据库迁移框架（21 个版本）
 - ✅ 分钟级预聚合统计，独立于原始日志保留周期
 - ✅ 客户端 API Key 鉴权与用量归因
 - ✅ Vue3 + Vite 管理前端（暗色霓虹主题），由 FastAPI 静态托管
@@ -75,7 +75,7 @@
                     ▼
         ┌──────────────────────────┐
         │  DatabaseManager (SQLite)│  ← core.database
-        │  + Migrator (14 个迁移)  │
+        │  + Migrator (21 个迁移)  │
         └──────────────────────────┘
 ```
 
@@ -105,7 +105,7 @@
 - **`database.py` — `DatabaseManager`**：每次 `get_connection()` 新建 sqlite3 连接并开启 `foreign_keys=ON`、`busy_timeout=3000`、`journal_mode=WAL`、`synchronous=NORMAL`、`check_same_thread=False`，有效规避"database is locked"。`initialize_tables()` 建最新基线 schema；`seed_default_config()` 写默认配置（负载均衡策略、超时、重试、日志保留等）；`get_today_date()` 用项目时区。
 - **`http_client.py` — `HttpClient`**：轻量单例，复用唯一 `httpx.AsyncClient`，`request()` 自动注入 Bearer 头。
 - **`timezone.py`**：统一使用 **Asia/Shanghai (UTC+8)**，导出 `now()/today()/today_range()/as_local()` 等，避免系统时区隐式 bug。
-- **`migrations/`**：**自研迁移框架**（非 alembic）。`Migration` 抽象基类 → `@register` 注册 → `Migrator.run()` 用 `schema_versions` 表做幂等执行（按 version 排序，`up()` 内用 `PRAGMA table_info` 判断列存在性）。支持 `rollback()`。CLI：`python -m core.migrations.cli`。**目前 14 个迁移版本**（001→014），涵盖 quota token 列、request_logs 扩展、accounts 去 region、provider_types 建表与种子、mapping_models 外键改造等。
+- **`migrations/`**：**自研迁移框架**（非 alembic）。`Migration` 抽象基类 → `@register` 注册 → `Migrator.run()` 用 `schema_versions` 表做幂等执行（按 version 排序，`up()` 内用 `PRAGMA table_info` 判断列存在性）。支持 `rollback()`。CLI：`python -m core.migrations.cli`。**目前 21 个迁移版本**（001→021），涵盖 quota token 列、request_logs 扩展、accounts 去 region、provider_types 建表与种子、mapping_models 外键改造、account_api_keys 多 Key 轮换（018–021）等。
 
 ### 4.2 数据访问层 `repositories/` + `models/`
 
@@ -152,7 +152,7 @@
 ### 4.4 API 层 `api/`
 
 - **`routes.py`**：`POST /api/v1/chat/completions`（核心推理，完全 OpenAI 兼容，支持流式与非流式）、`GET /api/health`、`GET /api/admin/quota`。推理链路：客户端 Key 鉴权 → `AliasRouter.get_candidates()` 取候选（失败 fallback）→ 按 `provider_type` 选限流策略 `check_rate_limit` → `CircuitBreaker.check()` 跳过冻结 → 转发上游 → `record_request`/`QuotaUpdater` 回写配额 → `CircuitBreaker` 记录成败 → `ResponseConverter` 转换 → `AdminService.log_request` 落库与预聚合。错误体统一为 OpenAI 格式 `{"error":{"message,type,param,code"}}`。
-- **`admin_routes.py`**：~60 个管理端点（供应商/模型/类型/映射/配置/日志(分页过滤)/统计/配额/告警/客户端 Key/应用信息/性能/熔断状态）。所有写操作在增删改供应商/映射后调用 `_refresh_after_account_change`，重建 `LoadBalancer` 并清空别名缓存，保证运行时一致性。
+- **`admin_routes.py`**：51 个管理端点（供应商/模型/类型/映射/配置/日志(分页过滤)/统计/配额/告警/客户端 Key/应用信息/性能/熔断状态）。所有写操作在增删改供应商/映射后调用 `_refresh_after_account_change`，重建 `LoadBalancer` 并清空别名缓存，保证运行时一致性。
 
 ### 4.5 前端 `web/`
 
@@ -228,7 +228,7 @@ request_stats_minute(bucket, model, account_id, client_key_name, virtual_model) 
 ## 八、技术亮点
 
 1. **架构分层清晰**：推理面（OpenAI 兼容）与管理面（admin API）职责分离，服务经 `initialize_all()` 统一装配，依赖注入到 `app.state`。
-2. **自研幂等迁移框架**：基于 `schema_versions` 表，可回滚，CLI 可用，演进历史清晰（14 版）。
+2. **自研幂等迁移框架**：基于 `schema_versions` 表，可回滚，CLI 可用，演进历史清晰（21 版，001→021）。
 3. **多供应商 + 多限流策略可插拔**：`provider_types` 表驱动策略构建，`rebuild_rate_limit_strategies()` 支持运行时热更新。
 4. **统计与日志解耦**：分钟级预聚合 `request_stats_minute`，统计/Key 归因不受 `request_logs` 短期保留影响。
 5. **健壮的容错链路**：候选 fallback + 熔断 + 配额自动标记不可用 + 后台周期任务。
@@ -262,14 +262,14 @@ request_stats_minute(bucket, model, account_id, client_key_name, virtual_model) 
 7. **README 与实现有出入**
    README 提到的 `/stats` 页面在实际代码已并入 `Dashboard.vue`；README 的账户管理路径写的是 `/accounts`，实际路由为 `/suppliers`；README 仍保留 `server.py`/`openai_proxy.py` 的过时运行说明。建议同步文档。
 
-8. **依赖缺少版本锁定与 `aiofiles` 实际使用**
-   `requirements.txt` 未 pin 版本（仅下限）；`aiofiles` 被声明但似乎未用到。建议补充 lock（如 `pip-compile`）并在前端构建说明中强调需先 `npm run build` 生成 `web/dist`。
+8. **依赖缺少版本锁定**
+   `requirements.txt` 未 pin 版本（仅下限）。`aiofiles` **不是死依赖**——它是 Starlette `StaticFiles`（托管 `web/dist/`）的运行时依赖，在应用中直接 `import` 不到，但 Starlette 内部调用时必须有；因此显式声明在 `requirements.txt` 中并在注释中标注用途是正确的。`demo/test_models.py` 使用 `aiohttp`（非运行时依赖，仅手动测试脚本使用，不在 `requirements.txt` 中）。建议补充 lock（如 `pip-compile`）并在前端构建说明中强调需先 `npm run build` 生成 `web/dist`。
 
 ---
 
 ## 十、总结
 
-这是一个**设计成熟、分层清晰、功能完整**的 ModelScope→OpenAI 代理服务，后端以 FastAPI + 手写 SQL SQLite 为核心，配套 Vue3 管理前端，具备多供应商、多限流策略、配额/熔断、分钟级统计与可插拔迁移框架。当前工作区聚焦于**仪表盘模型配额/限流可视化**（后端 `admin_service.get_model_quotas` + 前端 `ModelStatusTable`），并补充了对应测试。
+这是一个**设计成熟、分层清晰、功能完整**的 AI Provider 网关，后端以 FastAPI + 手写 SQL SQLite 为核心，配套 Vue3 管理前端，具备多供应商、多限流策略、配额/熔断、分钟级统计与可插拔迁移框架。当前工作区聚焦于**仪表盘模型配额/限流可视化**（后端 `admin_service.get_model_quotas` + 前端 `ModelStatusTable`），并补充了对应测试。
 
 主要可优化点集中在：**时区一致性 bug（日志清理）**、**管理 API 鉴权缺失**、**遗留文件清理**、**巨型 `AdminService` 拆分** 与 **文档同步**。
 

@@ -4,10 +4,12 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('web/dist', 'web/dist'), ('core/migrations/migrations', 'core/migrations/migrations')]
 binaries = []
-hiddenimports = ['main', 'multiprocessing']
+hiddenimports = ['main', 'multiprocessing', 'win32gui', 'win32api', 'win32con']
 hiddenimports += collect_submodules('core.migrations.migrations')
 tmp_ret = collect_all('uvicorn')
+tmp_ret2 = collect_all('PIL')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+datas += tmp_ret2[0]; binaries += tmp_ret2[1]; hiddenimports += tmp_ret2[2]
 
 
 a = Analysis(
@@ -31,14 +33,14 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='ModelScopeProvider.exe',
+    name='AIProvider.exe',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

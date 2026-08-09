@@ -32,13 +32,30 @@
             <td>
               <div class="flex items-center gap-3">
                 <Avatar :text="acc.name" size="sm" />
-                <div>
-                  <p class="font-medium text-ls-text">{{ acc.name }}</p>
+                <div class="relative group/cb">
+                  <p class="font-medium text-ls-text flex items-center gap-2">
+                    {{ acc.name }}
+                    <span v-if="cbByAccount[acc.id]?.length"
+                      class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/25 font-medium whitespace-nowrap"
+                      :title="formatCircuitBreakerTooltip(acc.id)">
+                      <span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>
+                      熔断
+                    </span>
+                  </p>
                   <p class="text-xs text-ls-muted font-mono">{{ maskKey(acc.api_key) }}</p>
                   <p v-if="acc.api_keys && acc.api_keys.length > 1" class="text-xs text-ls-dim">
                     +{{ acc.api_keys.length - 1 }} 个密钥
                     <span v-if="acc.api_key_records && acc.api_key_records.some(r => r.status === 'frozen')"
                       class="text-yellow-400"> · 有已冻结密钥</span>
+                    <span v-if="cbByAccount[acc.id]?.length"
+                      class="text-red-400 font-medium">
+                      · {{ cbByAccount[acc.id].length }} 个模型熔断中
+                    </span>
+                  </p>
+                  <p v-else-if="cbByAccount[acc.id]?.length"
+                    class="text-xs text-red-400 font-medium">
+                    <CIcon name="alert-triangle" :size="11" :stroke-width="2.5" class="inline mr-1" />
+                    {{ cbByAccount[acc.id].length }} 个模型被熔断器冻结
                   </p>
                 </div>
               </div>
@@ -353,7 +370,7 @@ import SegmentedControl from '@/components/SegmentedControl.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
 import { maskKey, formatContextLength } from '@/utils/format'
 import { modelTypeColor, modelTypeLabel } from '@/constants/modelType'
-import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, getModelQuotas, getProviderTypes, listApiKeys, addApiKey, updateApiKeyStatus, deleteApiKey } from '@/api'
+import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, getModelQuotas, getProviderTypes, listApiKeys, addApiKey, updateApiKeyStatus, deleteApiKey, getCircuitBreakerStates } from '@/api'
 
 const toast = inject('$toast')
 
@@ -383,6 +400,16 @@ const loadProviderTypes = async () => {
 
 // ── 模型用量数据（/api/model-quota） ──
 const modelQuotaMap = ref({}) // { [supplier_id]: [quotaItems] }
+const circuitBreakerStates = ref([]) // { key_id, account_id, model_name, frozen_remaining, error_type, ... }
+const cbByAccount = computed(() => {
+  const map = {}
+  for (const s of circuitBreakerStates.value) {
+    const aid = s.account_id
+    if (!map[aid]) map[aid] = []
+    map[aid].push(s)
+  }
+  return map
+})
 const showModelInfoDrawer = ref(false)
 const modelInfoSupplier = ref(null)
 
@@ -472,6 +499,21 @@ const modelInfoTotalCached = computed(() =>
 const modelInfoAvailable = computed(() =>
   modelInfoRows.value.filter(m => !m.is_unavailable).length
 )
+
+const formatCircuitBreakerTooltip = (accountId) => {
+  const states = cbByAccount.value[accountId] || []
+  if (states.length === 0) return ''
+  return states.map(s =>
+    `${s.model_name} (${s.error_type || 'error'}) — 剩余 ${formatCircuitBreakerTime(s.frozen_remaining || 0)}`
+  ).join('\n')
+}
+
+const formatCircuitBreakerTime = (seconds) => {
+  if (seconds <= 0) return '已解冻'
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+}
 
 const openModelInfo = (acc) => {
   modelInfoSupplier.value = acc
@@ -649,6 +691,7 @@ const loadData = async () => {
     })
     // Load model-level quotas (今日) and group by supplier_id
     await loadModelQuotas(0)
+    await loadCircuitBreaker()
   } catch (e) {
     error.value = e.message || 'Failed to load suppliers'
   }
@@ -667,6 +710,16 @@ const loadModelQuotas = async (days = 0) => {
     modelQuotaMap.value = map
   } catch (e) {
     console.error('Failed to load model quotas:', e)
+  }
+}
+
+// ── Circuit Breaker ──
+const loadCircuitBreaker = async () => {
+  try {
+    const res = await getCircuitBreakerStates()
+    circuitBreakerStates.value = res.data?.circuits || []
+  } catch (e) {
+    console.error('Failed to load circuit breaker states:', e)
   }
 }
 

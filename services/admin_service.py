@@ -1,5 +1,6 @@
 """Admin service for the management panel."""
 import datetime
+from datetime import timezone as _utc
 import logging
 import uuid
 
@@ -682,7 +683,7 @@ class AdminService:
         # project timezone (Asia/Shanghai) here would shift the cutoff +8h and
         # wrongly delete all logs from the last 8 hours.
         cutoff = (
-            datetime.datetime.now(datetime.timezone.utc)
+            datetime.datetime.now(_utc)
             - datetime.timedelta(hours=hours)
         ).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -828,7 +829,8 @@ class AdminService:
                     cached_tokens: int = 0, prompt_partial_cached: int = 0,
                     client_key_name: str = None,
                     response_headers: str = None,
-                    api_key_id: int = 0) -> str:
+                    api_key_id: int = 0,
+                    error_source: str = None) -> str:
         """Log a request and return its request_id."""
         request_id = f"req_{uuid.uuid4().hex[:8]}"
 
@@ -862,6 +864,7 @@ class AdminService:
             client_key_name=client_key_name,
             response_headers=response_headers,
             api_key_id=api_key_id,
+            error_source=error_source,
         )
 
         # Update minute-level aggregated stats (independent of raw log retention)

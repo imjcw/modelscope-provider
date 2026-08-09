@@ -1,4 +1,4 @@
-"""打包脚本：将 ModelScope Provider 打包为单文件 .exe（Windows）。
+"""打包脚本：将 AI Provider 打包为单文件 .exe（Windows）。
 
 用法（在项目根目录下执行）::
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
-NAME = "ModelScopeProvider"
+NAME = "AIProvider"
 DIST = ROOT / "dist"
 
 
@@ -69,13 +69,17 @@ def build_exe():
         "--clean",
         "--onefile",
         "--name", NAME,
-        "--console",
+        "--noconsole",
         "--add-data", add_data_web,
         "--add-data", add_data_migrations,
         "--collect-all", "uvicorn",
+        "--collect-all", "PIL",
         "--collect-submodules", "core.migrations.migrations",
         "--hidden-import", "main",
         "--hidden-import", "multiprocessing",
+        "--hidden-import", "win32gui",
+        "--hidden-import", "win32api",
+        "--hidden-import", "win32con",
         str(ROOT / "run.py"),
     ]
 
@@ -97,7 +101,8 @@ def build_exe():
     print("  使用方法：")
     print(f"    1. 将 {NAME}.exe 复制到目标电脑")
     print("    2. 双击运行（首次启动自动创建 data/ 目录）")
-    print("    3. 浏览器自动打开 http://localhost:8000")
+    print("    3. 程序运行在系统托盘，右键图标可打开后台或退出")
+    print(f"    4. 浏览器自动打开 http://localhost:8000")
     print()
 
 

@@ -49,7 +49,7 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--chart-green)" stroke-width="2.5"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
               <span class="text-xs text-green-400">注意</span>
             </div>
-            <p class="text-xs text-ls-dim">api_key 可以填任意字符串，代理服务不会校验。base_url 指向本服务的 `/api/v1` 路径即可。</p>
+            <p class="text-xs text-ls-dim">api_key 可以填任意字符串，代理服务不会校验。base_url 指向本服务的 `/openai/v1` 路径即可。</p>
           </div>
         </div>
 
@@ -166,13 +166,13 @@ import CopyButton from '@/components/CopyButton.vue'
 import CodeBlock from '@/components/CodeBlock.vue'
 
 // ── 页面级数据 ──
-const apiBaseUrl = computed(() => window.location.origin + '/api/v1')
+const apiBaseUrl = ref(window.location.origin + '/openai/v1')
 
 // ── 三步开始使用 ──
 const steps = [
   { title: '添加供应商', desc: '在「供应商管理」中添加 ModelScope 账户' },
   { title: '配置别名映射', desc: '在「模型映射」中设置别名到真实模型 ID' },
-  { title: '接入工具', desc: '将工具 API 地址指向本服务的 /api/v1' },
+  { title: '接入工具', desc: '将工具 API 地址指向本服务的 /openai/v1' },
 ]
 
 // ── 标签页 ──
@@ -184,7 +184,7 @@ const pythonSdkCode = `from openai import OpenAI
 
 client = OpenAI(
     api_key="任意值",
-    base_url="${window.location.origin}/api/v1",
+    base_url="${window.location.origin}/openai/v1",
 )
 
 # 普通调用
@@ -211,7 +211,7 @@ const jsSdkCode = `import { OpenAI } from "openai"
 
 const client = new OpenAI({
   apiKey: "任意值",
-  baseURL: "${window.location.origin}/api/v1",
+  baseURL: "${window.location.origin}/openai/v1",
 })
 
 // 普通调用
@@ -237,7 +237,7 @@ for await (const chunk of stream) {
   }
 }`
 
-const curlCode = `curl ${window.location.origin}/api/v1/chat/completions \\
+const curlCode = `curl ${window.location.origin}/openai/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "hy3",
@@ -249,7 +249,7 @@ const curlCode = `curl ${window.location.origin}/api/v1/chat/completions \\
     "max_tokens": 512
   }'`
 
-const curlStreamCode = `curl ${window.location.origin}/api/v1/chat/completions \\
+const curlStreamCode = `curl ${window.location.origin}/openai/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "hy3",
