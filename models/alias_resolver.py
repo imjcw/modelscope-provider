@@ -107,9 +107,9 @@ class ModelAliasResolver:
         except httpx.HTTPStatusError as e:
             # If model alias API doesn't exist, returns 404, or is blocked
             # by WAF/Cloudflare (403), just use the alias as-is. Some upstream
-            # providers (e.g. routeway.ai) don't expose a /models/{id} lookup
-            # endpoint at all.
-            if e.response.status_code in (403, 404):
+            # providers (e.g. routeway.ai, kilo.ai) don't expose a /models/{id}
+            # lookup endpoint at all (405 Method Not Allowed).
+            if e.response.status_code in (403, 404, 405):
                 logger.warning(
                     f"Model alias API not available for '{alias}' "
                     f"({e.response.status_code}), using as-is"

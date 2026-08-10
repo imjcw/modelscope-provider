@@ -381,7 +381,7 @@ import SegmentedControl from '@/components/SegmentedControl.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
 import { maskKey, formatContextLength } from '@/utils/format'
 import { modelTypeColor, modelTypeLabel } from '@/constants/modelType'
-import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, getModelQuotas, getProviderTypes, listApiKeys, addApiKey, updateApiKeyStatus, deleteApiKey, getCircuitBreakerStates } from '@/api'
+import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, deleteSupplierModel as apiDeleteSupplierModel, getModelQuotas, getProviderTypes, listApiKeys, addApiKey, updateApiKeyStatus, deleteApiKey, getCircuitBreakerStates } from '@/api'
 
 const toast = inject('$toast')
 
@@ -657,23 +657,36 @@ const deletingSupplier = ref(null)
 
 // ── Model delete confirmation modal ──
 const showModelDeleteModal = ref(false)
-const pendingModelDelete = ref(null) // { name, source: 'new'|'edit', idx }
+const pendingModelDelete = ref(null) // { name, source: 'new'|'edit', idx, id }
 
-const confirmModelDelete = () => {
+const confirmModelDelete = async () => {
   if (!pendingModelDelete.value) return
-  const { source, idx } = pendingModelDelete.value
-  if (source === 'new') {
+  const { source, idx, id } = pendingModelDelete.value
+  // 已保存到数据库的模型：调用后端 API 真实删除（级联清理路由绑定）。
+  // 此前只做 splice，保存走 bulk_upsert（纯 upsert 不删行），刷新后模型会"复活"。
+  if (source === 'edit' && id) {
+    try {
+      await apiDeleteSupplierModel(editingSupplier.value.id, id)
+      editingSupplier.value.models.splice(idx, 1)
+      toast('模型已删除', 'success')
+    } catch (e) {
+      toast('删除失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
+      return
+    }
+  } else if (source === 'new') {
     newSupplier.value.models.splice(idx, 1)
   } else {
     editingSupplier.value.models.splice(idx, 1)
   }
+  pendingModelDelete.value = null
+  showModelDeleteModal.value = false
 }
 
 const openModelDeleteConfirm = (source, idx) => {
   const model = source === 'new'
     ? newSupplier.value.models[idx]
     : editingSupplier.value.models[idx]
-  pendingModelDelete.value = { name: model?.model_name || '(未命名)', source, idx }
+  pendingModelDelete.value = { name: model?.model_name || '(未命名)', source, idx, id: model?.id || null }
   showModelDeleteModal.value = true
 }
 
