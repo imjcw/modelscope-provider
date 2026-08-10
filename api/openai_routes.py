@@ -17,6 +17,7 @@ import logging
 import time
 import httpx
 from datetime import datetime, timezone
+from services.models_cache import get_models
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +245,7 @@ def refresh_load_balancer(request: Request):
         supplier_model_repo = services.get("supplier_model_repo")
 
         if db and supplier_model_repo is not None:
-            from models.account import ModelScopeAccount, DEFAULT_PROVIDER_TYPE
+            from models.account import ModelScopeAccount, DEFAULT_PROVIDER_TYPE, build_ms_account
             from repositories.account_repository import AccountRepository
 
             repo = AccountRepository(db)
@@ -265,11 +266,8 @@ def refresh_load_balancer(request: Request):
 
             accounts = []
             for a in db_accounts:
-                accounts.append(ModelScopeAccount(
-                    account_id=a["account_id"],
-                    name=a.get("name", ""),
-                    base_url=a["base_url"],
-                    provider_type=a.get("provider_type", DEFAULT_PROVIDER_TYPE),
+                accounts.append(build_ms_account(
+                    a,
                     api_key_records=keys_by_id.get(a["id"]) or None,
                     unavailable_models=unavailable_map.get(a["account_id"], set()),
                 ))
@@ -336,7 +334,6 @@ async def stream_response_with_logging(
     request_start: str,
     quota_updater=None,
     client_key_name: str = None,
-    strategy=None,
     circuit_breaker=None,
     alias_router=None,
     key_id: int = 0,
@@ -404,7 +401,7 @@ async def stream_response_with_logging(
         if circuit_breaker is not None:
             try:
                 circuit_breaker.record_failure(
-                    key_id, account.account_id, actual_model_id or model_name, -1, strategy,
+                    key_id, account.account_id, actual_model_id or model_name, -1,
                 )
             except Exception:
                 pass
@@ -450,10 +447,15 @@ async def stream_response_with_logging(
             if circuit_breaker is not None:
                 try:
                     circuit_breaker.record_failure(
-                        key_id, account.account_id, actual_model_id or model_name, 502, strategy,
+                        key_id, account.account_id, actual_model_id or model_name, 502,
                     )
                 except Exception:
                     pass
+        # 与非流式对齐：raw_response 同样截断到 50KB，避免长流撑大列（B11/P8）
+        _raw_response_text = raw_response_fallback or "".join(raw_chunks)
+        if len(_raw_response_text) > 50000:
+            _raw_response_text = _raw_response_text[:50000] + "...(truncated)"
+
         logger.info(
             f"Streaming finished for {account.account_id}: "
             f"status={log_status} input={input_tokens} output={output_tokens} "
@@ -474,13 +476,14 @@ async def stream_response_with_logging(
                     latency_ms=None,
                     error_message=log_error,
                     raw_request=json.dumps(request_body, ensure_ascii=False),
-                    raw_response=raw_response_fallback or "".join(raw_chunks),
+                    raw_response=_raw_response_text,
                     request_start=request_start,
                     first_response=first_response,
                     end_time=end_time,
                     cached_tokens=cached_tokens,
                     prompt_partial_cached=prompt_partial_cached,
                     client_key_name=client_key_name,
+                    api_key_id=key_id,
                     response_headers=json.dumps(response_headers, ensure_ascii=False) if response_headers else None,
                 )
             except asyncio.CancelledError:
@@ -488,21 +491,10 @@ async def stream_response_with_logging(
             except Exception as e:
                 logger.error(f"Failed to log streaming request: {e}")
 
-    # Update quota via provider strategy (or fallback to legacy quota_updater)
-    if strategy:
-        try:
-            await asyncio.to_thread(strategy.record_request,
-                account.account_id, actual_model_id or model_name,
-                response_headers, stream_status_code,
-            )
-            if input_tokens > 0 or output_tokens > 0:
-                await asyncio.to_thread(strategy.record_usage,
-                    account.account_id, actual_model_id or model_name,
-                    input_tokens, output_tokens,
-                )
-        except Exception as e:
-            logger.warning(f"Failed to update streaming quota via strategy: {e}")
-    elif quota_updater:
+    # Update quota via the legacy quota_updater. The pluggable provider
+    # strategy from services.strategy was never implemented, so `strategy`
+    # was always None (B1) — quota_updater is the real working path.
+    if quota_updater:
         try:
             if input_tokens > 0 or output_tokens > 0:
                 await asyncio.to_thread(quota_updater.update_quota_from_usage,
@@ -562,16 +554,6 @@ async def _build_request_body(data: ChatCompletionRequest, actual_model_id: str)
     return body
 
 
-def _get_strategy_for_account(account, services: dict):
-    """Build the provider strategy for a selected account."""
-    try:
-        provider_type = account.provider_type or "modelscope"
-        from services.strategy import StrategyFactory
-        return StrategyFactory.get_strategy(provider_type)
-    except Exception:
-        return None
-
-
 async def _try_candidate(
     *,
     request: ChatCompletionRequest,
@@ -600,7 +582,6 @@ async def _try_candidate(
             account.account_id, actual_model_id, request.stream,
         )
 
-    strategy = _get_strategy_for_account(account, services)
     key_id = getattr(account, "_key_id", 0) or 0
     api_key = getattr(account, "_key_string", None) or account.api_key
 
@@ -653,7 +634,7 @@ async def _try_candidate(
         if circuit_breaker is not None:
             try:
                 circuit_breaker.record_failure(
-                    key_id, account.account_id, actual_model_id, -1, strategy,
+                    key_id, account.account_id, actual_model_id, -1,
                 )
             except Exception:
                 pass
@@ -671,20 +652,10 @@ async def _try_candidate(
         error_code = response.status_code
         detail_msg = f"Supplier error {error_code}: {error_body[:200]}" if error_body else f"Supplier error {error_code}"
 
-        if error_code == 429 and strategy is not None:
-            try:
-                await asyncio.to_thread(
-                    strategy.record_request,
-                    account.account_id, actual_model_id,
-                    dict(response.headers), error_code,
-                )
-            except Exception:
-                pass
-
         if circuit_breaker is not None:
             try:
                 circuit_breaker.record_failure(
-                    key_id, account.account_id, actual_model_id, error_code, strategy,
+                    key_id, account.account_id, actual_model_id, error_code,
                 )
             except Exception:
                 pass
@@ -760,18 +731,19 @@ async def _try_candidate(
             except Exception as le:
                 logger.error(f"Failed to log non-stream request: {le}", exc_info=True)
 
-        # Quota update
+        # Quota update — the legacy QuotaUpdater is the working path (B1:
+        # the pluggable services.strategy was never implemented, so the
+        # `strategy` branch above was always skipped).
         try:
-            if strategy and (input_tokens > 0 or output_tokens > 0):
+            if quota_updater and (input_tokens > 0 or output_tokens > 0):
                 await asyncio.to_thread(
-                    strategy.record_request,
-                    account.account_id, actual_model_id,
-                    dict(response.headers), response.status_code,
+                    quota_updater.update_quota_from_usage,
+                    account, input_tokens, output_tokens, actual_model_id,
                 )
+            if quota_updater and response is not None:
                 await asyncio.to_thread(
-                    strategy.record_usage,
-                    account.account_id, actual_model_id,
-                    input_tokens, output_tokens,
+                    quota_updater.update_quota_after_request,
+                    account, dict(response.headers), actual_model_id,
                 )
         except Exception as qe:
             logger.warning(f"Failed to update quota: {qe}")
@@ -785,6 +757,15 @@ async def _try_candidate(
         if alias_router is not None:
             try:
                 alias_router.record_usage(actual_model_id, client_key_name or "")
+            except Exception:
+                pass
+
+        # Release the least_conn in-flight slot for this now-completed
+        # non-streaming request. (The streaming path releases inside the
+        # generator's finally instead, so the two never double-release.)
+        if alias_router is not None:
+            try:
+                alias_router.release(key_id, actual_model_id)
             except Exception:
                 pass
 
@@ -807,7 +788,7 @@ async def _try_candidate(
             response, account, request.model, body,
             actual_model_id, admin_service, request_start,
             quota_updater=quota_updater, client_key_name=client_key_name,
-            strategy=strategy, circuit_breaker=circuit_breaker,
+            circuit_breaker=circuit_breaker,
             alias_router=alias_router, key_id=key_id,
         ),
         media_type="text/event-stream",
@@ -890,6 +871,17 @@ async def chat_completions(data: ChatCompletionRequest, fastapi_request: Request
                         )
                         continue
 
+                    # Acquire an in-flight slot for least_conn accounting. The
+                    # matching release happens when the request finishes: the
+                    # stream path releases inside stream_response_with_logging's
+                    # finally; the non-stream path releases below in _try_candidate;
+                    # a failed candidate releases here before falling back.
+                    if alias_router is not None:
+                        try:
+                            alias_router.acquire(candidate.key_id, actual_model_id)
+                        except Exception:
+                            pass
+
                     try:
                         return await _try_candidate(
                             request=data, account=account,
@@ -905,6 +897,13 @@ async def chat_completions(data: ChatCompletionRequest, fastapi_request: Request
                         )
                     except HTTPException as e:
                         last_error = e
+                        # Release the in-flight slot for the failed candidate so
+                        # least_conn counting stays accurate across fallbacks.
+                        if alias_router is not None:
+                            try:
+                                alias_router.release(candidate.key_id, actual_model_id)
+                            except Exception:
+                                pass
                         logger.warning(
                             "Candidate %d/%d failed: account=%s model=%s status=%s",
                             candidate_idx + 1, len(candidates),
@@ -1014,25 +1013,35 @@ async def chat_completions(data: ChatCompletionRequest, fastapi_request: Request
                       "param": None, "code": "internal_error"}})
 
 
+def _load_active_models(admin_service) -> list:
+    """Build the OpenAI-compatible model list from active mapping rows.
+
+    Extracted so the result can be cached (see ``services.models_cache``) and
+    reused by both the list and single-model endpoints (P3).
+    """
+    mappings = admin_service.mapping_repo.find_all()
+    created = int(datetime.now(timezone.utc).timestamp())
+    data = []
+    for m in mappings:
+        if m.get("status", "active") != "active":
+            continue
+        data.append({
+            "id": m["alias_name"],
+            "object": "model",
+            "created": created,
+            "owned_by": "provider",
+        })
+    return data
+
+
 @router.get("/v1/models")
 async def list_models(fastapi_request: Request):
-    """OpenAI-compatible list models endpoint."""
+    """OpenAI-compatible list models endpoint (cached, see P3)."""
     _authenticate_client_key(fastapi_request)
 
     admin_service = get_admin_service(fastapi_request)
-    data = []
     try:
-        mappings = admin_service.mapping_repo.find_all()
-        created = int(datetime.now(timezone.utc).timestamp())
-        for m in mappings:
-            if m.get("status", "active") != "active":
-                continue
-            data.append({
-                "id": m["alias_name"],
-                "object": "model",
-                "created": created,
-                "owned_by": "provider",
-            })
+        data = get_models(lambda: _load_active_models(admin_service))
     except Exception as e:
         logger.error(f"Failed to list models: {e}", exc_info=True)
         raise HTTPException(
@@ -1055,12 +1064,12 @@ async def get_model(
     model_id: str,
     fastapi_request: Request,
 ):
-    """OpenAI-compatible single model query endpoint."""
+    """OpenAI-compatible single model query endpoint (cached, see P3)."""
     _authenticate_client_key(fastapi_request)
 
     admin_service = get_admin_service(fastapi_request)
     try:
-        mappings = admin_service.mapping_repo.find_all()
+        models = get_models(lambda: _load_active_models(admin_service))
     except Exception as e:
         logger.error(f"Failed to list models for {model_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -1068,14 +1077,9 @@ async def get_model(
             detail={"error": {"message": "Failed to list models", "type": "internal_error", "param": None, "code": "internal_error"}}
         )
 
-    for m in mappings:
-        if m.get("alias_name") == model_id:
-            return {
-                "id": model_id,
-                "object": "model",
-                "created": int(datetime.now(timezone.utc).timestamp()),
-                "owned_by": "provider",
-            }
+    for m in models:
+        if m.get("id") == model_id:
+            return m
 
     raise HTTPException(
         status_code=404,

@@ -29,18 +29,3 @@ def today_range() -> tuple[str, str]:
     """
     t = now()
     return (t.strftime("%Y-%m-%d 00:00:00"), t.strftime("%Y-%m-%d 23:59:59"))
-
-
-def as_local(dt: datetime) -> datetime:
-    """Convert a timezone-aware datetime to the project timezone."""
-    if dt.tzinfo is None:
-        # Treat naive as UTC (database default)
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(TZ)
-
-
-def make_aware_naive(dt: datetime) -> datetime:
-    """Attach project timezone to a naive datetime."""
-    if dt.tzinfo is not None:
-        return dt
-    return dt.replace(tzinfo=TZ)

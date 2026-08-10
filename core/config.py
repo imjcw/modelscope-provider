@@ -39,11 +39,17 @@ class ConfigManager:
         for account_data in accounts:
             # Accept `name` (preferred) or fall back to `account_id` for backward compat
             name = account_data.get("name") or account_data.get("account_id", "")
+            api_key = account_data.get("api_key")
+            base_url = account_data.get("base_url")
+            if not api_key or not base_url:
+                raise ValueError(
+                    f"Account {name!r} is missing required 'api_key' or 'base_url'"
+                )
             account = ModelScopeAccount(
                 account_id=account_data.get("account_id", ""),
                 name=name,
-                api_key=account_data["api_key"],
-                base_url=account_data["base_url"],
+                api_key=api_key,
+                base_url=base_url,
                 provider_type=account_data.get("provider_type", DEFAULT_PROVIDER_TYPE),
             )
             accounts_list.append(account)

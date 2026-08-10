@@ -10,6 +10,7 @@ Background tasks periodically flush dirty counters and reload config from the DB
 """
 import json
 import logging
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -163,6 +164,10 @@ class RateLimitCache:
         self._windows: Dict[Tuple[str, str], RateLimitWindow] = {}
         # Set of keys that have been modified since last flush
         self._dirty: Set[Tuple[str, str]] = set()
+        # Guard shared state against the flush() worker thread (main.py runs
+        # flush() via asyncio.to_thread) racing the event-loop's check()/reload().
+        # RLock so reload() (which calls _load_all()) can re-enter safely.
+        self._lock = threading.RLock()
         self._load_all()
 
     # ----- public API ------------------------------------------------------
@@ -180,50 +185,51 @@ class RateLimitCache:
         ``False`` if adding this request would exceed ``max_requests`` within
         the last ``window_seconds`` (the sliding window ending now).
         """
-        key = (account_id, model_name)
-        window = self._windows.get(key)
+        with self._lock:
+            key = (account_id, model_name)
+            window = self._windows.get(key)
 
-        if window is None:
-            # First request — create new sliding window and record it.
-            window = RateLimitWindow(
-                account_id=account_id,
-                model_name=model_name,
-                window_seconds=float(window_seconds),
-                max_requests=max_requests,
-            )
+            if window is None:
+                # First request — create new sliding window and record it.
+                window = RateLimitWindow(
+                    account_id=account_id,
+                    model_name=model_name,
+                    window_seconds=float(window_seconds),
+                    max_requests=max_requests,
+                )
+                window.add()
+                self._windows[key] = window
+                self._dirty.add(key)
+                logger.info(
+                    "RateLimit window created for %s/%s: 1/%d",
+                    account_id, model_name, max_requests,
+                )
+                return True
+
+            # Windows restored from DB by ``_load_all`` carry placeholder config
+            # (window_seconds/max_requests == 0) because the strategy config is not
+            # persisted in ``account_rate_windows``. Backfill the real config from
+            # the caller on first access; otherwise the window would be
+            # misinterpreted (e.g. a 0-second window purges every timestamp).
+            # Also self-heal when the caller's limit changed (e.g. the account's
+            # active key count changed → quota limit = config_limit × N).
+            if not window.window_seconds:
+                window.window_seconds = float(window_seconds)
+            if max_requests and window.max_requests != max_requests:
+                window.max_requests = max_requests
+
+            # Sliding window: reject only if the current window is already full.
+            if window.is_exhausted:
+                logger.warning(
+                    "RateLimit exhausted for %s/%s: %d/%d in last %ds",
+                    account_id, model_name, window.count, max_requests,
+                    int(window.window_seconds),
+                )
+                return False
+
             window.add()
-            self._windows[key] = window
             self._dirty.add(key)
-            logger.info(
-                "RateLimit window created for %s/%s: 1/%d",
-                account_id, model_name, max_requests,
-            )
             return True
-
-        # Windows restored from DB by ``_load_all`` carry placeholder config
-        # (window_seconds/max_requests == 0) because the strategy config is not
-        # persisted in ``account_rate_windows``. Backfill the real config from
-        # the caller on first access; otherwise the window would be
-        # misinterpreted (e.g. a 0-second window purges every timestamp).
-        # Also self-heal when the caller's limit changed (e.g. the account's
-        # active key count changed → quota limit = config_limit × N).
-        if not window.window_seconds:
-            window.window_seconds = float(window_seconds)
-        if max_requests and window.max_requests != max_requests:
-            window.max_requests = max_requests
-
-        # Sliding window: reject only if the current window is already full.
-        if window.is_exhausted:
-            logger.warning(
-                "RateLimit exhausted for %s/%s: %d/%d in last %ds",
-                account_id, model_name, window.count, max_requests,
-                int(window.window_seconds),
-            )
-            return False
-
-        window.add()
-        self._dirty.add(key)
-        return True
 
     def get_quota_info(
         self,
@@ -245,30 +251,31 @@ class RateLimitCache:
         It is ``None`` when no in-memory window exists, so callers can fall back
         to the DB snapshot rather than treating absence as 0.
         """
-        key = (account_id, model_name)
-        window = self._windows.get(key)
-        if window is None:
+        with self._lock:
+            key = (account_id, model_name)
+            window = self._windows.get(key)
+            if window is None:
+                return {
+                    "quota_remaining": max_requests or 0,
+                    "quota_limit": max_requests or 0,
+                    "request_count": None,
+                }
+
+            # Backfill placeholder config from restored-from-DB windows.
+            if not window.window_seconds and window_seconds:
+                window.window_seconds = float(window_seconds)
+            if max_requests and window.max_requests != max_requests:
+                window.max_requests = max_requests
+
+            count = window.count
             return {
-                "quota_remaining": max_requests or 0,
-                "quota_limit": max_requests or 0,
-                "request_count": None,
+                "quota_remaining": max(0, window.max_requests - count),
+                "quota_limit": window.max_requests,
+                "request_count": count,
+                "window_start": time.strftime(
+                    "%Y-%m-%dT%H:%M:%S", time.gmtime(window.window_start)
+                ),
             }
-
-        # Backfill placeholder config from restored-from-DB windows.
-        if not window.window_seconds and window_seconds:
-            window.window_seconds = float(window_seconds)
-        if max_requests and window.max_requests != max_requests:
-            window.max_requests = max_requests
-
-        count = window.count
-        return {
-            "quota_remaining": max(0, window.max_requests - count),
-            "quota_limit": window.max_requests,
-            "request_count": count,
-            "window_start": time.strftime(
-                "%Y-%m-%dT%H:%M:%S", time.gmtime(window.window_start)
-            ),
-        }
 
     def flush(self) -> int:
         """Write all dirty windows to the database.
@@ -276,17 +283,19 @@ class RateLimitCache:
         Persists each window's current sliding-window count and the list of
         request timestamps (JSON) so the window can be reconstructed exactly
         after a restart.  Returns the number of rows written.
+
+        Snapshot + clear ``_dirty`` under the lock, then perform DB I/O outside
+        the lock so the hot-path ``check()`` is never blocked on disk.
         """
         if not self._dirty:
             return 0
 
-        count = 0
-        with self._db.get_connection() as conn:
+        with self._lock:
+            snapshots = []
             for key in self._dirty:
                 window = self._windows.get(key)
                 if window is None:
                     continue
-                account_id, model_name = key
                 # Purge stale timestamps so the persisted count reflects the
                 # current sliding window (now - window_seconds).
                 window._purge()
@@ -294,6 +303,14 @@ class RateLimitCache:
                     "%Y-%m-%dT%H:%M:%S", time.gmtime(window.window_start)
                 )
                 timestamps_json = json.dumps(list(window.timestamps))
+                snapshots.append(
+                    (key[0], key[1], window_start_iso, len(window.timestamps), timestamps_json)
+                )
+            self._dirty.clear()
+
+        count = 0
+        with self._db.get_connection() as conn:
+            for account_id, model_name, window_start_iso, request_count, timestamps_json in snapshots:
                 conn.execute(
                     """INSERT INTO account_rate_windows
                        (account_id, model_name, window_start, request_count, timestamps, updated_at)
@@ -304,10 +321,9 @@ class RateLimitCache:
                                      timestamps = excluded.timestamps,
                                      updated_at = CURRENT_TIMESTAMP""",
                     (account_id, model_name, window_start_iso,
-                     len(window.timestamps), timestamps_json),
+                     request_count, timestamps_json),
                 )
                 count += 1
-        self._dirty.clear()
         logger.debug("RateLimitCache flushed %d dirty windows", count)
         return count
 
@@ -317,9 +333,10 @@ class RateLimitCache:
         Called during startup and after crash recovery to ensure consistency.
         WARNING: This discards any in-memory changes that haven't been flushed.
         """
-        self._windows.clear()
-        self._dirty.clear()
-        self._load_all()
+        with self._lock:
+            self._windows.clear()
+            self._dirty.clear()
+            self._load_all()
 
     # ----- internals -------------------------------------------------------
 
@@ -402,11 +419,11 @@ class RateLimitCache:
             for r in rows:
                 try:
                     base = time.mktime(
-                        time.strptime(r["bucket"], "%Y-%m-%d %H:%M")
+                        time.strptime(r["bucket"], "%Y-%m-%d %H:%M:%S")
                     )
                 except (ValueError, KeyError, TypeError):
                     continue
-                n = int(r.get("requests") or 0)
+                n = int(r["requests"] or 0)
                 if n <= 0:
                     continue
                 # Spread the per-minute requests evenly across the minute so

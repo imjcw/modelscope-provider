@@ -1,7 +1,7 @@
 import os
 import pytest
 from provider.core.config import ConfigManager
-from provider.models.account import ModelScopeAccount
+from models.account import ModelScopeAccount
 
 
 @pytest.fixture(autouse=True)

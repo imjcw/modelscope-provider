@@ -17,6 +17,7 @@ from repositories.provider_type_repository import ProviderTypeRepository
 from repositories.quota_repository import QuotaRepository
 from repositories.supplier_model_repository import SupplierModelRepository
 from services.providers import build_rate_limit_strategies, create_strategy
+from services.models_cache import invalidate as invalidate_models_cache
 from models.account import DEFAULT_PROVIDER_TYPE
 
 logger = logging.getLogger(__name__)
@@ -59,9 +60,22 @@ class AdminService:
     def get_suppliers(self):
         """List suppliers enriched with today's quota info and API keys."""
         suppliers = self.account_repo.find_all()
+        if not suppliers:
+            return []
+        # Batch-load API keys for all suppliers in one query instead of one
+        # query per supplier (P2 / N+1).
+        key_map: dict = {}
+        if self.account_repo is not None:
+            try:
+                key_map = self.account_repo.find_api_keys_by_account_ids(
+                    [s["id"] for s in suppliers]
+                ) or {}
+            except Exception:
+                logger.warning("Failed to batch-load API keys for suppliers",
+                               exc_info=True)
         for s in suppliers:
             self._enrich_quota(s)
-            self._enrich_api_keys(s)
+            self._enrich_api_keys(s, key_map.get(s["id"]))
         return suppliers
 
     def get_supplier(self, supplier_id: int):
@@ -71,17 +85,19 @@ class AdminService:
             self._enrich_api_keys(s)
         return s
 
-    def _enrich_api_keys(self, supplier: dict) -> None:
+    def _enrich_api_keys(self, supplier: dict, records: list = None) -> None:
         """Add api_keys list and api_key_records to supplier dict from account_api_keys table.
 
         The legacy ``accounts.api_key`` column no longer exists (migration 023);
         all keys live in ``account_api_keys`` and are returned as-is.
+
+        When ``records`` is provided (e.g. a single batched lookup for all
+        suppliers), it is used directly to avoid one query per supplier (P2);
+        otherwise the keys are loaded for this single supplier.
         """
-        if self.account_repo is None:
-            supplier["api_keys"] = []
-            supplier["api_key_records"] = []
-            return
-        records = self.account_repo.find_all_api_keys(supplier["id"])
+        if records is None and self.account_repo is not None:
+            records = self.account_repo.find_all_api_keys(supplier["id"])
+        records = records or []
         supplier["api_keys"] = [r["api_key"] for r in records]
         supplier["api_key_records"] = records
 
@@ -322,14 +338,25 @@ class AdminService:
         and API key records (with status).
         """
         suppliers = self.account_repo.find_all()
+        ids = [sup["id"] for sup in suppliers]
+        # Batch-load models + API keys for all suppliers in one query each
+        # instead of one query per supplier (P6 / N+1).
+        models_by_id = {}
+        if self.supplier_model_repo is not None:
+            try:
+                models_by_id = self.supplier_model_repo.find_by_supplier_batch(ids) or {}
+            except Exception:
+                models_by_id = {}
+        keys_by_id = {}
+        if self.account_repo is not None:
+            try:
+                keys_by_id = self.account_repo.find_api_keys_by_account_ids(ids) or {}
+            except Exception:
+                keys_by_id = {}
         result = []
         for sup in suppliers:
-            models = []
-            if self.supplier_model_repo is not None:
-                models = self.supplier_model_repo.find_by_supplier(sup["id"])
-            key_records = []
-            if self.account_repo is not None:
-                key_records = self.account_repo.find_api_keys(sup["id"])
+            models = models_by_id.get(sup["id"], [])
+            key_records = keys_by_id.get(sup["id"], [])
             result.append({
                 "name": sup.get("name", ""),
                 "api_key": (key_records[0]["api_key"] if key_records else ""),
@@ -355,14 +382,25 @@ class AdminService:
     def export_config(self) -> dict:
         """Export full system config: suppliers, provider_types, mappings."""
         suppliers = self.account_repo.find_all()
+        ids = [sup["id"] for sup in suppliers]
+        # Batch-load models + API keys for all suppliers in one query each
+        # instead of one query per supplier (P6 / N+1).
+        models_by_id = {}
+        if self.supplier_model_repo is not None:
+            try:
+                models_by_id = self.supplier_model_repo.find_by_supplier_batch(ids) or {}
+            except Exception:
+                models_by_id = {}
+        keys_by_id = {}
+        if self.account_repo is not None:
+            try:
+                keys_by_id = self.account_repo.find_api_keys_by_account_ids(ids) or {}
+            except Exception:
+                keys_by_id = {}
         supplier_list = []
         for sup in suppliers:
-            models = []
-            if self.supplier_model_repo is not None:
-                models = self.supplier_model_repo.find_by_supplier(sup["id"])
-            key_records = []
-            if self.account_repo is not None:
-                key_records = self.account_repo.find_api_keys(sup["id"])
+            models = models_by_id.get(sup["id"], [])
+            key_records = keys_by_id.get(sup["id"], [])
             supplier_list.append({
                 "name": sup.get("name", ""),
                 "api_key": (key_records[0]["api_key"] if key_records else ""),
@@ -581,6 +619,9 @@ class AdminService:
             except Exception as e:
                 stats["errors"].append(f"第 {idx + 1} 项 ({m.get('alias_name', '?')}): {str(e)}")
 
+        # Mapping table changed — drop the cached /v1/models list (P3).
+        invalidate_models_cache()
+
     def _safe_bulk_models(self, supplier_id: int, models: list) -> None:
         """Bulk-insert models for a supplier, skipping invalid entries."""
         cleaned = []
@@ -608,24 +649,35 @@ class AdminService:
 
     def upsert_mapping(self, alias_name: str, actual_model_id: str,
                        description: str = "", status: str = "active"):
-        return self.mapping_repo.create(alias_name, actual_model_id, description, status)
+        result = self.mapping_repo.create(alias_name, actual_model_id, description, status)
+        invalidate_models_cache()
+        return result
 
     def update_mapping(self, alias_name: str, **kwargs):
         """Update mapping fields. Supported: actual_model_id, description, status."""
-        return self.mapping_repo.update(alias_name, **kwargs)
+        result = self.mapping_repo.update(alias_name, **kwargs)
+        invalidate_models_cache()
+        return result
 
     def toggle_mapping_status(self, alias_name: str):
         """Toggle mapping status between 'active' and 'disabled'."""
-        return self.mapping_repo.toggle_status(alias_name)
+        result = self.mapping_repo.toggle_status(alias_name)
+        invalidate_models_cache()
+        return result
 
     def bulk_update_mappings(self, mappings: dict):
         self.mapping_repo.bulk_upsert(mappings)
+        invalidate_models_cache()
 
     def delete_mapping(self, alias_name: str):
-        return self.mapping_repo.delete_by_alias(alias_name)
+        result = self.mapping_repo.delete_by_alias(alias_name)
+        invalidate_models_cache()
+        return result
 
     def rename_mapping(self, old_alias: str, new_alias: str):
-        return self.mapping_repo.rename(old_alias, new_alias)
+        result = self.mapping_repo.rename(old_alias, new_alias)
+        invalidate_models_cache()
+        return result
 
     def get_mapping_models(self, alias_name: str):
         """Get all models bound to a mapping alias (with model_type, context_length)."""
@@ -717,19 +769,20 @@ class AdminService:
                 "Cleaned up %d log entries older than %s (retention=%sh)",
                 deleted, cutoff, raw,
             )
-        else:
-            logger.info(
-                "Log cleanup: nothing to clean (cutoff=%s, retention=%sh)",
-                cutoff, raw,
-            )
-            # SQLite DELETE 只把页标记为空闲，文件不会变小；
-            # 删除后执行 VACUUM 才能真正回收磁盘空间。
+            # SQLite DELETE 只把页标记为空闲，文件不会变小；只有在真正删除
+            # 行之后才执行 VACUUM 回收磁盘空间。注意：不能在「无删除」分支做，
+            # 否则每个空闲周期都会无谓地全量重建库文件（且真实删除时反而从不回收）。
             db = self.db or getattr(self.log_repo, "db", None)
             if db is not None:
                 try:
                     db.vacuum()
                 except Exception as exc:
                     logger.warning("VACUUM after log cleanup failed: %s", exc)
+        else:
+            logger.info(
+                "Log cleanup: nothing to clean (cutoff=%s, retention=%sh)",
+                cutoff, raw,
+            )
 
     # ── Mapping usage ────────────────────────────────────────────────────
 
@@ -760,11 +813,21 @@ class AdminService:
         # stats table may store either, so we match on both when attributing usage.
         sup_name_by_id = {}
         sid_to_keys = {}  # supplier_id -> set of identifier strings to match stats rows
+
+        # Batch-load all bound supplier accounts once instead of one query per
+        # binding (P5 / N+1).
+        sids = [b.get("supplier_id") for b in bound if b.get("supplier_id") is not None]
+        acc_by_id = {}
+        if sids and self.account_repo is not None:
+            try:
+                acc_by_id = self.account_repo.find_by_ids(sids) or {}
+            except Exception:
+                acc_by_id = {}
         for b in bound:
             sid = b.get("supplier_id")
             if sid is None:
                 continue
-            acc = self.account_repo.find_by_id(sid)
+            acc = acc_by_id.get(sid)
             sup_name_by_id[sid] = acc.get("name", "") if acc else ""
             keys = {str(sid)}
             if acc and acc.get("account_id") is not None:
@@ -878,7 +941,7 @@ class AdminService:
                     return dt.timestamp()
 
                 latency_ms = int((parse_ts(end_time) - parse_ts(request_start)) * 1000)
-            except Exception:
+            except (ValueError, TypeError):
                 latency_ms = None
 
         self.log_repo.create(
@@ -930,20 +993,25 @@ class AdminService:
         if self.client_key_repo is None:
             return []
         keys = self.client_key_repo.find_all()
+        if not keys:
+            return []
         today_start = today()
-        for k in keys:
-            k["today_requests"] = 0
-            k["today_input_tokens"] = 0
-            k["today_output_tokens"] = 0
-            k["today_cache_tokens"] = 0
+        # Batch-load today's usage for all client keys in one query instead of
+        # one query per key (P4 / N+1).
+        stats_map: dict = {}
+        if self.log_repo is not None:
             try:
-                s = self.log_repo.query_stats_client_key(today_start, k["name"])
-                k["today_requests"] = s.get("requests", 0) or 0
-                k["today_input_tokens"] = s.get("input_tokens", 0) or 0
-                k["today_output_tokens"] = s.get("output_tokens", 0) or 0
-                k["today_cache_tokens"] = s.get("cached_tokens", 0) or 0
+                stats_map = self.log_repo.query_stats_client_keys_batch(
+                    today_start, [k["name"] for k in keys]
+                ) or {}
             except Exception:
-                pass
+                logger.debug("Failed to batch-load client key usage", exc_info=True)
+        for k in keys:
+            s = stats_map.get(k["name"], {})
+            k["today_requests"] = s.get("requests", 0) or 0
+            k["today_input_tokens"] = s.get("input_tokens", 0) or 0
+            k["today_output_tokens"] = s.get("output_tokens", 0) or 0
+            k["today_cache_tokens"] = s.get("cached_tokens", 0) or 0
         return keys
 
     def create_client_key(self, name: str, description: str = "") -> dict:
@@ -1139,11 +1207,20 @@ class AdminService:
         # Get all suppliers
         suppliers = self.account_repo.find_all()
 
-        # Get supplier-level quota info for unavailable_models
+        # Get supplier-level quota info for unavailable_models — batch load
+        # once instead of one query per supplier (P1 / N+1).
+        account_ids_all = [sup["account_id"] for sup in suppliers]
+        quota_info_batch = {}
+        if self.quota_repo is not None and account_ids_all:
+            try:
+                quota_info_batch = self.quota_repo.get_account_info_batch(account_ids_all) or {}
+            except Exception:
+                quota_info_batch = {}
+
         supplier_quota_map = {}
         for sup in suppliers:
             aid = sup["account_id"]
-            info = self.quota_repo.get_account_info(aid) if self.quota_repo else None
+            info = quota_info_batch.get(aid)
             unavailable = set()
             if info and "unavailable_models" in info:
                 um = info["unavailable_models"]
@@ -1178,6 +1255,25 @@ class AdminService:
                 except Exception:
                     continue
 
+        # Batch-load model quotas + supplier model catalogs once (P1 / N+1)
+        model_quotas_all = {}
+        models_by_supplier = {}
+        if suppliers:
+            if self.quota_repo is not None:
+                try:
+                    model_quotas_all = self.quota_repo.get_model_quotas_batch(
+                        [sup["account_id"] for sup in suppliers]
+                    ) or {}
+                except Exception:
+                    model_quotas_all = {}
+            if self.supplier_model_repo is not None:
+                try:
+                    models_by_supplier = self.supplier_model_repo.find_by_supplier_batch(
+                        [sup["id"] for sup in suppliers]
+                    ) or {}
+                except Exception:
+                    models_by_supplier = {}
+
         result = []
         for sup in suppliers:
             sid = sup["id"]
@@ -1204,12 +1300,12 @@ class AdminService:
                 except Exception:
                     pass
 
-            # Get model-level quotas for this supplier
-            model_quotas = self.quota_repo.get_model_quotas(account_id)
+            # Get model-level quotas for this supplier (already loaded in batch)
+            model_quotas = model_quotas_all.get(account_id, [])
             model_quota_map = {m["model_name"]: m for m in model_quotas}
 
-            # Get all models for this supplier
-            models = self.supplier_model_repo.find_by_supplier(sid)
+            # Get all models for this supplier (already loaded in batch)
+            models = models_by_supplier.get(sid, [])
 
             # Pre-fetch raw window counters for this account directly from
             # account_rate_windows — the authoritative source of truth. We read
@@ -1244,6 +1340,43 @@ class AdminService:
             for _aliases in model_to_alias.values():
                 _all_alias_keys.update(_aliases)
 
+            # ── Per-account batch stats (P1): fetch every model's today-token
+            # usage + range aggregate in ONE query each instead of one per model
+            # (the old code issued N×M queries inside this loop).  Memoize the
+            # alias lookup + active-key count the same way.
+            model_names = [m.get("model_name") for m in models if m.get("model_name")]
+            token_today_map = {}
+            agg_map = {}
+            agg_by_key_map = {}
+            if self.log_repo is not None and model_names:
+                try:
+                    token_today_map = self.log_repo.query_stats_today_token_usage_batch(
+                        account_id, model_names, *today_range()
+                    ) or {}
+                except Exception:
+                    token_today_map = {}
+                try:
+                    agg_map = self.log_repo.query_stats_model_aggregate_batch(
+                        account_id, model_names, _range_start, _range_end
+                    ) or {}
+                except Exception:
+                    agg_map = {}
+                if key_id:
+                    try:
+                        agg_by_key_map = self.log_repo.query_stats_model_aggregate_by_key_batch(
+                            account_id, model_names, key_id, _range_start, _range_end
+                        ) or {}
+                    except Exception:
+                        agg_by_key_map = {}
+
+            # active key count is constant per supplier — compute once, not per model
+            key_count = 1
+            try:
+                key_count = self.account_repo.count_active_keys(account_id)
+            except Exception:
+                key_count = 1
+            alias_cache: dict = {}
+
             for m in models:
                 model_name = m.get("model_name", "")
                 model_type = m.get("model_type", "text")
@@ -1261,16 +1394,18 @@ class AdminService:
                 # model_quotas table lacks a total_cached_tokens column — without this
                 # fallback the cache column would always show 0.
                 if quota_limit == 0 and today_input == 0 and today_output == 0:
-                    today_input, today_output, today_cached = self._get_today_token_usage(account_id, model_name)
+                    _ti, _to, _tc = token_today_map.get(model_name, (0, 0, 0))
+                    today_input, today_output, today_cached = _ti, _to, _tc
                 elif today_cached == 0:
                     # Model has usage data in model_quotas but cached_tokens was
                     # never persisted there — fetch it from the stats table.
-                    _inp, _out, _cached = self._get_today_token_usage(account_id, model_name)
-                    today_cached = _cached or today_cached
+                    _ti, _to, _tc = token_today_map.get(model_name, (0, 0, 0))
+                    today_cached = _tc or today_cached
 
                 # 按时间范围查询请求数/成功数/成功率（stats 表）；
                 # 当指定 key_id 时改用 request_logs 按该 key 聚合
-                # （request_stats_minute 不区分 key）。
+                # （request_stats_minute 不区分 key）。两者均来自本供应商的
+                # 批量预取结果，避免每个模型再发一次查询（P1 / N+1）。
                 _requests = 0
                 _success = 0
                 _success_rate = None
@@ -1278,15 +1413,10 @@ class AdminService:
                 try:
                     if key_id:
                         _inp_s, _out_s, _cached_s, _req_s, _suc_s = \
-                            self.log_repo.query_stats_model_aggregate_by_key(
-                                account_id, model_name, key_id,
-                                _range_start, _range_end,
-                            )
+                            agg_by_key_map.get(model_name, (0, 0, 0, 0, 0))
                     else:
                         _inp_s, _out_s, _cached_s, _req_s, _suc_s = \
-                            self.log_repo.query_stats_model_aggregate(
-                                account_id, model_name, _range_start, _range_end,
-                            )
+                            agg_map.get(model_name, (0, 0, 0, 0, 0))
                     _requests = _req_s
                     _success = _suc_s
                     _success_rate = round(_suc_s / _req_s * 100, 1) if _req_s else None
@@ -1318,8 +1448,7 @@ class AdminService:
                     # 多 key 账户的有效窗口额度 = 配置上限 × N，与拦截侧一致。
                     # 计数语义与 AliasRouter 候选一致（主密钥 + 活跃 account_api_keys）。
                     try:
-                        _key_count = self.account_repo.count_active_keys(account_id)
-                        max_requests = max_requests * max(1, _key_count)
+                        max_requests = max_requests * max(1, key_count)
                     except Exception:
                         pass
                     # 计数 key 以真实模型 ID (actual_model_id) 写入（见 routes.py
@@ -1329,7 +1458,10 @@ class AdminService:
                     # 因名字不一致而始终显示满额。
                     match_keys = [model_name]
                     if self.mapping_repo is not None and model_name:
-                        _mrows = self.mapping_repo.find_by_alias(model_name)
+                        _mrows = alias_cache.get(model_name)
+                        if _mrows is None:
+                            _mrows = self.mapping_repo.find_by_alias(model_name)
+                            alias_cache[model_name] = _mrows
                         if _mrows:
                             match_keys.append(_mrows[0].get("actual_model_id"))
                     # 也尝试该目录模型在 stats 中记录过的客户端别名（如 "sense"）
@@ -1413,15 +1545,6 @@ class AdminService:
                 })
 
         return result
-
-    def _get_today_token_usage(self, account_id: str, model_name: str) -> tuple:
-        """Get today's input and output token totals for an account+model from
-        the pre-aggregated ``request_stats_minute`` table.
-        """
-        start_of_day, end_of_day = today_range()
-        return self.log_repo.query_stats_today_token_usage(
-            account_id, model_name, start_of_day, end_of_day,
-        )  # -> (input_tokens, output_tokens, cached_tokens)
 
     # ── Stats ──
 

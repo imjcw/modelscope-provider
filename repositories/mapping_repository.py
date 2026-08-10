@@ -74,10 +74,6 @@ class MappingRepository:
             )
         return self.find_by_alias(alias_name)[0] if self.find_by_alias(alias_name) else None
 
-    def update_status(self, alias_name: str, status: str) -> Optional[dict]:
-        """Set status ('active' or 'disabled') for a mapping alias."""
-        return self.update(alias_name, status=status)
-
     def toggle_status(self, alias_name: str) -> Optional[dict]:
         """Toggle status between 'active' and 'disabled'.
 

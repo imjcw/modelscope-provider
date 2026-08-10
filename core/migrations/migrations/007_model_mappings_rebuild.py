@@ -17,7 +17,13 @@ class ModelMappingsRebuild(Migration):
             # rebuilt table in this migration's region path; nothing to do here.
             return
 
-        # Legacy schema with region → rebuild
+        # Legacy schema with region → rebuild. model_mappings is the PARENT of
+        # mapping_models (FK), so DROP TABLE cascades under FK=ON — disable FK.
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("""
             CREATE TABLE model_mappings_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,3 +39,5 @@ class ModelMappingsRebuild(Migration):
         """)
         conn.execute("DROP TABLE model_mappings")
         conn.execute("ALTER TABLE model_mappings_new RENAME TO model_mappings")
+        # Restore FK enforcement for subsequent operations.
+        conn.execute("PRAGMA foreign_keys = ON")

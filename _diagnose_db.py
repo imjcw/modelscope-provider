@@ -1,6 +1,6 @@
 import os, sqlite3, tempfile
 
-db = "/mnt/d/workspace/third/provider/data/modelscope_provider.db"
+db = "/mnt/d/workspace/third/provider/data/ai_provider.db"
 print(f"exists: {os.path.exists(db)}")
 print(f"writable: {os.access(db, os.W_OK)}")
 

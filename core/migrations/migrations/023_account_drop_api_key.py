@@ -47,6 +47,13 @@ class AccountDropApiKey(Migration):
             return
 
         # Fallback for old SQLite: rebuild the table without the column.
+        # `accounts` is the PARENT of account_api_keys / supplier_models /
+        # mapping_models FKs, so disable FK first to avoid cascade-deleting them.
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("CREATE TABLE accounts_new AS SELECT "
                      "id, account_id, name, base_url, provider_type, status, "
                      "created_at, updated_at FROM accounts")
@@ -55,6 +62,7 @@ class AccountDropApiKey(Migration):
         # Recreate the usual indexes/constraints if any existed on accounts.
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS "
                      "idx_accounts_account_id ON accounts(account_id)")
+        conn.execute("PRAGMA foreign_keys = ON")
 
     def up(self, conn: sqlite3.Connection) -> None:
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(accounts)")]

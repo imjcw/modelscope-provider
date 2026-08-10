@@ -4,6 +4,24 @@ from dataclasses import dataclass
 from models.account import ModelScopeAccount
 
 
+def _parse_models(text) -> set:
+    """Safely parse a JSON array of model names.
+
+    Returns an empty set for ``None``/empty/invalid-JSON input instead of
+    raising — a corrupted ``unavailable_models`` cell should degrade to
+    "nothing marked unavailable", not crash the routing/quota path.
+    """
+    if not text:
+        return set()
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return set(data)
+
+
 @dataclass
 class QuotaInfo:
     """Quota information for an account."""
@@ -49,7 +67,7 @@ class QuotaRepository:
                     quota_date=today,
                     quota_remaining=row["quota_remaining"] or 0,
                     quota_limit=quota_limit,
-                    unavailable_models=set(json.loads(row["unavailable_models"]) if row["unavailable_models"] else [])
+                    unavailable_models=_parse_models(row["unavailable_models"])
                 )
             else:
                 # Create new quota entry
@@ -102,7 +120,7 @@ class QuotaRepository:
             row = cursor.fetchone()
 
             if row:
-                current_models = set(json.loads(row["unavailable_models"]) if row["unavailable_models"] else [])
+                current_models = _parse_models(row["unavailable_models"])
                 current_models.add(model_name)
                 cursor.execute("""
                     UPDATE account_quotas
@@ -137,7 +155,7 @@ class QuotaRepository:
                     "quota_limit": row["quota_limit"] or 0,
                     "total_input_tokens": row["total_input_tokens"] or 0,
                     "total_output_tokens": row["total_output_tokens"] or 0,
-                    "unavailable_models": set(json.loads(row["unavailable_models"]) if row["unavailable_models"] else []),
+                    "unavailable_models": _parse_models(row["unavailable_models"]),
                     "quota_date": row["quota_date"]
                 }
             return None
@@ -163,7 +181,7 @@ class QuotaRepository:
             )
             for row in cursor.fetchall():
                 um = row["unavailable_models"]
-                result[row["account_id"]] = set(json.loads(um) if um else [])
+                result[row["account_id"]] = _parse_models(um)
         return result
 
     def reset_unavailable_models(self, account_id: str):
@@ -282,3 +300,62 @@ class QuotaRepository:
                 WHERE account_id = ? AND quota_date = ?
             """, (account_id, today))
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_account_info_batch(self, account_ids) -> dict:
+        """Batch version of :meth:`get_account_info`.
+
+        Returns ``{account_id(str): info_dict}``. Accounts without a quota row
+        for today are simply absent. Eliminates the N+1 query that
+        ``get_model_quotas`` would otherwise issue once per supplier (P1).
+        """
+        if not account_ids:
+            return {}
+        today = self.db.get_today_date()
+        ids = list(account_ids)
+        result: dict = {}
+        with self.db.get_connection() as conn:
+            placeholders = ",".join("?" * len(ids))
+            cursor = conn.execute(
+                f"""SELECT account_id, quota_remaining, quota_limit,
+                           total_input_tokens, total_output_tokens,
+                           unavailable_models, quota_date
+                    FROM account_quotas
+                    WHERE account_id IN ({placeholders}) AND quota_date = ?""",
+                (*ids, today),
+            )
+            for row in cursor.fetchall():
+                result[row["account_id"]] = {
+                    "account_id": row["account_id"],
+                    "quota_remaining": row["quota_remaining"] or 0,
+                    "quota_limit": row["quota_limit"] or 0,
+                    "total_input_tokens": row["total_input_tokens"] or 0,
+                    "total_output_tokens": row["total_output_tokens"] or 0,
+                    "unavailable_models": _parse_models(row["unavailable_models"]),
+                    "quota_date": row["quota_date"],
+                }
+        return result
+
+    def get_model_quotas_batch(self, account_ids) -> dict:
+        """Batch version of :meth:`get_model_quotas`.
+
+        Returns ``{account_id(str): [model_quota_rows]}``. Used by
+        ``get_model_quotas`` to load every supplier's model quotas in a single
+        query instead of one per supplier (P1).
+        """
+        if not account_ids:
+            return {}
+        today = self.db.get_today_date()
+        ids = list(account_ids)
+        result: dict = {aid: [] for aid in ids}
+        with self.db.get_connection() as conn:
+            placeholders = ",".join("?" * len(ids))
+            rows = conn.execute(
+                f"""SELECT account_id, model_name, quota_remaining, quota_limit,
+                           total_input_tokens, total_output_tokens
+                    FROM model_quotas
+                    WHERE account_id IN ({placeholders}) AND quota_date = ?""",
+                (*ids, today),
+            ).fetchall()
+            for row in rows:
+                result.setdefault(row["account_id"], []).append(dict(row))
+        return result

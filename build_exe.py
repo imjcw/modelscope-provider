@@ -62,6 +62,7 @@ def build_exe():
     sep = ";" if sys.platform == "win32" else ":"
     add_data_web = f"{WEB / 'dist'}{sep}web/dist"
     add_data_migrations = f"{ROOT / 'core' / 'migrations' / 'migrations'}{sep}core/migrations/migrations"
+    add_data_favicon = f"{WEB / 'favicon.ico'}{sep}web"
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -70,10 +71,11 @@ def build_exe():
         "--onefile",
         "--name", NAME,
         "--noconsole",
+        "--icon", str(WEB / "favicon.ico"),
         "--add-data", add_data_web,
         "--add-data", add_data_migrations,
+        "--add-data", add_data_favicon,
         "--collect-all", "uvicorn",
-        "--collect-all", "PIL",
         "--collect-all", "pywin32",
         "--collect-all", "win32com",
         "--collect-submodules", "core.migrations.migrations",

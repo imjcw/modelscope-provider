@@ -667,7 +667,8 @@ class LogRepository:
                           COALESCE(SUM(CASE WHEN status_code IS NOT NULL
                                             AND status_code < 400 THEN 1 ELSE 0 END), 0) AS success
                    FROM request_logs
-                   WHERE timestamp >= ? AND timestamp <= ?
+                   WHERE timestamp >= strftime('%Y-%m-%d %H:%M:%S', ?, '-8 hours')
+                     AND timestamp <= strftime('%Y-%m-%d %H:%M:%S', ?, '-8 hours')
                      AND account_id = ? AND actual_model_id = ?
                      AND api_key_id = ?""",
                 (start, end, account_id, model, key_id),
@@ -676,3 +677,139 @@ class LogRepository:
                 row["input_tokens"], row["output_tokens"], row["cached_tokens"],
                 row["requests"], row["success"],
             )
+
+    def query_stats_client_keys_batch(self, today_start: str, keys: list) -> dict:
+        """Batch version of :meth:`query_stats_client_key`.
+
+        Returns ``{client_key_name: {requests, input_tokens, output_tokens,
+        cached_tokens}}``. Eliminates the N+1 query in ``get_client_keys`` (P4).
+        """
+        if not keys:
+            return {}
+        s = self._floor_minute(today_start)
+        placeholders = ",".join("?" * len(keys))
+        result = {
+            k: {"requests": 0, "input_tokens": 0,
+                "output_tokens": 0, "cached_tokens": 0}
+            for k in keys
+        }
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                f"""SELECT client_key_name,
+                          COALESCE(SUM(requests), 0) AS requests,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND client_key_name IN ({placeholders})
+                   GROUP BY client_key_name""",
+                (s, *keys),
+            ).fetchall()
+            for row in rows:
+                result[row["client_key_name"]] = dict(row)
+        return result
+
+    def query_stats_today_token_usage_batch(
+        self, account_id: str, model_names: list, start_of_day: str, end_of_day: str,
+    ) -> dict:
+        """Batch version of :meth:`query_stats_today_token_usage`.
+
+        Returns ``{model_name: (input_tokens, output_tokens, cached_tokens)}``.
+        Used by ``get_model_quotas`` to fetch every model's today-token totals
+        for an account in one query instead of one per model (P1).
+        """
+        if not model_names:
+            return {}
+        s, e = self._floor_minute(start_of_day), self._floor_minute(end_of_day)
+        placeholders = ",".join("?" * len(model_names))
+        result = {m: (0, 0, 0) for m in model_names}
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                f"""SELECT model,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?
+                     AND account_id = ? AND model IN ({placeholders})
+                   GROUP BY model""",
+                (s, e, account_id, *model_names),
+            ).fetchall()
+            for row in rows:
+                result[row["model"]] = (
+                    row["input_tokens"], row["output_tokens"], row["cached_tokens"],
+                )
+        return result
+
+    def query_stats_model_aggregate_batch(
+        self, account_id: str, model_names: list, start: str, end: str,
+    ) -> dict:
+        """Batch version of :meth:`query_stats_model_aggregate`.
+
+        Returns ``{model_name: (input, output, cached, requests, success)}``.
+        Used by ``get_model_quotas`` to fetch per-model request/token aggregates
+        for an account over a range in one query (P1).
+        """
+        if not model_names:
+            return {}
+        s, e = self._floor_minute(start), self._floor_minute(end)
+        placeholders = ",".join("?" * len(model_names))
+        result = {m: (0, 0, 0, 0, 0) for m in model_names}
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                f"""SELECT model,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                          COALESCE(SUM(requests), 0) AS requests,
+                          COALESCE(SUM(success), 0) AS success
+                   FROM request_stats_minute
+                   WHERE bucket >= ? AND bucket <= ?
+                     AND account_id = ? AND model IN ({placeholders})
+                   GROUP BY model""",
+                (s, e, account_id, *model_names),
+            ).fetchall()
+            for row in rows:
+                result[row["model"]] = (
+                    row["input_tokens"], row["output_tokens"], row["cached_tokens"],
+                    row["requests"], row["success"],
+                )
+        return result
+
+    def query_stats_model_aggregate_by_key_batch(
+        self, account_id: str, model_names: list, key_id: int, start: str, end: str,
+    ) -> dict:
+        """Batch version of :meth:`query_stats_model_aggregate_by_key`.
+
+        Returns ``{model_name: (input, output, cached, requests, success)}``
+        keyed by ``actual_model_id``. Used by ``get_model_quotas`` when a
+        ``key_id`` filter is active, to aggregate per-model stats from
+        ``request_logs`` in one query (P1).
+        """
+        if not model_names:
+            return {}
+        placeholders = ",".join("?" * len(model_names))
+        result = {m: (0, 0, 0, 0, 0) for m in model_names}
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                f"""SELECT actual_model_id AS model,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                          COUNT(*) AS requests,
+                          COALESCE(SUM(CASE WHEN status_code IS NOT NULL
+                                            AND status_code < 400 THEN 1 ELSE 0 END), 0) AS success
+                   FROM request_logs
+                   WHERE timestamp >= strftime('%Y-%m-%d %H:%M:%S', ?, '-8 hours')
+                     AND timestamp <= strftime('%Y-%m-%d %H:%M:%S', ?, '-8 hours')
+                     AND account_id = ? AND actual_model_id IN ({placeholders})
+                     AND api_key_id = ?
+                   GROUP BY actual_model_id""",
+                (start, end, account_id, *model_names, key_id),
+            ).fetchall()
+            for row in rows:
+                result[row["model"]] = (
+                    row["input_tokens"], row["output_tokens"], row["cached_tokens"],
+                    row["requests"], row["success"],
+                )
+        return result

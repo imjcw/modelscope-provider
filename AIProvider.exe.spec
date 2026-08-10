@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_all
 datas = [
     ('web/dist', 'web/dist'),
     ('core/migrations/migrations', 'core/migrations/migrations'),
+    ('web/favicon.ico', 'web'),
 ]
 binaries = []
 hiddenimports = [
@@ -66,4 +67,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_field=None,
+    icon='web/favicon.ico',
 )

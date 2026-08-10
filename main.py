@@ -53,19 +53,19 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Global services dictionary
-_services = None
-_admin_service = None
-
-
 async def initialize_services():
-    """Initialize all services (async)."""
-    global _services, _admin_service
+    """Initialize all services (async).
+
+    Returns the assembled services dict. Callers should treat the result as
+    app-scoped state and stash it on ``app.state`` (see :func:`lifespan`) rather
+    than relying on a module-level global — this keeps service state tied to the
+    app instance and makes the code testable without process-wide singletons.
+    """
     config = ConfigManager()
 
     initializer = ServiceInitializer(config)
     # Pass accounts=None so ServiceInitializer loads from DB (with .env migration)
-    _services = await initializer.initialize_all(accounts=None)
+    services = await initializer.initialize_all(accounts=None)
 
     # Record app start time for uptime calculation
     try:
@@ -98,7 +98,7 @@ async def initialize_services():
         from repositories.client_api_key_repository import ClientApiKeyRepository
         from repositories.provider_type_repository import ProviderTypeRepository
 
-    db = _services["database"]
+    db = services["database"]
     admin_service = AdminService(
         account_repo=AccountRepository(db),
         mapping_repo=MappingRepository(db),
@@ -109,23 +109,17 @@ async def initialize_services():
         mapping_model_repo=MappingModelRepository(db),
         client_key_repo=ClientApiKeyRepository(db),
         provider_type_repo=ProviderTypeRepository(db),
-        rate_limit_strategies=_services.get("rate_limit_strategies"),
+        rate_limit_strategies=services.get("rate_limit_strategies"),
         db=db,
-        quota_updater=_services.get("quota_updater"),
-        config_cache=_services.get("config_cache"),
-        rate_limit_cache=_services.get("rate_limit_cache"),
+        quota_updater=services.get("quota_updater"),
+        config_cache=services.get("config_cache"),
+        rate_limit_cache=services.get("rate_limit_cache"),
     )
-    _admin_service = admin_service
     # Expose admin_service so the periodic cleanup task can find it via services["admin_service"]
-    _services["admin_service"] = admin_service
-    logger.info(f"Loaded {len(_services['accounts'])} accounts, admin service initialized")
+    services["admin_service"] = admin_service
+    logger.info(f"Loaded {len(services['accounts'])} accounts, admin service initialized")
 
-    return _services
-
-
-def get_services():
-    """Get services (sync helper)."""
-    return _services
+    return services
 
 
 @asynccontextmanager
@@ -133,8 +127,8 @@ async def lifespan(app: FastAPI):
     """Lifespan handler for FastAPI."""
     services = await initialize_services()
     app.state.services = services
-    app.state.admin_service = _admin_service
-    app.state.alias_router = _services["alias_router"]
+    app.state.admin_service = services["admin_service"]
+    app.state.alias_router = services["alias_router"]
 
     # Periodic task intervals are overridable via env vars so operators can
     # tune them without redeploying (e.g. LOG_CLEANUP_INTERVAL=600).
@@ -221,6 +215,52 @@ async def lifespan(app: FastAPI):
         await http_client.close_all_clients()
 
 
+# Reject oversized request bodies to protect upstream accounts. Defined at
+# module level (not inside lifespan) so it is importable/testable and applies
+# to every app instance created by create_app().
+MAX_REQUEST_BODY = 16 * 1024 * 1024  # 16 MB
+_BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+async def limit_request_body(request, call_next):
+    """Enforce a request body size cap.
+
+    The fast path validates ``Content-Length``. Requests without it (e.g.
+    ``Transfer-Encoding: chunked``) would bypass that check, so they are
+    buffered and capped here — closing the chunked-encoding body-size bypass.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > MAX_REQUEST_BODY:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": "Payload too large",
+                "detail": f"Request body exceeds the {MAX_REQUEST_BODY} byte limit",
+            },
+        )
+    if content_length is None and request.method in _BODY_METHODS:
+        received = 0
+        chunks = []
+        async for chunk in request.stream():
+            received += len(chunk)
+            if received > MAX_REQUEST_BODY:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "error": "Payload too large",
+                        "detail": f"Request body exceeds the {MAX_REQUEST_BODY} byte limit",
+                    },
+                )
+            chunks.append(chunk)
+        body = b"".join(chunks)
+
+        async def _receive():  # noqa: ANN202
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request._receive = _receive
+    return await call_next(request)
+
+
 def create_app():
     """Create and configure FastAPI application."""
     # Create FastAPI app with lifespan
@@ -231,10 +271,15 @@ def create_app():
         lifespan=lifespan
     )
 
+    # Register body-size limit middleware (defined at module level so it is
+    # importable for tests and applies to every created app instance).
+    app.middleware("http")(limit_request_body)
+
     # Include API routes
     app.include_router(router, prefix="/openai", tags=["OpenAI"])
-    # Backward-compatible mount: the pre-2026-08 API used the /api prefix
-    # (e.g. /api/v1/chat/completions). Keep it working for existing clients.
+    # DEPRECATED dual mount: the pre-2026-08 API used the /api prefix
+    # (e.g. /api/v1/chat/completions). Kept only for backward compatibility
+    # with existing clients. New integrations should use the /openai prefix.
     app.include_router(router, prefix="/api", tags=["OpenAI-legacy"])
     app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 
@@ -246,22 +291,6 @@ def create_app():
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             response.headers["Expires"] = "0"
         return response
-
-    # Reject oversized request bodies to protect upstream accounts.
-    MAX_REQUEST_BODY = 16 * 1024 * 1024  # 16 MB
-
-    @app.middleware("http")
-    async def limit_request_body(request, call_next):
-        content_length = request.headers.get("content-length")
-        if content_length and content_length.isdigit() and int(content_length) > MAX_REQUEST_BODY:
-            return JSONResponse(
-                status_code=413,
-                content={
-                    "error": "Payload too large",
-                    "detail": f"Request body exceeds the {MAX_REQUEST_BODY} byte limit",
-                },
-            )
-        return await call_next(request)
 
     # Root redirect to frontend
     @app.get("/")

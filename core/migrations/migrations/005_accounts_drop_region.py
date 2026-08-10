@@ -15,6 +15,14 @@ class AccountsDropRegion(Migration):
         if "region" not in cols:
             return  # already removed
 
+        # Rebuilding the parent `accounts` table via DROP TABLE cascades to child
+        # tables under PRAGMA foreign_keys=ON. Disable FK for the rebuild.
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        conn.execute("PRAGMA foreign_keys = OFF")
+
         # SQLite < 3.35 doesn't support DROP COLUMN → rebuild.
         # Carry over only columns that exist in the source (don't assume name/status
         # are present in every legacy schema), and never carry region.
@@ -43,3 +51,5 @@ class AccountsDropRegion(Migration):
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_name ON accounts(name)"
         )
+        # Restore FK enforcement for subsequent operations.
+        conn.execute("PRAGMA foreign_keys = ON")

@@ -97,6 +97,12 @@ class AliasRouter:
         # 批量查询多 API Key
         keys_by_id = self._load_api_keys(supplier_ids)
 
+        # 回填多 Key 记录到 account dict，使 _to_ms_account 能产出带
+        # api_key_records 的 ModelScopeAccount（供 HttpClient 多 Key 轮换）。
+        # 旧实现读了一个从不存在的 "_api_key_records" 键，导致恒为 None（M2）。
+        for _sid, _acc in accounts_by_id.items():
+            _acc["api_key_records"] = keys_by_id.get(_sid)
+
         candidates = []
         for entry in valid_entries:
             account_dict = accounts_by_id.get(entry["supplier_id"])
@@ -152,16 +158,17 @@ class AliasRouter:
             logger.warning("Failed to load api keys batch", exc_info=True)
             return {}
 
-    def _to_ms_account(self, account_dict: dict) -> object:
-        """将 account dict 转换为 ModelScopeAccount（含多 API Key 记录）。"""
-        from models.account import ModelScopeAccount, DEFAULT_PROVIDER_TYPE
-        key_records = account_dict.get("_api_key_records") or None
-        return ModelScopeAccount(
-            account_id=account_dict["account_id"],
-            name=account_dict.get("name", ""),
-            base_url=account_dict["base_url"],
-            provider_type=account_dict.get("provider_type", DEFAULT_PROVIDER_TYPE),
-            api_key_records=key_records,
+    def _to_ms_account(self, account_dict: dict) -> "ModelScopeAccount":
+        """将 account dict 转换为 ModelScopeAccount（含多 API Key 记录）。
+
+        api_key_records 由 _build_candidates 在批量加载 keys 后回填到
+        account_dict，因此这里能拿到真实的多 Key 记录（旧实现读了从不存在的
+        ``_api_key_records`` 键，导致恒为 None；见 M2）。
+        """
+        from models.account import build_ms_account
+        return build_ms_account(
+            account_dict,
+            api_key_records=account_dict.get("api_key_records"),
         )
 
     def get_candidates(self, alias: str) -> List[RoutingResult]:
@@ -210,33 +217,29 @@ class AliasRouter:
     def route(self, alias: str) -> Optional[RoutingResult]:
         """为 alias 选择一个（账号, 模型, Key）三元组。
 
+        复用 :meth:`get_candidates` 的排序逻辑（round_robin/random/least_conn），
+        避免与候选构建逻辑重复（M8）。least_conn 下 get_candidates 已将候选按在途
+        连接数升序排列，取首位即最低负载；为保持与原 route 语义一致，仅在
+        least_conn 时对选中的候选 acquire（release 由调用方负责）。
+
         Returns:
             RoutingResult（有绑定时）或 None（无绑定时）
         """
-        candidates = self._build_candidates(alias)
+        candidates = self.get_candidates(alias)
         if not candidates:
             return None
 
+        selected = candidates[0]  # get_candidates 已按策略排序
         strategy = self._get_strategy()
-
-        if strategy == "round_robin":
-            idx = self._round_robin_index(alias, len(candidates))
-            selected = candidates[idx]
-        elif strategy == "random":
-            selected = random.choice(candidates)
-        else:  # least_conn
-            selected = min(
-                candidates, key=lambda c: self._conn_count(self._identity(c))
-            )
-            self.acquire(*self._identity(selected))
-
-        account_dict, model_name, key_record = selected
-        ms_account = self._to_ms_account(account_dict)
+        if strategy == "least_conn":
+            # 递增在途连接计数，与原 route() 的 least_conn 分支语义一致
+            self.acquire(selected.key_id, selected.model_name)
 
         logger.info(
-            f"AliasRouter: routed '{alias}' → account={ms_account.account_id}, "
-            f"key_id={key_record['id']}, model={model_name}, strategy={strategy}"
+            f"AliasRouter: routed '{alias}' → account={selected.account.account_id}, "
+            f"key_id={selected.key_id}, model={selected.model_name}, strategy={strategy}"
         )
+        return selected
         return RoutingResult(
             account=ms_account,
             model_name=model_name,

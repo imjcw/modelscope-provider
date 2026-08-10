@@ -105,7 +105,16 @@ class HttpClient:
         else:
             # Legacy path: pick the first active key.
             keys = self._get_active_keys(account)
-            api_key = keys[0] if keys else account.api_key
+            api_key = keys[0] if keys else getattr(account, "api_key", None)
+
+        # Guard against a missing key. The legacy LoadBalancer path can reach
+        # here with no usable key (api_key is None), which would otherwise
+        # crash on `len(api_key)` and build a "Bearer None" header. Fail loud
+        # but cleanly — the caller converts this to a 502.
+        if not api_key:
+            account_id = getattr(account, "account_id", "?")
+            logger.error("No usable API key for account %s", account_id)
+            raise ValueError(f"No usable API key configured for account {account_id}")
 
         headers = self._build_headers(api_key)
         key_suffix = api_key[-8:] if len(api_key) > 8 else "***"

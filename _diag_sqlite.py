@@ -3,7 +3,7 @@ import os, sqlite3, tempfile, shutil
 from pathlib import Path
 
 DATA = "data"
-DB = Path(DATA) / "modelscope_provider.db"
+DB = Path(DATA) / "ai_provider.db"
 DB_TEST = Path(DATA) / "_diag_test.db"
 
 print(f"=== Platform ===")

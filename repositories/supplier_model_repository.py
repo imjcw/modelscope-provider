@@ -118,3 +118,26 @@ class SupplierModelRepository:
                 (model_name,),
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    def find_by_supplier_batch(self, supplier_ids: List[int]) -> dict:
+        """Batch version of :meth:`find_by_supplier`.
+
+        Returns ``{supplier_id: [model_dicts]}``. Used by ``get_suppliers`` and
+        the export paths to load every supplier's model catalog in one query
+        instead of one per supplier (P2 / P6).
+        """
+        if not supplier_ids:
+            return {}
+        ids = list(supplier_ids)
+        result = {sid: [] for sid in ids}
+        placeholders = ",".join("?" * len(ids))
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM supplier_models "
+                f"WHERE supplier_id IN ({placeholders}) "
+                f"ORDER BY supplier_id, model_name",
+                ids,
+            ).fetchall()
+            for row in rows:
+                result.setdefault(row["supplier_id"], []).append(dict(row))
+        return result

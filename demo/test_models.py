@@ -1,30 +1,47 @@
-"""Test which models in the database are actually accessible."""
+"""Test which models in the database are actually accessible.
+
+⚠️ SECURITY: 此脚本以前在源码中硬编码了真实 ModelScope API Key。
+这些 Key 已经泄露，应当被轮换（revoke/重新生成）。
+
+现在账户信息一律从环境变量读取，源码中不再包含任何明文凭据：
+
+    export MODELSCOPE_ACCOUNTS_JSON='[
+      {"id": "acc1", "name": "ms.cn", "key": "YOUR_KEY_HERE",
+       "base": "https://api-inference.modelscope.cn/v1"},
+      {"id": "acc2", "name": "ms.ai", "key": "YOUR_KEY_HERE",
+       "base": "https://api-inference.modelscope.ai/v1"}
+    ]'
+
+如果没有设置该变量，脚本会直接退出并提示如何配置，不会用假 Key 发起请求。
+"""
 import asyncio
 import json
+import os
 import sys
 import aiohttp
 
 # === CONFIG ===
-ACCOUNTS = [
-    {
-        "id": "0f72278e5e894a45a9b2c8c139580680",
-        "name": "ms.cn(tk)",
-        "key": "ms-ef15676c-7ad4-49b5-8b55-2c2ae7101b8c",
-        "base": "https://api-inference.modelscope.cn/v1",
-    },
-    {
-        "id": "e796c040eb5643149b45faf682992178",
-        "name": "ms.cn(nico)",
-        "key": "ms-115faeda-7f55-4c98-9520-21b37a0c18f3",
-        "base": "https://api-inference.modelscope.cn/v1",
-    },
-    {
-        "id": "90f8e8f226ff41a8a51f186a8d8410db",
-        "name": "ms.ai(nico)",
-        "key": "ms-ff949c01-ac4f-4854-b7ba-9c43b0c02c53",
-        "base": "https://api-inference.modelscope.ai/v1",
-    },
-]
+# 账户信息从环境变量读取，避免把真实凭据写进源码 / 版本库。
+_raw_accounts = os.getenv("MODELSCOPE_ACCOUNTS_JSON")
+if not _raw_accounts:
+    print(
+        "未设置 MODELSCOPE_ACCOUNTS_JSON 环境变量，无法运行模型可用性测试。\n"
+        "请按以下格式提供账户信息（key 替换为你的真实 Key）：\n\n"
+        'export MODELSCOPE_ACCOUNTS_JSON=\'[{"id":"acc1","name":"ms.cn",'
+        '"key":"YOUR_KEY_HERE","base":"https://api-inference.modelscope.cn/v1"}]\'\n',
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+try:
+    ACCOUNTS = json.loads(_raw_accounts)
+except json.JSONDecodeError as exc:
+    print(f"MODELSCOPE_ACCOUNTS_JSON 不是合法 JSON：{exc}", file=sys.stderr)
+    sys.exit(1)
+
+if not isinstance(ACCOUNTS, list) or not ACCOUNTS:
+    print("MODELSCOPE_ACCOUNTS_JSON 必须是非空数组。", file=sys.stderr)
+    sys.exit(1)
 
 MODELS = [
     "Qwen/Qwen3.5-397B-A17B",

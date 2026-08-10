@@ -11,6 +11,16 @@ class ProviderTypeEmptyDefault(Migration):
     description = "Change provider_type column default from 'modelscope' to ''"
 
     def up(self, conn):
+        # Rebuilding the parent `accounts` table via DROP TABLE fires an implicit
+        # DELETE under PRAGMA foreign_keys=ON, cascading via ON DELETE CASCADE to
+        # account_api_keys / supplier_models / mapping_models and wiping them.
+        # Disable FK for the rebuild so all child rows survive, then restore it.
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        conn.execute("PRAGMA foreign_keys = OFF")
+
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(accounts)")]
         # Preserve api_key column if it still exists — migration 023 is responsible
         # for migrating its data into account_api_keys and dropping it. If v17
@@ -43,8 +53,18 @@ class ProviderTypeEmptyDefault(Migration):
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_account_id ON accounts (account_id)"
         )
+        # Restore FK enforcement for subsequent operations.
+        conn.execute("PRAGMA foreign_keys = ON")
 
     def down(self, conn):
+        # Same FK-off guard as up(): rebuilding the parent `accounts` table must
+        # not cascade-delete child rows.
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        conn.execute("PRAGMA foreign_keys = OFF")
+
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(accounts)")]
         api_key_col = "api_key TEXT NOT NULL DEFAULT ''," if "api_key" in cols else ""
         conn.execute(
@@ -74,3 +94,5 @@ class ProviderTypeEmptyDefault(Migration):
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_account_id ON accounts (account_id)"
         )
+        # Restore FK enforcement for subsequent operations.
+        conn.execute("PRAGMA foreign_keys = ON")

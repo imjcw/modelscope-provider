@@ -43,3 +43,33 @@ class ModelScopeAccount:
                 self.api_key = derived
         if not self.api_keys:
             self.api_keys = [self.api_key] if self.api_key else []
+
+
+def build_ms_account(
+    account_dict: dict,
+    *,
+    api_key_records=None,
+    unavailable_models=None,
+) -> "ModelScopeAccount":
+    """Construct a :class:`ModelScopeAccount` from a raw DB row dict.
+
+    Shared by the alias router and the load-balancer refresh path so the
+    multi-key ``api_key_records`` field (and ``unavailable_models``) are
+    populated consistently instead of each caller re-deriving them.
+
+    Args:
+        account_dict: a row dict from the ``accounts`` table (expects keys
+            ``account_id``, ``base_url`` and optionally ``name``/``provider_type``).
+        api_key_records: list of key dicts from ``account_api_keys``; defaults
+            to whatever is already present on ``account_dict``.
+        unavailable_models: a set of currently-unavailable model names.
+    """
+    return ModelScopeAccount(
+        account_id=account_dict["account_id"],
+        name=account_dict.get("name", ""),
+        base_url=account_dict["base_url"],
+        provider_type=account_dict.get("provider_type", DEFAULT_PROVIDER_TYPE),
+        api_key_records=api_key_records if api_key_records is not None
+        else account_dict.get("api_key_records"),
+        unavailable_models=unavailable_models or set(),
+    )

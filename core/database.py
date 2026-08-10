@@ -145,6 +145,14 @@ class DatabaseManager:
             conn = self._conn_pool.get_nowait()
         except Exception:
             conn = self._new_connection()
+        # Re-enforce foreign-key enforcement on every checkout. Migrations may
+        # temporarily disable FK (PRAGMA foreign_keys=OFF) to rebuild a parent
+        # table without triggering ON DELETE CASCADE; this guarantees normal
+        # queries always run with FK on, regardless of pooled-connection state.
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            pass
         try:
             yield conn
             conn.commit()
