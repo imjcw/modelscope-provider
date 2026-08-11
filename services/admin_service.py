@@ -924,7 +924,15 @@ class AdminService:
                     api_key_id: int = 0,
                     error_source: str = None) -> str:
         """Log a request and return its request_id."""
+        from datetime import datetime, timezone
+
         request_id = f"req_{uuid.uuid4().hex[:8]}"
+        # Primary request time at millisecond precision (UTC). The DB column
+        # default CURRENT_TIMESTAMP only has second precision, so set it
+        # explicitly here. Format stays fixed-width "YYYY-MM-DD HH:MM:SS.fff"
+        # so lexicographic ordering / range filters remain correct.
+        now = datetime.now(timezone.utc)
+        ts = now.strftime("%Y-%m-%d %H:%M:%S.") + f"{now.microsecond // 1000:03d}"
 
         # Compute latency_ms from timing fields if not provided
         if latency_ms is None and request_start and end_time:
@@ -957,6 +965,7 @@ class AdminService:
             response_headers=response_headers,
             api_key_id=api_key_id,
             error_source=error_source,
+            timestamp=ts,
         )
 
         # Update minute-level aggregated stats (independent of raw log retention)

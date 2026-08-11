@@ -64,8 +64,21 @@ class LogRepository:
                client_key_name: str = None,
                response_headers: str = None,
                api_key_id: int = 0,
-               error_source: str = None) -> int:
-        """Insert a log entry."""
+               error_source: str = None,
+               timestamp: str = None) -> int:
+        """Insert a log entry.
+
+        ``timestamp`` is the primary request time shown in the admin UI. It is
+        stored at millisecond precision (``YYYY-MM-DD HH:MM:SS.fff`` in UTC) so
+        the dashboard can display sub-second timestamps. When omitted it falls
+        back to the current UTC time with millisecond precision rather than the
+        SQLite ``CURRENT_TIMESTAMP`` default, which only has second precision.
+        """
+        if timestamp is None:
+            from datetime import datetime, timezone
+
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.") + \
+                f"{datetime.now(timezone.utc).microsecond // 1000:03d}"
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO request_logs
@@ -74,14 +87,16 @@ class LogRepository:
                     error_message, raw_request, raw_response,
                     request_start, first_response, end_time,
                     cached_tokens, prompt_partial_cached,
-                    client_key_name, response_headers, api_key_id, error_source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    client_key_name, response_headers, api_key_id, error_source,
+                    timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (request_id, model, actual_model_id, account_id, account_name, status_code,
                  input_tokens, output_tokens, latency_ms, is_stream,
                  error_message, raw_request, raw_response,
                  request_start, first_response, end_time,
                  cached_tokens, prompt_partial_cached,
-                 client_key_name, response_headers, api_key_id, error_source),
+                 client_key_name, response_headers, api_key_id, error_source,
+                 timestamp),
             )
             return cursor.lastrowid
 
