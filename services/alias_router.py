@@ -240,12 +240,6 @@ class AliasRouter:
             f"key_id={selected.key_id}, model={selected.model_name}, strategy={strategy}"
         )
         return selected
-        return RoutingResult(
-            account=ms_account,
-            model_name=model_name,
-            key_id=key_record["id"],
-            key_string=key_record["api_key"],
-        )
 
     # ----- least_conn 在途连接计数 -----------------------------------------
 

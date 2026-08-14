@@ -10,7 +10,8 @@ protocol-prefixed prefix.
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
-from typing import Optional, List, AsyncGenerator, Any
+from typing import Optional, List, AsyncGenerator, Any, Union
+import copy
 import json
 import asyncio
 import logging
@@ -41,12 +42,12 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
-    stop: Optional[str] = None
-    n: Optional[int] = 1
+    stop: Optional[Union[str, List[str]]] = None
+    n: Optional[int] = None
     frequency_penalty: Optional[float] = None
     presence_penalty: Optional[float] = None
     logit_bias: Optional[dict] = None
-    logprobs: Optional[bool] = None
+    logprobs: Optional[Union[bool, int]] = None
     top_logprobs: Optional[int] = None
     response_format: Optional[Any] = None
     seed: Optional[int] = None
@@ -55,6 +56,7 @@ class ChatCompletionRequest(BaseModel):
     tool_choice: Optional[Any] = None
     functions: Optional[Any] = None
     parallel_tool_calls: Optional[bool] = None
+    stream_options: Optional[dict] = None
 
 
 class ErrorResponse(BaseModel):
@@ -82,6 +84,57 @@ def _extract_cache_usage(usage) -> tuple:
         return int(cached or 0), int(partial)
     except (TypeError, ValueError):
         return 0, 0
+
+
+def _is_openai_response(resp_json: dict) -> bool:
+    """Check if a response already follows the OpenAI chat completion format.
+
+    A valid OpenAI response has:
+      - ``choices``: non-empty list
+      - ``choices[0].message.role``: present
+      - ``usage``: dict
+
+    Non-OpenAI responses (e.g. raw ModelScope format) fall through so the
+    ``ResponseConverter`` can normalize them — but we never touch an already-valid
+    OpenAI response, which would otherwise strip useful fields like
+    ``prompt_tokens_details`` (and break cache-usage tracking).
+    """
+    if not isinstance(resp_json, dict):
+        return False
+    choices = resp_json.get("choices")
+    if not isinstance(choices, list) or len(choices) == 0:
+        return False
+    first = choices[0]
+    if not isinstance(first, dict):
+        return False
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return False
+    if "role" not in message:
+        return False
+    usage = resp_json.get("usage")
+    if not isinstance(usage, dict):
+        return False
+    return True
+
+
+def _normalize_response(response_converter, resp_json: dict) -> dict:
+    """Normalize a non-OpenAI upstream response to the OpenAI format.
+
+    If the response already looks like a standard OpenAI chat completion,
+    return it unchanged — converting it would lose fields like
+    ``prompt_tokens_details`` that cache-usage tracking depends on.
+
+    If the response is in a non-standard format (e.g. raw ModelScope),
+    apply the ``ResponseConverter`` to translate it. Conversion failures are
+    swallowed so the original payload is returned as a fallback.
+    """
+    if _is_openai_response(resp_json):
+        return resp_json
+    try:
+        return response_converter.convert_to_openai(resp_json)
+    except Exception:
+        return resp_json
 
 
 async def _safe_read_response_body(response, max_len: int = 50000) -> str:
@@ -287,7 +340,13 @@ async def stream_response(
     response,
     _capture_headers: bool = False,
 ) -> AsyncGenerator[str, None]:
-    """Generate streaming response from a pre-made upstream response."""
+    """Generate streaming response from a pre-made upstream response.
+
+    If the upstream produces no valid data chunks (e.g. only heartbeat
+    messages, only ``[DONE]``, or a non-SSE body), an error data chunk is
+    yielded at the end so the client sees a clear error instead of a
+    silent empty stream.
+    """
     if _capture_headers:
         hdrs = {}
         try:
@@ -297,12 +356,15 @@ async def stream_response(
         yield f"data: {json.dumps({'__hdrs__': hdrs})}\n\n"
 
     decoder = json.JSONDecoder()
+    yielded_any = False
+    saw_done = False
 
     try:
         async for line in response.aiter_lines():
             stripped = line.strip()
             if stripped == "[DONE]":
                 yield "data: [DONE]\n\n"
+                saw_done = True
                 return
 
             if stripped.startswith("data:"):
@@ -313,15 +375,32 @@ async def stream_response(
                 try:
                     chunk, _ = decoder.raw_decode(data_str)
                 except json.JSONDecodeError:
+                    # Non-JSON data — forward it raw so the client sees it.
                     yield f"data: {data_str}\n\n"
+                    yielded_any = True
                     continue
 
                 if chunk and chunk.get("choices") is None:
+                    # Non-choices chunk (heartbeat / keepalive) — skip silently.
                     continue
 
+                yielded_any = True
                 yield f"data: {json.dumps(chunk)}\n\n"
     finally:
         await _safe_aclose(response)
+        # If the stream produced no useful data at all (no data: lines, or
+        # only non-choices heartbeat chunks), emit an error marker so the
+        # client sees a clear error instead of a silent empty stream.
+        if not yielded_any and not saw_done:
+            error_json = json.dumps({
+                "error": {
+                    "message": "Upstream returned empty stream (no data received)",
+                    "type": "upstream_error",
+                    "param": None,
+                    "code": "empty_stream",
+                }
+            })
+            yield f"data: {error_json}\n\n"
 
 
 async def stream_response_with_logging(
@@ -368,6 +447,17 @@ async def stream_response_with_logging(
 
             if is_special_chunk:
                 continue
+
+            # Detect the empty-stream error marker emitted by stream_response
+            # when the upstream produced no valid data chunks.
+            if data_str:
+                try:
+                    err_obj, _ = json.JSONDecoder().raw_decode(data_str)
+                    if isinstance(err_obj, dict) and err_obj.get("error") and err_obj.get("error", {}).get("code") == "empty_stream":
+                        stream_failed = True
+                        interrupt_reason = "empty_stream"
+                except Exception:
+                    pass
 
             if first_response is None:
                 first_response = datetime.now(timezone.utc).isoformat()
@@ -421,13 +511,23 @@ async def stream_response_with_logging(
             except Exception:
                 pass
 
+        # The empty-stream error marker was detected inside the for loop (not in
+        # an except block), so record the circuit-breaker failure here.
+        if stream_failed and not stream_interrupted and circuit_breaker is not None:
+            try:
+                circuit_breaker.record_failure(
+                    key_id, account.account_id, actual_model_id or model_name, 502,
+                )
+            except Exception:
+                pass
+
         end_time = datetime.now(timezone.utc).isoformat()
         _stream_ended = stream_interrupted or stream_failed
         _is_empty = len(raw_chunks) == 0
         log_status = -1 if (_stream_ended or _is_empty) else stream_status_code
         log_error = (
             f"Streaming interrupted: {interrupt_reason}"
-            if stream_interrupted
+            if interrupt_reason
             else f"Empty stream: upstream returned 0 chunks (status={stream_status_code})"
             if _is_empty
             else None
@@ -550,6 +650,8 @@ async def _build_request_body(data: ChatCompletionRequest, actual_model_id: str)
         body["functions"] = data.functions
     if data.parallel_tool_calls is not None:
         body["parallel_tool_calls"] = data.parallel_tool_calls
+    if data.stream_options is not None:
+        body["stream_options"] = dict(data.stream_options)
     # stream is controlled server-side, not forwarded
     return body
 
@@ -671,7 +773,6 @@ async def _try_candidate(
 
     # ── Non-streaming success ──
     if not request.stream:
-        first_response = datetime.now(timezone.utc).isoformat()
         try:
             # Read the full response body for parsing. `response.text` works for
             # both real httpx responses and test mocks (where `.text` is set
@@ -682,6 +783,96 @@ async def _try_candidate(
             else:
                 raw_text = await _safe_read_response_body(response)
                 resp_json = json.loads(raw_text) if raw_text else {}
+
+            # Validate the response body. An empty body or a body with no
+            # ``choices`` means the upstream returned a 200 but no content —
+            # treat it as a 502 Bad Gateway so the caller can try another
+            # candidate or surface a clear error to the client.
+            if not resp_json:
+                if circuit_breaker is not None:
+                    try:
+                        circuit_breaker.record_failure(
+                            key_id, account.account_id, actual_model_id, 502,
+                        )
+                    except Exception:
+                        pass
+                await _log_error_request(
+                    admin_service, request.model, actual_model_id, account,
+                    client_key_name, 502,
+                    "Empty response body from upstream", body,
+                    request_start, first_response, is_stream=request.stream,
+                    key_id=key_id, error_source="upstream",
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "error": {
+                            "message": "Supplier returned empty response",
+                            "type": "server_error",
+                            "param": None,
+                            "code": "empty_response",
+                        }
+                    },
+                )
+            choices = resp_json.get("choices")
+            if not choices or not isinstance(choices, list) or len(choices) == 0:
+                if circuit_breaker is not None:
+                    try:
+                        circuit_breaker.record_failure(
+                            key_id, account.account_id, actual_model_id, 502,
+                        )
+                    except Exception:
+                        pass
+                await _log_error_request(
+                    admin_service, request.model, actual_model_id, account,
+                    client_key_name, 502,
+                    f"Invalid response from upstream: no choices in {resp_json.get('id', '?')}",
+                    body, request_start, first_response, is_stream=request.stream,
+                    key_id=key_id, error_source="upstream",
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "error": {
+                            "message": "Supplier returned response with no choices",
+                            "type": "server_error",
+                            "param": None,
+                            "code": "no_choices",
+                        }
+                    },
+                )
+            # Verify the first choice has a message block. Some upstreams
+            # return ``choices`` without ``message`` (e.g. only ``finish_reason``),
+            # which is not a valid OpenAI response.
+            first_choice = choices[0]
+            if not isinstance(first_choice, dict) or not first_choice.get("message"):
+                if circuit_breaker is not None:
+                    try:
+                        circuit_breaker.record_failure(
+                            key_id, account.account_id, actual_model_id, 502,
+                        )
+                    except Exception:
+                        pass
+                await _log_error_request(
+                    admin_service, request.model, actual_model_id, account,
+                    client_key_name, 502,
+                    f"Invalid response from upstream: no message in {resp_json.get('id', '?')}",
+                    body, request_start, first_response, is_stream=request.stream,
+                    key_id=key_id, error_source="upstream",
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "error": {
+                            "message": "Supplier returned response with no message",
+                            "type": "server_error",
+                            "param": None,
+                            "code": "no_message",
+                        }
+                    },
+                )
+        except HTTPException:
+            raise
         except Exception:
             await _log_error_request(
                 admin_service, request.model, actual_model_id, account,
@@ -690,6 +881,17 @@ async def _try_candidate(
                 key_id=key_id, error_source="upstream",
             )
             raise HTTPException(status_code=502, detail="Invalid response from supplier")
+        # Normalize non-OpenAI responses to the OpenAI format. Already-valid
+        # OpenAI responses pass through unchanged so fields like
+        # ``prompt_tokens_details`` (needed for cache-usage tracking) are not
+        # stripped by the converter.
+        # Record the raw upstream response BEFORE normalization so the log
+        # captures what the supplier actually sent — useful for debugging when
+        # the converter transforms non-standard formats.
+        raw_upstream_response = json.dumps(resp_json, ensure_ascii=False)
+        response_converter = services.get("response_converter")
+        if response_converter is not None:
+            resp_json = _normalize_response(response_converter, resp_json)
         try:
             await response.aclose()
         except Exception:
@@ -700,7 +902,6 @@ async def _try_candidate(
         output_tokens = resp_usage.get("completion_tokens", 0) or 0
         cached_tokens, prompt_partial_cached = _extract_cache_usage(resp_usage)
         end_time = datetime.now(timezone.utc).isoformat()
-        raw_response = json.dumps(resp_json, ensure_ascii=False)
 
         if admin_service:
             try:
@@ -721,7 +922,7 @@ async def _try_candidate(
                     input_tokens=input_tokens, output_tokens=output_tokens,
                     is_stream=False,
                     raw_request=json.dumps(body, ensure_ascii=False),
-                    raw_response=raw_response[:50000] + ("...(truncated)" if len(raw_response) > 50000 else ""),
+                    raw_response=raw_upstream_response[:50000] + ("...(truncated)" if len(raw_upstream_response) > 50000 else ""),
                     request_start=request_start, first_response=first_response, end_time=end_time,
                     cached_tokens=cached_tokens, prompt_partial_cached=prompt_partial_cached,
                     client_key_name=client_key_name,
@@ -852,7 +1053,7 @@ async def chat_completions(data: ChatCompletionRequest, fastapi_request: Request
                             candidate_idx + 1, len(candidates),
                             account.account_id, actual_model_id,
                         )
-                        cb_req_body = {"model": actual_model_id, "messages": data.messages}
+                        cb_req_body = await _build_request_body(data, actual_model_id)
                         now = datetime.now(timezone.utc).isoformat()
                         await _log_error_request(
                             admin_service, data.model, actual_model_id, account,
@@ -883,9 +1084,13 @@ async def chat_completions(data: ChatCompletionRequest, fastapi_request: Request
                             pass
 
                     try:
-                        return await _try_candidate(
+                        # Deep-copy body per candidate so per-candidate mutations
+                        # (``model``, ``stream_options``, etc.) in ``_try_candidate``
+                        # don't leak into the next candidate in the fallback chain.
+                        body_copy = copy.deepcopy(body)
+                        result = await _try_candidate(
                             request=data, account=account,
-                            actual_model_id=actual_model_id, body=body,
+                            actual_model_id=actual_model_id, body=body_copy,
                             http_client=http_client,
                             admin_service=admin_service,
                             quota_updater=quota_updater, services=services,
@@ -911,6 +1116,25 @@ async def chat_completions(data: ChatCompletionRequest, fastapi_request: Request
                             getattr(e, "status_code", "??"),
                         )
                         continue
+                    except Exception as e:
+                        # Non-HTTPException (e.g. ValueError from http_client
+                        # when no usable key exists). Release the in-flight slot
+                        # to avoid leaking the least_conn counter, then re-raise.
+                        if alias_router is not None:
+                            try:
+                                alias_router.release(candidate.key_id, actual_model_id)
+                            except Exception:
+                                pass
+                        logger.error(
+                            "Candidate %d/%d failed with non-HTTP error: "
+                            "account=%s model=%s error=%s",
+                            candidate_idx + 1, len(candidates),
+                            account.account_id, actual_model_id,
+                            f"{type(e).__name__}: {e}",
+                        )
+                        raise
+                    else:
+                        return result
 
                 # All candidates exhausted
                 raise last_error or HTTPException(

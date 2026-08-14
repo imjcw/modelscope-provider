@@ -56,3 +56,32 @@ app.provide('toastMessage', toastMessage)
 app.provide('toastType', toastType)
 app.provide('$toast', toast)
 app.use(router).mount('#app')
+
+// ── PWA Service Worker ──
+if ('serviceWorker' in navigator) {
+  const swUrl = '/web/sw.js'
+  const registration = async () => {
+    try {
+      const reg = await navigator.serviceWorker.register(swUrl, { scope: '/web/' })
+      // Auto-update when a new SW version is pushed
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            // New SW installed while tab is active — notify user
+            const toast = app.config.globalProperties
+            if (window._aiToast) window._aiToast('新版本已就绪，刷新即可更新', 'success')
+          }
+        })
+      })
+    } catch (e) {
+      // SW registration is best-effort; fail silently
+    }
+  }
+  // Wait for the page to settle before registering
+  if (document.readyState === 'complete') {
+    registration()
+  } else {
+    window.addEventListener('load', registration)
+  }
+}
