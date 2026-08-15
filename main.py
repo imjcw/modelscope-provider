@@ -19,11 +19,13 @@ try:
     from provider.core.config import ConfigManager
     from provider.core.service_init import ServiceInitializer
     from provider.api.openai_routes import router
+    from provider.api.anthropic_routes import router as anthropic_router
     from provider.api.admin_routes import router as admin_router
 except ImportError:
     from core.config import ConfigManager
     from core.service_init import ServiceInitializer
     from api.openai_routes import router
+    from api.anthropic_routes import router as anthropic_router
     from api.admin_routes import router as admin_router
 import logging
 import logging.handlers
@@ -277,6 +279,7 @@ def create_app():
 
     # Include API routes
     app.include_router(router, prefix="/openai", tags=["OpenAI"])
+    app.include_router(anthropic_router, prefix="/anthropic", tags=["Anthropic"])
     # DEPRECATED dual mount: the pre-2026-08 API used the /api prefix
     # (e.g. /api/v1/chat/completions). Kept only for backward compatibility
     # with existing clients. New integrations should use the /openai prefix.
