@@ -480,7 +480,7 @@ async def stream_response_anthropic(
                             "message": "Upstream returned empty stream",
                         },
                     }
-                    yield f"data: {json.dumps(error_data)}\n\n"
+                    yield _emit("error", error_data)
                 return
 
             if not stripped.startswith("data:"):
@@ -527,12 +527,12 @@ async def stream_response_anthropic(
                 first_delta = False
                 yielded_any = True
 
-            # Detect tool_use delta
+            # Detect finish_reason — close blocks and emit message_delta/stop
             if finish_reason:
                 if not saw_finish:
                     saw_finish = True
-                    # Close current block
-                    yield _emit("content_block_stop", {"index": block_idx})
+                    if block_types:
+                        yield _emit("content_block_stop", {"index": block_idx})
                     yield _emit("message_delta", {
                         "delta": {"stop_reason": _openai_finish_to_anthropic_stop(finish_reason),
                                   "stop_sequence": None},
@@ -541,40 +541,40 @@ async def stream_response_anthropic(
                     yield _emit("message_stop", {})
                 continue
 
-            # Emit content_block_start on first text delta for this block
-            if delta.get("content") or delta.get("role"):
-                if delta.get("role") == "assistant":
-                    # First delta has role but no content
-                    if first_delta:
-                        first_delta = False
+            # ── Content block handling ──
+            # If we see role="assistant" and no block has started yet, open one.
+            # This must happen BEFORE the content check so both content_block_start
+            # AND content_block_delta can fire on the same chunk (e.g. when the
+            # first OpenAI delta carries both role and text).
+            if delta.get("role") == "assistant" and not block_types:
+                yield _emit("content_block_start", {
+                    "type": "content_block_start",
+                    "index": block_idx,
+                    "content_block": {"type": "text", "text": ""},
+                })
+                block_types.append("text")
+                yielded_any = True
+
+            # Emit text_delta for any non-empty content
+            text = delta.get("content", "") or ""
+            if text:
+                if block_types and block_types[-1] != "text":
+                    block_idx += 1
                     yield _emit("content_block_start", {
                         "type": "content_block_start",
                         "index": block_idx,
                         "content_block": {"type": "text", "text": ""},
                     })
                     block_types.append("text")
-                    yielded_any = True
-                    continue
 
-                text = delta.get("content", "") or ""
-                if text:
-                    if block_types and block_types[-1] != "text":
-                        block_idx += 1
-                        yield _emit("content_block_start", {
-                            "type": "content_block_start",
-                            "index": block_idx,
-                            "content_block": {"type": "text", "text": ""},
-                        })
-                        block_types.append("text")
+                yield _emit("content_block_delta", {
+                    "type": "content_block_delta",
+                    "index": block_idx,
+                    "delta": {"type": "text_delta", "text": text},
+                })
+                yielded_any = True
 
-                    yield _emit("content_block_delta", {
-                        "type": "content_block_delta",
-                        "index": block_idx,
-                        "delta": {"type": "text_delta", "text": text},
-                    })
-                    yielded_any = True
-
-            # Tool use deltas
+            # ── Tool use deltas ──
             tool_calls = delta.get("tool_calls")
             if tool_calls and isinstance(tool_calls, list):
                 for tc in tool_calls:
@@ -618,7 +618,7 @@ async def stream_response_anthropic(
                     "message": "Upstream returned empty stream",
                 },
             }
-            yield f"data: {json.dumps(error_data)}\n\n"
+            yield _emit("error", error_data)
 
 
 # ── Candidate loop ──────────────────────────────────────────────────────
