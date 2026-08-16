@@ -2,7 +2,7 @@
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('D:/workspace/ai/modelscope-provider/web/dist', 'web/dist'), ('D:/workspace/ai/modelscope-provider/core/migrations/migrations', 'core/migrations/migrations'), ('D:/workspace/ai/modelscope-provider/web/favicon.ico', 'web')]
+datas = [('web/dist', 'web/dist'), ('core/migrations/migrations', 'core/migrations/migrations'), ('web/favicon.ico', 'web')]
 binaries = []
 hiddenimports = ['main', 'multiprocessing', 'win32gui', 'win32api', 'win32con', 'yaml']
 hiddenimports += collect_submodules('core.migrations.migrations')
@@ -15,7 +15,7 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['D:/workspace/ai/modelscope-provider/run.py'],
+    ['run.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
@@ -48,5 +48,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['D:/workspace/ai/modelscope-provider/web/favicon.ico'],
+    icon=['web/favicon.ico'],
 )

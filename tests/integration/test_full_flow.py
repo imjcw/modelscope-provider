@@ -5,18 +5,7 @@ from fastapi.testclient import TestClient
 from provider.main import create_app
 from provider.core.database import DatabaseManager
 from provider.core.migrations import Migrator
-
-
-class MockAccount:
-    """Mock ModelScopeAccount for testing."""
-
-    def __init__(self, account_id: str):
-        self.account_id = account_id
-        self.name = account_id
-        self.base_url = "https://api.inference.modelscope.cn/v1"
-        self.api_key = "test-key"
-        self.unavailable_models = set()
-        self.last_reset_date = "2026-07-15"
+from provider.repositories.account_repository import AccountRepository
 
 
 @pytest.fixture
@@ -36,20 +25,19 @@ def integration_db_url(tmp_path):
 
 
 def _seed_test_supplier(db_url: str):
-    """Seed a test supplier into the given DB."""
+    """Seed a test supplier into the given DB.
+
+    Uses ``AccountRepository.create`` so API keys land in ``account_api_keys``
+    (the legacy ``accounts.api_key`` column was dropped in migration 023).
+    """
     db = DatabaseManager(db_url)
-    with db.get_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT count(*) FROM accounts")
-        if c.fetchone()[0] == 0:
-            conn.execute(
-                "INSERT INTO accounts (account_id, name, api_key, base_url, status) "
-                "VALUES (?, ?, ?, ?, ?)",
-                ("test-integration-000", "test-integration-000",
-                 "test-integration-key",
-                 "https://api-inference.modelscope.cn/v1/chat/completions",
-                 "active"),
-            )
+    repo = AccountRepository(db)
+    if not repo.find_all():
+        repo.create(
+            name="test-integration-000",
+            api_keys=["test-integration-key"],
+            base_url="https://api-inference.modelscope.cn/v1/chat/completions",
+        )
 
 
 @pytest.fixture

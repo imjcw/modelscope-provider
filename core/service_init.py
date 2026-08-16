@@ -25,14 +25,20 @@ from models.account import DEFAULT_PROVIDER_TYPE
 def _resolve_read_timeout(config_repo) -> float:
     """Read ``request_timeout_ms`` and convert to seconds for httpx read timeout.
 
-    Falls back to 1 hour (3600s) if the key is missing or not a valid number.
+    Falls back to 1 hour (3600s) if the key is missing, unreadable, or the
+    config table/database is not yet available (e.g. during first startup).
     """
-    raw = config_repo.get("request_timeout_ms")
-    if raw is None:
-        return 3600.0
     try:
+        raw = config_repo.get("request_timeout_ms")
+        if raw is None:
+            return 3600.0
         return max(0.0, float(raw) / 1000.0)
     except (ValueError, TypeError):
+        return 3600.0
+    except Exception:
+        # Defensive: a DB read failure must not crash service startup.
+        logger.warning("Failed to read request_timeout_ms, using default 3600s",
+                       exc_info=True)
         return 3600.0
 
 
@@ -114,6 +120,7 @@ class ServiceInitializer:
             ),
         }
         # 从 DB 加载自定义类型，覆盖或补充硬编码策略
+        provider_type_repo = None
         try:
             provider_type_repo = ProviderTypeRepository(database)
             db_types = provider_type_repo.find_all()
@@ -123,8 +130,23 @@ class ServiceInitializer:
                     rate_limit_cache=rate_limit_cache,
                 )
                 rate_limit_strategies.update(db_strategies)
+            else:
+                # Seed default provider types on first run so the admin panel
+                # shows known types out of the box without manual setup.
+                for key, name, desc in [
+                    ("anthropic", "Anthropic", "Anthropic (Claude) API"),
+                    ("per_model", "Per-Model", "Per-model key / provider"),
+                ]:
+                    existing = provider_type_repo.find_by_type_key(key)
+                    if not existing:
+                        provider_type_repo.create(key, name, desc)
         except Exception:
-            pass
+            # If the provider_types table is missing or unreadable
+            # (e.g. migrations not yet run), fall back to the built-in
+            # strategies above. Also prevents a NameError where
+            # provider_type_repo was referenced in the services dict
+            # but never assigned (fixed by initializing to None above).
+            provider_type_repo = None
 
         services = {
             "database": database,

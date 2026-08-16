@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 from datetime import datetime
 from typing import List, Optional
@@ -797,9 +797,14 @@ class LogRepository:
         """Batch version of :meth:`query_stats_model_aggregate_by_key`.
 
         Returns ``{model_name: (input, output, cached, requests, success)}``
-        keyed by ``actual_model_id``. Used by ``get_model_quotas`` when a
-        ``key_id`` filter is active, to aggregate per-model stats from
-        ``request_logs`` in one query (P1).
+        keyed by ``actual_model_id`` (resolved upstream model, which matches
+        the catalog model name ``model_names`` passed by ``get_model_quotas``).
+        The WHERE clause also filters on ``actual_model_id`` rather than
+        the raw ``model`` column, because ``request_logs.model`` may hold an
+        alias (what the client typed) while the catalog lookup uses the
+        resolved model name.  Used by ``get_model_quotas`` when a ``key_id``
+        filter is active, to aggregate per-model stats from ``request_logs``
+        in one query (P1).
         """
         if not model_names:
             return {}

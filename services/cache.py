@@ -98,6 +98,10 @@ class RateLimitWindow:
     model_name: str
     window_seconds: float
     max_requests: int
+    # API key id this window belongs to. 0 = the supplier's primary key.
+    # Per-key windows let a supplier's N keys each hold their own quota for a
+    # model instead of sharing a single counter.
+    key_id: int = 0
     # Sliding window: epoch seconds of each counted request, oldest first.
     timestamps: deque = field(default_factory=deque)
 
@@ -178,15 +182,19 @@ class RateLimitCache:
         model_name: str,
         window_seconds: int,
         max_requests: int,
+        key_id: int = 0,
     ) -> bool:
         """Check and increment the rate-limit counter (sliding window).
 
         Returns ``True`` if the request is allowed (under the limit),
         ``False`` if adding this request would exceed ``max_requests`` within
         the last ``window_seconds`` (the sliding window ending now).
+
+        ``key_id`` scopes the window to a single API key (per key+model
+        isolation). Defaults to 0 (supplier primary key).
         """
         with self._lock:
-            key = (account_id, model_name)
+            key = (account_id, model_name, key_id)
             window = self._windows.get(key)
 
             if window is None:
@@ -196,13 +204,14 @@ class RateLimitCache:
                     model_name=model_name,
                     window_seconds=float(window_seconds),
                     max_requests=max_requests,
+                    key_id=key_id,
                 )
                 window.add()
                 self._windows[key] = window
                 self._dirty.add(key)
                 logger.info(
-                    "RateLimit window created for %s/%s: 1/%d",
-                    account_id, model_name, max_requests,
+                    "RateLimit window created for %s/%s/%s: 1/%d",
+                    account_id, model_name, key_id, max_requests,
                 )
                 return True
 
@@ -237,8 +246,9 @@ class RateLimitCache:
         model_name: str,
         window_seconds: int = 0,
         max_requests: int = 0,
+        key_id: int = 0,
     ) -> dict:
-        """Return quota info for display.
+        """Return quota info for display for a single (key_id, model).
 
         Expected keys: ``quota_remaining``, ``quota_limit``.
 
@@ -250,9 +260,12 @@ class RateLimitCache:
         sliding window (now - window_seconds) — the authoritative "已用" value.
         It is ``None`` when no in-memory window exists, so callers can fall back
         to the DB snapshot rather than treating absence as 0.
+
+        ``key_id`` selects the API key's window (defaults to 0). Use
+        :meth:`get_model_count_across_keys` to aggregate across all keys.
         """
         with self._lock:
-            key = (account_id, model_name)
+            key = (account_id, model_name, key_id)
             window = self._windows.get(key)
             if window is None:
                 return {
@@ -276,6 +289,40 @@ class RateLimitCache:
                     "%Y-%m-%dT%H:%M:%S", time.gmtime(window.window_start)
                 ),
             }
+
+    def get_model_count_across_keys(
+        self,
+        account_id: str,
+        model_name: str,
+        window_seconds: int = 0,
+        max_requests: int = 0,
+        key_id: int | None = None,
+    ) -> Optional[dict]:
+        """Sum the sliding-window request count for ``(account_id, model_name)``.
+
+        When ``key_id`` is set, scope to that specific key; otherwise sum across
+        ALL API keys of the supplier (per key+model isolation means each key has
+        its own window). Returns ``{"request_count": <sum>}`` or ``None`` when
+        no in-memory window exists for that model, so callers fall back to the
+        DB snapshot instead of treating absence as 0.
+        """
+        with self._lock:
+            windows = [
+                w
+                for (aid, mdl, _kid), w in self._windows.items()
+                if aid == account_id and mdl == model_name
+                and (key_id is None or _kid == key_id)
+            ]
+            if not windows:
+                return None
+            total = 0
+            for w in windows:
+                if not w.window_seconds and window_seconds:
+                    w.window_seconds = float(window_seconds)
+                if max_requests and w.max_requests != max_requests:
+                    w.max_requests = max_requests
+                total += w.count
+            return {"request_count": total}
 
     def flush(self) -> int:
         """Write all dirty windows to the database.
@@ -304,23 +351,24 @@ class RateLimitCache:
                 )
                 timestamps_json = json.dumps(list(window.timestamps))
                 snapshots.append(
-                    (key[0], key[1], window_start_iso, len(window.timestamps), timestamps_json)
+                    (key[0], key[1], key[2], window_start_iso,
+                     len(window.timestamps), timestamps_json)
                 )
             self._dirty.clear()
 
         count = 0
         with self._db.get_connection() as conn:
-            for account_id, model_name, window_start_iso, request_count, timestamps_json in snapshots:
+            for account_id, model_name, key_id, window_start_iso, request_count, timestamps_json in snapshots:
                 conn.execute(
                     """INSERT INTO account_rate_windows
-                       (account_id, model_name, window_start, request_count, timestamps, updated_at)
-                       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                       ON CONFLICT(account_id, model_name)
+                       (account_id, model_name, key_id, window_start, request_count, timestamps, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                       ON CONFLICT(account_id, model_name, key_id)
                        DO UPDATE SET window_start = excluded.window_start,
                                      request_count = excluded.request_count,
                                      timestamps = excluded.timestamps,
                                      updated_at = CURRENT_TIMESTAMP""",
-                    (account_id, model_name, window_start_iso,
+                    (account_id, model_name, key_id, window_start_iso,
                      request_count, timestamps_json),
                 )
                 count += 1
@@ -344,7 +392,7 @@ class RateLimitCache:
         """Load all existing rate-limit windows from the database."""
         with self._db.get_connection() as conn:
             rows = conn.execute(
-                "SELECT account_id, model_name, request_count, timestamps "
+                "SELECT account_id, model_name, key_id, request_count, timestamps "
                 "FROM account_rate_windows"
             ).fetchall()
 
@@ -377,12 +425,13 @@ class RateLimitCache:
             # how the timestamps were originally persisted.
             loaded_ts = deque(sorted(loaded_ts))
 
-            key = (row["account_id"], row["model_name"])
+            key = (row["account_id"], row["model_name"], row["key_id"])
             self._windows[key] = RateLimitWindow(
                 account_id=row["account_id"],
                 model_name=row["model_name"],
                 window_seconds=0,  # set by check()/get_quota_info() on access
                 max_requests=0,    # same
+                key_id=row["key_id"],
                 timestamps=loaded_ts,
             )
 

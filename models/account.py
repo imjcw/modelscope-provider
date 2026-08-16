@@ -19,6 +19,11 @@ class ModelScopeAccount:
     # read or write it; all keys live in account_api_keys.
     api_key: str = ""
     base_url: str = ""
+    # Optional separate upstream base for the Anthropic-native protocol. When a
+    # supplier exposes OpenAI and Anthropic endpoints at different URLs, set
+    # ``base_url`` to the OpenAI endpoint and ``anthropic_base_url`` to the
+    # Anthropic one. Empty means "fall back to base_url for Anthropic too".
+    anthropic_base_url: str = ""
     provider_type: str = DEFAULT_PROVIDER_TYPE
     name: str = ""
     quota_limit: int = 0
@@ -68,6 +73,7 @@ def build_ms_account(
         account_id=account_dict["account_id"],
         name=account_dict.get("name", ""),
         base_url=account_dict["base_url"],
+        anthropic_base_url=account_dict.get("anthropic_base_url", "") or "",
         provider_type=account_dict.get("provider_type", DEFAULT_PROVIDER_TYPE),
         api_key_records=api_key_records if api_key_records is not None
         else account_dict.get("api_key_records"),

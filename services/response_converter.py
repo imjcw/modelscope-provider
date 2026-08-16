@@ -12,6 +12,25 @@ class ResponseConverter:
         try:
             # Handle null/missing choices (some upstream APIs return "choices": null)
             choices = ms_response.get("choices") or []
+            # Empty choices: return an empty-but-valid OpenAI payload so callers
+            # don't KeyError on choices[0]["message"]["content"].
+            if not choices:
+                return {
+                    "id": ms_response.get("id", ""),
+                    "object": "chat.completion",
+                    "created": ms_response.get("created", 0),
+                    "model": ms_response.get("model", ""),
+                    "choices": [{
+                        "index": 0,
+                        "message": {"role": "assistant", "content": ""},
+                        "finish_reason": "stop",
+                    }],
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                }
             message = choices[0].get("message", {}) if choices else {}
             usage = ms_response.get("usage") or {}
 

@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from provider.core.service_init import ServiceInitializer
 
 
@@ -15,6 +15,7 @@ async def test_initialize_all_services():
     with patch("provider.core.service_init.DatabaseManager") as mock_db, \
          patch("provider.core.service_init.Migrator"), \
          patch("provider.core.service_init.HttpClient") as mock_http, \
+         patch("provider.core.service_init.ProviderTypeRepository") as mock_pt_repo_cls, \
          patch("provider.core.service_init.QuotaRepository"), \
          patch("provider.core.service_init.LoadBalancer"), \
          patch("provider.core.service_init.ResponseConverter"), \
@@ -23,8 +24,18 @@ async def test_initialize_all_services():
 
         mock_db_instance = Mock()
         mock_db_instance.initialize_tables = Mock()
+        mock_db_instance.seed_default_config = Mock()
         mock_db_instance.get_today_date = Mock(return_value="2026-07-15")
+        # ConfigRepository.get() → self.db.get_connection() → "with conn:"
+        # MagicMock supports __enter__/__exit__ out of the box.
+        mock_db_instance.get_connection = Mock(return_value=MagicMock())
         mock_db.return_value = mock_db_instance
+
+        # ProviderTypeRepository.find_all() returning [] (fresh install)
+        # exercises the seed branch.
+        mock_pt_repo = Mock()
+        mock_pt_repo.find_all = Mock(return_value=[])
+        mock_pt_repo_cls.return_value = mock_pt_repo
 
         mock_http_instance = Mock()
         mock_http_instance.create_client = AsyncMock()
@@ -59,6 +70,10 @@ async def test_initialize_services_calls_database_init():
     with patch("provider.core.service_init.DatabaseManager") as mock_db, \
          patch("provider.core.service_init.Migrator"):
         mock_db_instance = Mock()
+        mock_db_instance.initialize_tables = Mock()
+        mock_db_instance.seed_default_config = Mock()
+        # ConfigRepository and ConfigCache read through get_connection().
+        mock_db_instance.get_connection = Mock(return_value=MagicMock())
         mock_db.return_value = mock_db_instance
 
         config = Mock()

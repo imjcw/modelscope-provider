@@ -142,13 +142,19 @@ class AdminService:
 
     def create_supplier(self, name: str, base_url: str,
                         provider_type: str = DEFAULT_PROVIDER_TYPE,
-                        api_keys: list = None, api_key_records: list = None) -> dict:
-        """Create a supplier. Requires at least one API key (stored in account_api_keys)."""
+                        api_keys: list = None, api_key_records: list = None,
+                        anthropic_base_url: str = "") -> dict:
+        """Create a supplier. Requires at least one API key (stored in account_api_keys).
+
+        ``anthropic_base_url`` optionally points the Anthropic-native protocol at
+        a different upstream than ``base_url`` (dual-protocol suppliers).
+        """
         if api_key_records:
             keys = [r.get("api_key", "").strip() for r in api_key_records
                     if r.get("api_key", "").strip()]
             created = self.account_repo.create(
-                name, base_url, provider_type=provider_type, api_keys=keys
+                name, base_url, provider_type=provider_type, api_keys=keys,
+                anthropic_base_url=anthropic_base_url,
             )
             if self.account_repo is not None:
                 self.account_repo.replace_api_keys_with_records(
@@ -160,7 +166,8 @@ class AdminService:
         if not keys:
             raise ValueError("At least one API key is required")
         return self.account_repo.create(
-            name, base_url, provider_type=provider_type, api_keys=keys
+            name, base_url, provider_type=provider_type, api_keys=keys,
+            anthropic_base_url=anthropic_base_url,
         )
 
     def update_supplier(self, supplier_id: int, **kwargs) -> dict:
@@ -1129,16 +1136,17 @@ class AdminService:
             "per_model": per_model_list,
         }
 
-    def get_key_docs(self, key_id: int, base_url: str = None):
+    def get_key_docs(self, key_id: int, base_url: str = None, anthropic_base_url: str = None):
         """Return integration meta-data for a client API key.
 
         Only dynamic data is returned — the rendering is done in the frontend
         to keep documentation content, code snippets, and error-table content
-        in a single source of truth (Guide.vue).
+        in a single source of truth (Guide.vue / KeyDetailPanel).
 
         Args:
             key_id: Client API key primary key.
-            base_url: Real service base URL (e.g. ``https://example.com/api/v1``).
+            base_url: OpenAI entry base URL (e.g. ``https://example.com/openai/v1``).
+            anthropic_base_url: Anthropic entry base URL (e.g. ``.../anthropic/v1``).
         """
         if self.client_key_repo is None:
             return {}
@@ -1146,30 +1154,40 @@ class AdminService:
         if not key:
             return {}
         if not base_url:
-            base_url = "https://your-domain.com/api/v1"
-        return {"key_value": key["key_value"], "base_url": base_url}
+            base_url = "https://your-domain.com/openai/v1"
+        if not anthropic_base_url:
+            anthropic_base_url = "https://your-domain.com/anthropic/v1"
+        return {"key_value": key["key_value"],
+                "base_url": base_url,
+                "anthropic_base_url": anthropic_base_url}
 
     # ── Model Quotas ──
 
     def _get_account_rate_windows(self, account_id: str) -> dict:
-        """Read raw (model_name -> (window_start, request_count)) counters.
+        """Read raw window counters keyed by ``(model_name, key_id)``.
 
         Returns the authoritative window counters for an account straight from
         ``account_rate_windows``. Going through this table (instead of the
         strategy object) is intentional: at request time SenseTime counts under
         an aliased model name, and the admin strategy instance can differ from
         the request-time one — both would make the strategy methods unreliable.
+
+        Since the per-model window is now keyed per API key, a single model may
+        have several rows (one per ``key_id``); the display layer aggregates them.
         """
         if self.db is None:
             return {}
         try:
             with self.db.get_connection() as conn:
                 rows = conn.execute(
-                    "SELECT model_name, window_start, request_count "
+                    "SELECT model_name, key_id, window_start, request_count "
                     "FROM account_rate_windows WHERE account_id = ?",
                     (account_id,),
                 ).fetchall()
-            return {r["model_name"]: (r["window_start"], r["request_count"]) for r in rows}
+            return {
+                (r["model_name"], r["key_id"]): (r["window_start"], r["request_count"])
+                for r in rows
+            }
         except Exception:
             return {}
 
@@ -1183,10 +1201,11 @@ class AdminService:
             days: 0 = today only, otherwise past N days. When >0, token usage
                   and success rate are aggregated from the stats table over the
                   requested range instead of from model_quotas cumulative fields.
-            key_id: when truthy, filter request stats by this api_key_id (from
-                    ``account_api_keys``). Quota / window / unavailability data
-                    remain per-model; only token counts, request counts and
-                    success rate are key-scoped.
+            key_id: when not None, filter request stats by this api_key_id (from
+                    ``account_api_keys``; primary key is ``0``). Quota and window
+                    data are also scoped to this key (model_quotas rows filtered
+                    by key_id, window counters scoped to the key, max_requests
+                    shows the per-key limit instead of key-count × base).
 
         Returns a list of dicts:
         - supplier_id, supplier_name, account_id
@@ -1205,6 +1224,12 @@ class AdminService:
         if self.quota_repo is None or self.supplier_model_repo is None:
             return []
 
+        # 前端传的是 account_api_keys.id（自增主键），而所有内部表（request_logs、
+        # model_quotas、account_quotas、account_rate_windows）都用逻辑 key_id
+        # （0 = 主 key，1 = 第二 key...）。在此处转换。
+        if key_id is not None:
+            key_id = self.account_repo.api_key_id_to_logical(key_id)
+
         # 计算时间范围（days=0 = 今日，否则过去 N 天）
         if days and days > 0:
             from datetime import timedelta
@@ -1222,7 +1247,7 @@ class AdminService:
         quota_info_batch = {}
         if self.quota_repo is not None and account_ids_all:
             try:
-                quota_info_batch = self.quota_repo.get_account_info_batch(account_ids_all) or {}
+                quota_info_batch = self.quota_repo.get_account_info_batch(account_ids_all, key_id=key_id) or {}
             except Exception:
                 quota_info_batch = {}
 
@@ -1271,7 +1296,7 @@ class AdminService:
             if self.quota_repo is not None:
                 try:
                     model_quotas_all = self.quota_repo.get_model_quotas_batch(
-                        [sup["account_id"] for sup in suppliers]
+                        [sup["account_id"] for sup in suppliers], key_id=key_id
                     ) or {}
                 except Exception:
                     model_quotas_all = {}
@@ -1370,7 +1395,7 @@ class AdminService:
                     ) or {}
                 except Exception:
                     agg_map = {}
-                if key_id:
+                if key_id is not None:
                     try:
                         agg_by_key_map = self.log_repo.query_stats_model_aggregate_by_key_batch(
                             account_id, model_names, key_id, _range_start, _range_end
@@ -1420,7 +1445,7 @@ class AdminService:
                 _success_rate = None
                 _inp_s = _out_s = _cached_s = 0
                 try:
-                    if key_id:
+                    if key_id is not None:
                         _inp_s, _out_s, _cached_s, _req_s, _suc_s = \
                             agg_by_key_map.get(model_name, (0, 0, 0, 0, 0))
                     else:
@@ -1431,9 +1456,15 @@ class AdminService:
                     _success_rate = round(_suc_s / _req_s * 100, 1) if _req_s else None
                 except Exception:
                     pass
-                # 指定 key 时：token 用量永远取按 key 聚合的结果（忽略 model_quotas 累计值）
-                # days>0 时：token 用量也改为按范围聚合（取代 model_quota 的累计值）
-                if days and days > 0:
+                # 指定 key 时：token 用量永远取按该 key 聚合的结果（request_logs 的
+                # agg_by_key_map），否则会回退到全供应商级的 token_today_map /
+                # model_quotas 累计值，导致所有 key 的用量显示成一模一样。days>0 时
+                # 同理走按范围聚合。
+                if key_id is not None:
+                    today_input = _inp_s
+                    today_output = _out_s
+                    today_cached = _cached_s
+                elif days and days > 0:
                     today_input = _inp_s
                     today_output = _out_s
                     today_cached = _cached_s
@@ -1456,8 +1487,12 @@ class AdminService:
                     # 配额上限 × 活跃 key 数：每个 key 在上游持有独立配额，因此
                     # 多 key 账户的有效窗口额度 = 配置上限 × N，与拦截侧一致。
                     # 计数语义与 AliasRouter 候选一致（主密钥 + 活跃 account_api_keys）。
+                    # 当指定 key_id 时，显示该 key 的单 key 上限，不乘 key 数。
                     try:
-                        max_requests = max_requests * max(1, key_count)
+                        if key_id is not None:
+                            max_requests = max_requests  # 单 key 上限
+                        else:
+                            max_requests = max_requests * max(1, key_count)
                     except Exception:
                         pass
                     # 计数 key 以真实模型 ID (actual_model_id) 写入（见 routes.py
@@ -1486,8 +1521,9 @@ class AdminService:
                         _counts = []
                         for _k in match_keys:
                             try:
-                                _info = self.rate_limit_cache.get_quota_info(
-                                    account_id, _k, window_seconds, max_requests
+                                _info = self.rate_limit_cache.get_model_count_across_keys(
+                                    account_id, _k, window_seconds, max_requests,
+                                    key_id=key_id,
                                 )
                             except Exception:
                                 _info = None
@@ -1497,23 +1533,44 @@ class AdminService:
                             sliding_count = max(_counts)
 
                     if sliding_count is None:
-                        cnt_model = next((k for k in match_keys if k in raw_windows), None)
-                        if cnt_model is None and len(raw_windows) == 1:
-                            # Supplier-wide fallback (e.g. SenseTime aliases all
-                            # models to one "sense"/"__global__" counter). Only fall
-                            # back when the single window key is NOT itself another
-                            # specific model in this catalog — otherwise model A's
-                            # counter would bleed onto model B's row.
-                            _only_key = next(iter(raw_windows))
-                            _belongs_to_other = (
-                                _only_key in _catalog_names and _only_key != model_name
-                            )
-                            if not _belongs_to_other:
-                                cnt_model = _only_key
-                        if cnt_model is not None:
-                            sliding_count = raw_windows[cnt_model][1]
+                        # raw_windows is keyed by (model_name, key_id). When
+                        # key_id is specified, scope to that key only.
+                        cnt = 0
+                        matched = False
+                        for _mn in match_keys:
+                            for (_rmn, _rkid), (_ws, _rc) in raw_windows.items():
+                                if _rmn == _mn and (key_id is None or _rkid == key_id):
+                                    cnt += _rc
+                                    matched = True
+                        if matched:
+                            sliding_count = cnt
                         else:
-                            sliding_count = 0
+                            # Supplier-wide fallback (e.g. SenseTime aliases every
+                            # model to one "__global__" counter). Each key now holds
+                            # its own window counter (per-key), so the supplier-wide
+                            # used count is the per-key sum — sum across all keys
+                            # that share that aliased row. Only fall back when the
+                            # matched model is NOT itself another specific catalog
+                            # model (otherwise model A's counter would bleed onto
+                            # model B's row).
+                            _global_rows = [
+                                _rc for (_rmn, _rkid), (_ws, _rc) in raw_windows.items()
+                                if _rmn == "__global__"
+                                and (key_id is None or _rkid == key_id)
+                            ]
+                            if _global_rows:
+                                sliding_count = sum(_global_rows)
+                            elif len(raw_windows) == 1:
+                                _only_key = next(iter(raw_windows))
+                                _belongs_to_other = (
+                                    _only_key[0] in _catalog_names and _only_key[0] != model_name
+                                )
+                                if not _belongs_to_other:
+                                    sliding_count = next(iter(raw_windows.values()))[1]
+                                else:
+                                    sliding_count = 0
+                            else:
+                                sliding_count = 0
 
                     remaining = max(0, max_requests - sliding_count)
                     win = {

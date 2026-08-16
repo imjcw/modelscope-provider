@@ -236,7 +236,7 @@ class CircuitBreaker:
                     key_id, model_name, account_id, state.consecutive_failures,
                     self.escalation_freeze_seconds,
                 )
-                self._escalate(strategy, account_id, model_name, state.error_type)
+                self._escalate(strategy, account_id, model_name, state.error_type, key_id)
                 return
 
             # 瞬时错误（server_error / network_error / timeout / rate_limited）第 1 次
@@ -361,17 +361,23 @@ class CircuitBreaker:
         account_id: str,
         model_name: str,
         error_type: Optional[str],
+        key_id: int = 0,
     ) -> None:
-        """Notify the supplier strategy that the circuit breaker escalated."""
+        """Notify the supplier strategy that the circuit breaker escalated.
+
+        ``key_id`` is forwarded so the strategy can mark the model unavailable for
+        the specific key (matching the breaker's own ``(key_id, model)`` scope),
+        rather than blocking every key of the supplier.
+        """
         if strategy is None:
             return
         handler = getattr(strategy, "on_circuit_breaker_escalation", None)
         if handler is None:
             return
         try:
-            handler(account_id, model_name, error_type)
+            handler(account_id, model_name, error_type, key_id)
         except Exception:
             logger.exception(
-                "Circuit breaker escalation handler failed for %s/%s",
-                account_id, model_name,
+                "Circuit breaker escalation handler failed for %s/%s (key %s)",
+                account_id, model_name, key_id,
             )

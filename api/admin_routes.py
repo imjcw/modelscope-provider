@@ -58,10 +58,11 @@ def _refresh_after_account_change(request: Request):
 
 class SupplierCreate(BaseModel):
     name: str = Field(..., description="Supplier display name")
-    base_url: str = Field(..., description="Provider base URL")
-    provider_type: str = Field(default=DEFAULT_PROVIDER_TYPE, description="Provider type: modelscope, sensetime")
+    base_url: str = Field(..., description="OpenAI-compatible base URL (ends with /v1 for OpenAI providers)")
+    provider_type: str = Field(default=DEFAULT_PROVIDER_TYPE, description="Provider type: modelscope, sensetime, anthropic, per_model")
     api_keys: List[str] = Field(default_factory=list, description="API keys (stored in account_api_keys)")
     api_key_records: List[dict] = Field(default_factory=list, description="API key records with status (id, api_key, status)")
+    anthropic_base_url: str = Field(default="", description="Optional separate Anthropic-native base URL (e.g. https://api.anthropic.com). Used for the /anthropic entry point; falls back to base_url when empty.")
 
 
 class SupplierUpdate(BaseModel):
@@ -71,6 +72,7 @@ class SupplierUpdate(BaseModel):
     provider_type: Optional[str] = None
     api_keys: Optional[List[str]] = None
     api_key_records: Optional[List[dict]] = None
+    anthropic_base_url: Optional[str] = None
 
 
 class MappingUpsert(BaseModel):
@@ -283,6 +285,7 @@ def create_supplier(body: SupplierCreate, request: Request, service=Depends(get_
             provider_type=body.provider_type,
             api_keys=body.api_keys,
             api_key_records=body.api_key_records,
+            anthropic_base_url=body.anthropic_base_url,
         )
         _refresh_after_account_change(request)
         return result
@@ -889,12 +892,16 @@ def get_client_key_stats(key_id: int, days: int = 30, service=Depends(get_admin_
 def get_client_key_docs(key_id: int, request: Request, service=Depends(get_admin_service)):
     """Return integration meta-data for a specific client API key (rendered in frontend).
 
-    The canonical proxy prefix is ``/openai`` (e.g. ``/openai/v1/chat/completions``).
-    ``/api`` remains mounted as a backward-compatible alias for existing clients.
+    Both protocol entry points are returned so the frontend can render snippets
+    for the OpenAI-compatible endpoint *and* the Anthropic-native endpoint.
+    The protocol the client speaks is determined by which entry it calls.
     """
     prefix = f"{request.url.scheme}://{request.url.netloc}"
     base_url = prefix + "/openai/v1"
-    docs = service.get_key_docs(key_id=key_id, base_url=base_url)
+    anthropic_base_url = prefix + "/anthropic/v1"
+    docs = service.get_key_docs(
+        key_id=key_id, base_url=base_url, anthropic_base_url=anthropic_base_url
+    )
     if not docs:
         raise HTTPException(status_code=404, detail="Client key not found")
     return docs

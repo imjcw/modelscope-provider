@@ -2,17 +2,50 @@
   <div class="h-full flex flex-col overflow-hidden">
     <PageHeader title="使用指南 // Guide" subtitle="// 将代理服务接入你的工具和项目">
       <template #action>
-        <span class="text-xs text-ls-muted">API 基础地址</span>
-        <div class="flex items-center gap-1 bg-ls-card rounded-md border border-ls-border px-2.5 py-1">
-          <code class="text-xs font-mono text-ls-accent">{{ apiBaseUrl }}</code>
-          <CopyButton :text="apiBaseUrl" :size="12" class="ml-1"
-            color-class="text-ls-dim hover:text-ls-text"
-            :toast-text="'已复制: ' + apiBaseUrl" />
+        <div class="flex items-center gap-3">
+          <div>
+            <span class="text-xs text-ls-muted">OpenAI 端</span>
+            <div class="flex items-center gap-1 bg-ls-card rounded-md border border-ls-border px-2.5 py-1">
+              <code class="text-xs font-mono text-ls-accent">{{ openaiBaseUrl }}</code>
+              <CopyButton :text="openaiBaseUrl" :size="12" class="ml-1"
+                color-class="text-ls-dim hover:text-ls-text"
+                :toast-text="'已复制: ' + openaiBaseUrl" />
+            </div>
+          </div>
+          <div>
+            <span class="text-xs text-ls-muted">Anthropic 端</span>
+            <div class="flex items-center gap-1 bg-ls-card rounded-md border border-ls-border px-2.5 py-1">
+              <code class="text-xs font-mono text-ls-accent">{{ anthropicBaseUrl }}</code>
+              <CopyButton :text="anthropicBaseUrl" :size="12" class="ml-1"
+                color-class="text-ls-dim hover:text-ls-text"
+                :toast-text="'已复制: ' + anthropicBaseUrl" />
+            </div>
+          </div>
         </div>
       </template>
     </PageHeader>
 
     <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6 space-y-6">
+      <!-- 协议说明 -->
+      <CCard no-padding>
+        <div class="p-4">
+          <div class="flex items-center gap-2 mb-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--chart-yellow)" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+            <span class="text-xs text-ls-text font-medium">协议由客户端入口决定</span>
+          </div>
+          <p class="text-xs text-ls-dim">一个供应商可同时支持 OpenAI 兼容接口和 Anthropic 原生接口、两个入口对应两个地址。</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            <div class="bg-ls-bg rounded-md border border-ls-border p-3">
+              <p class="text-xs font-mono text-ls-accent">/openai/v1/chat/completions</p>
+              <p class="text-[11px] text-ls-muted mt-1">OpenAI 协议 · 鉴权 <span class="font-mono">Authorization: Bearer</span> · 指向 <span class="font-mono">base_url</span></p>
+            </div>
+            <div class="bg-ls-bg rounded-md border border-ls-border p-3">
+              <p class="text-xs font-mono text-ls-accent">/anthropic/v1/messages</p>
+              <p class="text-[11px] text-ls-muted mt-1">Anthropic 协议 · 鉴权 <span class="font-mono">x-api-key</span> · 指向 <span class="font-mono">anthropic_base_url</span>（回落 base_url）</p>
+            </div>
+          </div>
+        </div>
+      </CCard>
       <!-- 步骤导航 -->
       <CCard>
         <h2 class="font-semibold text-ls-text mb-4">三步开始使用</h2>
@@ -37,47 +70,57 @@
           </div>
         </template>
 
-        <!-- Tab: OpenAI SDK -->
-        <div v-show="activeTab === 0" class="p-5 space-y-5">
-          <div>
-            <h3 class="text-sm font-medium text-ls-text">Python · OpenAI SDK</h3>
-            <p class="text-xs text-ls-muted mt-0.5">只需修改 base_url，其余代码不变</p>
+        <!-- Tab: OpenAI 协议 -->
+        <div v-show="activeTab === 0" class="p-5 space-y-4">
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-medium text-ls-text">OpenAI 协议</span>
+            <code class="text-xs font-mono text-ls-accent">/openai/v1/chat/completions</code>
+            <span class="text-xs text-ls-muted">· 鉴权 <span class="font-mono">Authorization: Bearer</span></span>
           </div>
-          <CodeBlock lang="python" :code="pythonSdkCode" />
+          <div class="flex gap-1">
+            <button v-for="(s, i) in openaiSnippets" :key="s.key" @click="activeOpenaiSnippet = i"
+              :class="activeOpenaiSnippet === i ? 'bg-ls-accent text-ls-bg' : 'text-ls-dim hover:text-ls-text'"
+              class="px-3 py-1.5 text-xs rounded-md transition-colors">{{ s.label }}</button>
+          </div>
+          <CodeBlock :lang="openaiSnippets[activeOpenaiSnippet].lang" :code="openaiSnippets[activeOpenaiSnippet].code" />
+          <div v-if="activeOpenaiSnippet === 2">
+            <h3 class="text-sm font-medium text-ls-text mt-3">流式响应（SSE）</h3>
+            <p class="text-xs text-ls-muted mt-0.5">添加 <code class="text-ls-accent">"stream": true</code> 即可</p>
+            <CodeBlock lang="bash" :code="curlStreamCode" />
+          </div>
           <div class="bg-ls-bg rounded-md border border-ls-border p-3">
             <div class="flex items-center gap-2 mb-1">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--chart-green)" stroke-width="2.5"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
               <span class="text-xs text-green-400">注意</span>
             </div>
-            <p class="text-xs text-ls-dim">api_key 可以填任意字符串，代理服务不会校验。base_url 指向本服务的 `/openai/v1` 路径即可。</p>
+            <p class="text-xs text-ls-dim">api_key 可填任意字符串，代理服务不校验；base_url 指向本服务 <code class="text-ls-accent">/openai/v1</code> 即可。</p>
           </div>
         </div>
 
-        <!-- Tab: JavaScript SDK -->
-        <div v-show="activeTab === 1" class="p-5 space-y-5">
-          <div>
-            <h3 class="text-sm font-medium text-ls-text">JavaScript / TypeScript · OpenAI SDK</h3>
-            <p class="text-xs text-ls-muted mt-0.5">npm 包 <code class="text-ls-accent">@openai/openai</code> 同样兼容</p>
+        <!-- Tab: Anthropic 协议 -->
+        <div v-show="activeTab === 1" class="p-5 space-y-4">
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-medium text-ls-text">Anthropic 协议</span>
+            <code class="text-xs font-mono text-ls-accent">/anthropic/v1/messages</code>
+            <span class="text-xs text-ls-muted">· 鉴权 <span class="font-mono">x-api-key</span></span>
           </div>
-          <CodeBlock lang="javascript" :code="jsSdkCode" />
-        </div>
-
-        <!-- Tab: curl -->
-        <div v-show="activeTab === 2" class="p-5 space-y-5">
-          <div>
-            <h3 class="text-sm font-medium text-ls-text">curl · 直接 HTTP 调用</h3>
-            <p class="text-xs text-ls-muted mt-0.5">适合快速验证或无 SDK 环境</p>
+          <div class="flex gap-1">
+            <button v-for="(s, i) in anthropicSnippets" :key="s.key" @click="activeAnthropicSnippet = i"
+              :class="activeAnthropicSnippet === i ? 'bg-ls-accent text-ls-bg' : 'text-ls-dim hover:text-ls-text'"
+              class="px-3 py-1.5 text-xs rounded-md transition-colors">{{ s.label }}</button>
           </div>
-          <CodeBlock lang="bash" :code="curlCode" />
-          <div>
-            <h3 class="text-sm font-medium text-ls-text mt-3">流式响应（SSE）</h3>
-            <p class="text-xs text-ls-muted mt-0.5">添加 <code class="text-ls-accent">"stream": true</code> 即可</p>
+          <CodeBlock :lang="anthropicSnippets[activeAnthropicSnippet].lang" :code="anthropicSnippets[activeAnthropicSnippet].code" />
+          <div class="bg-ls-bg rounded-md border border-ls-border p-3">
+            <div class="flex items-center gap-2 mb-1">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--chart-yellow)" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+              <span class="text-xs text-ls-accent">注意</span>
+            </div>
+            <p class="text-xs text-ls-dim">base_url 指向本服务 <code class="text-ls-accent">/anthropic/v1</code>；api_key 填供应商密钥，通过 <code class="font-mono">x-api-key</code> 头传递；请求体必须指定 <code class="font-mono">max_tokens</code>。</p>
           </div>
-          <CodeBlock lang="bash" :code="curlStreamCode" />
         </div>
 
         <!-- Tab: 第三方工具 -->
-        <div v-show="activeTab === 3" class="p-5 space-y-5">
+        <div v-show="activeTab === 2" class="p-5 space-y-5">
           <div>
             <h3 class="text-sm font-medium text-ls-text">第三方工具对接</h3>
             <p class="text-xs text-ls-muted mt-0.5">兼容 OpenAI API 的工具均可直接接入</p>
@@ -111,7 +154,7 @@
         </div>
 
         <!-- Tab: 请求格式 -->
-        <div v-show="activeTab === 4" class="p-5 space-y-5">
+        <div v-show="activeTab === 3" class="p-5 space-y-5">
           <div>
             <h3 class="text-sm font-medium text-ls-text">请求 / 响应格式</h3>
             <p class="text-xs text-ls-muted mt-0.5">完全兼容 OpenAI API 格式</p>
@@ -127,7 +170,7 @@
         </div>
 
         <!-- Tab: 错误处理 -->
-        <div v-show="activeTab === 5" class="p-5 space-y-5">
+        <div v-show="activeTab === 4" class="p-5 space-y-5">
           <div>
             <h3 class="text-sm font-medium text-white">错误码与处理建议</h3>
             <p class="text-xs text-gray-500 mt-0.5">调用失败时请参考以下状态码排查</p>
@@ -166,21 +209,25 @@ import CopyButton from '@/components/CopyButton.vue'
 import CodeBlock from '@/components/CodeBlock.vue'
 
 // ── 页面级数据 ──
-const apiBaseUrl = ref(window.location.origin + '/openai/v1')
+const openaiBaseUrl = ref(window.location.origin + '/openai/v1')
+const anthropicBaseUrl = ref(window.location.origin + '/anthropic/v1')
 
 // ── 三步开始使用 ──
 const steps = [
   { title: '添加供应商', desc: '在「供应商管理」中添加 ModelScope 账户' },
   { title: '配置别名映射', desc: '在「模型映射」中设置别名到真实模型 ID' },
-  { title: '接入工具', desc: '将工具 API 地址指向本服务的 /openai/v1' },
+  { title: '接入工具', desc: 'OpenAI 工具指向 /openai/v1；Anthropic 工具指向 /anthropic/v1' },
 ]
 
 // ── 标签页 ──
-const tabs = ['Python SDK', 'JavaScript SDK', 'curl', '第三方工具', '请求格式', '错误处理']
-const activeTab = ref(3)
+const tabs = ['OpenAI 协议', 'Anthropic 协议', '第三方工具', '请求格式', '错误处理']
+const activeTab = ref(0)
 
-// ── 代码示例 ──
-const pythonSdkCode = `from openai import OpenAI
+// ── OpenAI 协议代码示例（按语言切换）──
+const openaiSnippets = [
+  {
+    key: 'python', label: 'Python', lang: 'python',
+    code: `from openai import OpenAI
 
 client = OpenAI(
     api_key="任意值",
@@ -205,9 +252,11 @@ for chunk in client.chat.completions.create(
     stream=True,
 ):
     if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")`
-
-const jsSdkCode = `import { OpenAI } from "openai"
+        print(chunk.choices[0].delta.content, end="")`,
+  },
+  {
+    key: 'javascript', label: 'JavaScript / TypeScript', lang: 'javascript',
+    code: `import { OpenAI } from "openai"
 
 const client = new OpenAI({
   apiKey: "任意值",
@@ -235,9 +284,11 @@ for await (const chunk of stream) {
   if (chunk.choices[0]?.delta?.content) {
     process.stdout.write(chunk.choices[0].delta.content)
   }
-}`
-
-const curlCode = `curl ${window.location.origin}/openai/v1/chat/completions \\
+}`,
+  },
+  {
+    key: 'curl', label: 'curl', lang: 'bash',
+    code: `curl ${window.location.origin}/openai/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "hy3",
@@ -247,8 +298,43 @@ const curlCode = `curl ${window.location.origin}/openai/v1/chat/completions \\
     ],
     "temperature": 0.7,
     "max_tokens": 512
-  }'`
+  }'`,
+  },
+]
+const activeOpenaiSnippet = ref(0)
 
+// ── Anthropic 协议代码示例（按语言切换）──
+const anthropicSnippets = [
+  {
+    key: 'python', label: 'Python', lang: 'python',
+    code: `from anthropic import Anthropic
+
+client = Anthropic(
+    api_key="你的密钥",
+    base_url="${window.location.origin}/anthropic/v1",
+)
+message = client.messages.create(
+    model="hy3",
+    messages=[{"role": "user", "content": "你好"}],
+    max_tokens=1024,
+)
+print(message.content[0].text)`,
+  },
+  {
+    key: 'curl', label: 'curl', lang: 'bash',
+    code: `curl ${window.location.origin}/anthropic/v1/messages \\
+  -H "content-type: application/json" \\
+  -H "x-api-key: 你的密钥" \\
+  -d '{
+    "model": "hy3",
+    "messages": [{"role": "user", "content": "你好"}],
+    "max_tokens": 1024
+  }'`,
+  },
+]
+const activeAnthropicSnippet = ref(0)
+
+// ── curl 流式（仅 OpenAI curl 子 tab 时展示）──
 const curlStreamCode = `curl ${window.location.origin}/openai/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -258,41 +344,48 @@ const curlStreamCode = `curl ${window.location.origin}/openai/v1/chat/completion
   }'`
 
 const commonConfig = [
-  { label: 'API 地址', value: apiBaseUrl.value },
-  { label: 'API Key', value: '任意字符串' },
+  { label: 'OpenAI 端', value: openaiBaseUrl.value },
+  { label: 'Anthropic 端', value: anthropicBaseUrl.value },
+  { label: 'API Key', value: '任意字符串（OpenAI 端）/ 供应商密钥（Anthropic 端）' },
   { label: '模型名', value: '别名（如 hy3）' },
 ]
 
 const tools = [
   {
     name: 'Cursor / Windsurf',
-    host: new URL(apiBaseUrl.value).host,
+    host: new URL(openaiBaseUrl.value).host,
     path: '/chat/completions',
     desc: '在设置中选择 "Custom OpenAI"，填入本服务的完整 URL 作为 API Base，API Key 任意填写即可。',
   },
   {
     name: 'Next.js / Vercel AI SDK',
-    host: new URL(apiBaseUrl.value).host,
+    host: new URL(openaiBaseUrl.value).host,
     path: '/chat/completions',
     desc: '使用 createOpenAI 时传入 baseURL 指向本服务，即可像调用 OpenAI 一样使用 ModelScope。',
   },
   {
     name: 'LangChain',
-    host: new URL(apiBaseUrl.value).host,
+    host: new URL(openaiBaseUrl.value).host,
     path: '/chat/completions',
     desc: 'ChatOpenAI(base_url=本服务地址, api_key="任意值") 即可初始化，支持所有 LangChain 链和工具。',
   },
   {
     name: 'Dify / Coze / FastGPT',
-    host: new URL(apiBaseUrl.value).host,
+    host: new URL(openaiBaseUrl.value).host,
     path: '/chat/completions',
     desc: '在自定义模型/数据源设置中选择 OpenAI 兼容，填入本服务地址，模型名称填写已配置的别名。',
   },
   {
-    name: 'Claude Code / Aider',
-    host: new URL(apiBaseUrl.value).host,
+    name: 'Aider / 其他 OpenAI 客户端',
+    host: new URL(openaiBaseUrl.value).host,
     path: '/chat/completions',
     desc: '设置自定义 API provider，base_url 指向本服务，即可通过代理调用 ModelScope 模型。',
+  },
+  {
+    name: 'Claude Code（原生 Anthropic 模式）',
+    host: new URL(anthropicBaseUrl.value).host,
+    path: '/v1/messages',
+    desc: '启用 Anthropic 模式并指向本服务的 Anthropic 端地址，通过 x-api-key 鉴权调用。',
   },
 ]
 

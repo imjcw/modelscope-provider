@@ -163,7 +163,7 @@ class TrayRunner:
         if msg == _win32con.WM_DESTROY:
             _win32gui.PostQuitMessage(0)
         elif msg == _TRAY_MSG:
-            if lParam in (_win32con.WM_LBUTTONDOWN, _win32con.WM_LBUTTONUP):
+            if lParam == _win32con.WM_LBUTTONUP:
                 self._open()
             # 在 RBUTTONUP / CONTEXTMENU 时弹出菜单（不要在 RBUTTONDOWN
             # 弹，否则菜单会在用户松开右键时立即消失）

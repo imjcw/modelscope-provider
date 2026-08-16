@@ -29,33 +29,55 @@ def test_get_today_date(database):
 
 
 def test_account_quotas_composite_primary_key(database):
-    """Verify account_quotas uses a composite primary key on (account_id, quota_date)."""
+    """Verify account_quotas uses a composite primary key on (account_id, key_id, quota_date)."""
     with database.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(account_quotas)")
         columns = {row[1]: row for row in cursor.fetchall()}
 
         pk_columns = [name for name, row in columns.items() if row[5] > 0]
-        assert set(pk_columns) == {"account_id", "quota_date"}
+        assert set(pk_columns) == {"account_id", "key_id", "quota_date"}
 
 
 def test_account_quotas_duplicate_rejection(database):
-    """Verify that duplicate (account_id, quota_date) rows are rejected."""
+    """Verify that duplicate (account_id, key_id, quota_date) rows are rejected."""
     with database.get_connection() as conn:
         cursor = conn.cursor()
         today = database.get_today_date()
         cursor.execute(
-            "INSERT INTO account_quotas (account_id, quota_date, quota_remaining, quota_limit) "
-            "VALUES (?, ?, ?, ?)",
-            ("acc-1", today, 100, 1000),
+            "INSERT INTO account_quotas (account_id, key_id, quota_date, quota_remaining, quota_limit) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("acc-1", 0, today, 100, 1000),
         )
 
         with pytest.raises(Exception):
             cursor.execute(
-                "INSERT INTO account_quotas (account_id, quota_date, quota_remaining, quota_limit) "
-                "VALUES (?, ?, ?, ?)",
-                ("acc-1", today, 90, 1000),
+                "INSERT INTO account_quotas (account_id, key_id, quota_date, quota_remaining, quota_limit) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("acc-1", 0, today, 90, 1000),
             )
+
+
+def test_account_quotas_distinct_per_key(database):
+    """Different key_id values under the same (account_id, quota_date) are allowed."""
+    with database.get_connection() as conn:
+        cursor = conn.cursor()
+        today = database.get_today_date()
+        cursor.execute(
+            "INSERT INTO account_quotas (account_id, key_id, quota_date, quota_remaining, quota_limit) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("acc-1", 0, today, 100, 1000),
+        )
+        cursor.execute(
+            "INSERT INTO account_quotas (account_id, key_id, quota_date, quota_remaining, quota_limit) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("acc-1", 1, today, 200, 1000),
+        )
+        rows = conn.execute(
+            "SELECT quota_remaining FROM account_quotas WHERE account_id = ? AND quota_date = ?",
+            ("acc-1", today),
+        ).fetchall()
+        assert {r["quota_remaining"] for r in rows} == {100, 200}
 
 
 def test_connection_is_new_each_time(database):

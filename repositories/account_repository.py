@@ -71,12 +71,16 @@ class AccountRepository:
 
     def create(self, name: str, base_url: str,
                status: str = "active", provider_type: str = DEFAULT_PROVIDER_TYPE,
-               api_keys: Optional[List[str]] = None) -> dict:
+               api_keys: Optional[List[str]] = None,
+                anthropic_base_url: str = "") -> dict:
         """Create a new account. account_id is auto-generated as UUID.
 
         All API keys are stored in ``account_api_keys`` (the legacy single
         ``accounts.api_key`` column was dropped in migration 023). At least one
         key is required; the first key is flagged as the primary ("主密钥").
+
+        ``anthropic_base_url`` optionally points the Anthropic-native protocol at
+        a different upstream than ``base_url`` (dual-protocol suppliers).
         """
         keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
         if not keys:
@@ -84,9 +88,10 @@ class AccountRepository:
         account_id = uuid.uuid4().hex
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                """INSERT INTO accounts (account_id, name, base_url, provider_type, status)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (account_id, name, base_url, provider_type, status),
+                """INSERT INTO accounts
+                   (account_id, name, base_url, provider_type, status, anthropic_base_url)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (account_id, name, base_url, provider_type, status, anthropic_base_url or ""),
             )
             new_id = cursor.lastrowid
             for sort_order, key in enumerate(keys):
@@ -107,7 +112,8 @@ class AccountRepository:
         (add/update/delete API key), not through this method.
         """
         # NOTE: "api_key" removed — the column no longer exists (migration 023).
-        allowed = {"base_url", "status", "account_id", "name", "provider_type"}
+        allowed = {"base_url", "status", "account_id", "name",
+                   "provider_type", "anthropic_base_url"}
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
             return None
@@ -289,4 +295,28 @@ class AccountRepository:
                 "DELETE FROM account_api_keys WHERE id = ?", (key_id,)
             )
             conn.commit()
+
+    def api_key_id_to_logical(self, api_key_id: int) -> int:
+        """Convert an ``account_api_keys.id`` to the logical key index (0 = primary).
+
+        The logical key_id is the 0-based position of the key in the account's
+        sorted key list (by ``sort_order, id``). This is the value used in
+        ``request_logs.api_key_id``, ``model_quotas.key_id``, etc.
+        Returns ``0`` when the key is not found (safe fallback).
+        """
+        with self.db.get_connection() as conn:
+            key = conn.execute(
+                "SELECT account_id FROM account_api_keys WHERE id = ?", (api_key_id,)
+            ).fetchone()
+            if not key:
+                return 0
+            account_id = key["account_id"]
+            all_keys = conn.execute(
+                "SELECT id FROM account_api_keys WHERE account_id = ? ORDER BY sort_order, id",
+                (account_id,),
+            ).fetchall()
+            for idx, row in enumerate(all_keys):
+                if row["id"] == api_key_id:
+                    return idx
+            return 0
             return cursor.rowcount > 0

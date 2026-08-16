@@ -1,27 +1,23 @@
-"""Test cases for MappingModelRepository."""
+"""Test cases for MappingModelRepository.
+
+Uses the project-standard ``database`` fixture (conftest autouse sets up an
+isolated, migrated tmp_path SQLite file) instead of a hardcoded DB path.
+"""
 import pytest
-import sqlite3
-from provider.core.database import DatabaseManager
 from provider.repositories.mapping_model_repository import MappingModelRepository
+from provider.repositories.account_repository import AccountRepository
+from provider.repositories.supplier_model_repository import SupplierModelRepository
+from provider.repositories.mapping_repository import MappingRepository
 
 
 @pytest.fixture
-def test_db():
-    """Create test database with accounts, parent mapping entries and supplier_models."""
-    # Start from a clean DB file to ensure FK constraints are active
-    try:
-        import os
-        os.remove('modelscope_proxy_test.db')
-    except FileNotFoundError:
-        pass
+def test_db(database):
+    """Create test data: accounts, parent model_mappings and supplier_models.
 
-    db = DatabaseManager('modelscope_proxy_test.db')
-    db.initialize_tables()
-    # Create test accounts for foreign key constraint
-    from provider.repositories.account_repository import AccountRepository
-    from provider.repositories.supplier_model_repository import SupplierModelRepository
-    from provider.repositories.mapping_repository import MappingRepository
-
+    The ``database`` fixture already provides an isolated, migrated SQLite file
+    (no hardcoded path, auto-cleaned by pytest's tmp_path teardown).
+    """
+    db = database
     acc_repo = AccountRepository(db)
     sm_repo = SupplierModelRepository(db)
     mapping_repo = MappingRepository(db)
@@ -55,13 +51,6 @@ def test_db():
         raise ValueError(f"supplier_model ({sid}, {name}) not found")
 
     yield db, acc1, acc2, sm_repo, _sm_id
-    # Cleanup
-    conn = sqlite3.connect('modelscope_proxy_test.db')
-    conn.execute("DROP TABLE IF EXISTS mapping_models")
-    conn.execute("DROP TABLE IF EXISTS model_mappings")
-    conn.execute("DROP TABLE IF EXISTS accounts")
-    conn.commit()
-    conn.close()
 
 
 @pytest.fixture

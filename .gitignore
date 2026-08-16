@@ -58,3 +58,4 @@ web/dist/
 .zcode/
 .superpowers/
 docs/superpowers/
+.agents/

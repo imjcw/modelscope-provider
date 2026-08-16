@@ -39,9 +39,13 @@ class ModelScopeStrategy(RateLimitStrategy):
         account_id: str,
         model_name: str,
         error_type: Optional[str],
+        key_id: int = 0,
     ) -> None:
         """熔断升级：连续 10 次瞬态失败后，标记模型今日不可用，
         让路由直接跳过该候选，而不是等 1 小时冻结窗口过去再试。
+
+        ``key_id`` 透传自熔断器的 ``(key_id, model)`` 维度，因此只标记该 key
+        的模型不可用，而不影响同供应商的其它 key（与全局额度的 key 维度一致）。
         """
         if error_type not in self._TRANSIENT_ERROR_TYPES:
             logger.debug(
@@ -51,12 +55,14 @@ class ModelScopeStrategy(RateLimitStrategy):
             )
             return
         logger.warning(
-            "Circuit-breaker escalation: marking %s/%s unavailable (error_type=%s)",
-            account_id, model_name, error_type,
+            "Circuit-breaker escalation: marking %s/%s (key %s) unavailable (error_type=%s)",
+            account_id, model_name, key_id, error_type,
         )
-        self.quota_repository.mark_model_unavailable(account_id, model_name)
+        self.quota_repository.mark_model_unavailable(account_id, model_name, key_id=key_id)
 
-    def check_rate_limit(self, account_id: str, model_name: str, key_count: int = 1) -> bool:
+    def check_rate_limit(
+        self, account_id: str, model_name: str, key_count: int = 1, key_id: int = 0
+    ) -> bool:
         """Always allow — ModelScope quota is enforced upstream."""
         return True
 
@@ -66,6 +72,7 @@ class ModelScopeStrategy(RateLimitStrategy):
         model_name: str,
         response_headers: dict,
         status_code: int,
+        key_id: int = 0,
     ) -> None:
         """Parse modelscope-ratelimit-* headers and update quota tables."""
         account = ModelScopeAccount(
@@ -74,7 +81,7 @@ class ModelScopeStrategy(RateLimitStrategy):
             base_url="",
         )
         self.quota_updater.update_quota_after_request(
-            account, response_headers, model_name, self.header_config
+            account, response_headers, model_name, self.header_config, key_id=key_id
         )
 
     def record_usage(
@@ -83,6 +90,7 @@ class ModelScopeStrategy(RateLimitStrategy):
         model_name: str,
         input_tokens: int,
         output_tokens: int,
+        key_id: int = 0,
     ) -> None:
         """Record token usage from streaming responses."""
         account = ModelScopeAccount(
@@ -91,7 +99,7 @@ class ModelScopeStrategy(RateLimitStrategy):
             base_url="",
         )
         self.quota_updater.update_quota_from_usage(
-            account, input_tokens, output_tokens, model_name
+            account, input_tokens, output_tokens, model_name, key_id=key_id
         )
 
     def get_quota_info(self, account_id: str) -> dict:

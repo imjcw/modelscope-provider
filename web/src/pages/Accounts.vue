@@ -140,9 +140,26 @@
         <FormField label="供应商类型">
           <CSelect v-model="newSupplier.provider_type" :options="providerTypeOptions" placeholder="选择供应商类型（可选）" />
         </FormField>
-        <FormField label="Base URL">
-          <input v-model="newSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
-            class="form-input font-mono" @keyup.enter="addSupplier">
+        <FormField label="上游地址（可多协议）">
+          <div class="space-y-2">
+            <div>
+              <p class="text-xs text-ls-dim mb-1">
+                OpenAI 端（<span class="font-mono">/openai/...</span> 入口，末尾带 <span class="font-mono">/v1</span>）
+              </p>
+              <input v-model="newSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
+                class="form-input font-mono" @keyup.enter="addSupplier">
+            </div>
+            <div>
+              <p class="text-xs text-ls-dim mb-1">
+                Anthropic 端（<span class="font-mono">/anthropic/...</span> 入口，根地址不带 <span class="font-mono">/v1</span>）
+              </p>
+              <input v-model="newSupplier.anthropic_base_url" type="text" placeholder="https://api.anthropic.com"
+                class="form-input font-mono" @keyup.enter="addSupplier">
+            </div>
+            <p class="text-[11px] text-ls-muted mt-1">
+              协议由客户端入口决定：一个供应商可同时配置 OpenAI / Anthropic 两端地址；留空则该端点不可用。
+            </p>
+          </div>
         </FormField>
 
         <!-- ── 支持模型 ── -->
@@ -205,9 +222,26 @@
         <FormField label="供应商类型">
           <CSelect v-model="editingSupplier.provider_type" :options="providerTypeOptions" placeholder="选择供应商类型（可选）" />
         </FormField>
-        <FormField label="Base URL">
-          <input v-model="editingSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
-            class="form-input font-mono" @keyup.enter="saveEdit">
+        <FormField label="上游地址（可多协议）">
+          <div class="space-y-2">
+            <div>
+              <p class="text-xs text-ls-dim mb-1">
+                OpenAI 端（<span class="font-mono">/openai/...</span> 入口，末尾带 <span class="font-mono">/v1</span>）
+              </p>
+              <input v-model="editingSupplier.base_url" type="text" placeholder="https://api-inference.modelscope.cn/v1"
+                class="form-input font-mono" @keyup.enter="saveEdit">
+            </div>
+            <div>
+              <p class="text-xs text-ls-dim mb-1">
+                Anthropic 端（<span class="font-mono">/anthropic/...</span> 入口，根地址不带 <span class="font-mono">/v1</span>）
+              </p>
+              <input v-model="editingSupplier.anthropic_base_url" type="text" placeholder="https://api.anthropic.com"
+                class="form-input font-mono" @keyup.enter="saveEdit">
+            </div>
+            <p class="text-[11px] text-ls-muted mt-1">
+              协议由客户端入口决定：一个供应商可同时配置 OpenAI / Anthropic 两端地址；留空则该端点不可用。
+            </p>
+          </div>
         </FormField>
         <FormField label="状态">
           <div class="flex items-center gap-3">
@@ -304,6 +338,19 @@
         </div>
       </div>
 
+      <!-- 熔断器解冻提示 -->
+      <div v-if="hasFrozenForSupplier"
+           class="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/25 rounded-lg px-4 py-3 mb-4">
+        <div class="flex items-center gap-2 text-sm text-red-300">
+          <CIcon name="alert-triangle" :size="16" :stroke-width="2.5" />
+          <span>{{ frozenCircuitsForSupplier.length }} 个模型被熔断器冻结，可手动解冻立即恢复</span>
+        </div>
+        <button @click="unfreezeSupplierAll" :disabled="unfreezing"
+                class="px-3 py-1.5 text-xs rounded-md bg-red-500/20 text-red-300 hover:bg-red-500/30 disabled:opacity-50 whitespace-nowrap">
+          {{ unfreezing ? '解冻中…' : '解冻全部' }}
+        </button>
+      </div>
+
       <CTable v-if="modelInfoRows.length > 0" pad="sm">
         <thead>
           <tr>
@@ -341,15 +388,22 @@
             <td class="text-right text-xs font-mono" :class="(m.today_cached_tokens || 0) > 0 ? 'text-green-400' : 'text-ls-muted'">{{ (m.today_cached_tokens || 0).toLocaleString() }}</td>
             <td class="text-right text-xs font-mono text-ls-dim">{{ (m.today_output_tokens || 0).toLocaleString() }}</td>
             <td class="text-center">
-              <template v-if="m.is_unavailable">
-                <span class="tag tag-danger">不可用</span>
-              </template>
-              <template v-else-if="m.success_rate !== null && m.success_rate < 85">
-                <span class="tag tag-warning">异常 {{ m.success_rate }}%</span>
-              </template>
-              <template v-else>
-                <span class="tag tag-success">正常{{ m.success_rate !== null ? ' ' + m.success_rate + '%' : '' }}</span>
-              </template>
+              <div class="flex flex-col items-center gap-1">
+                <template v-if="m.is_unavailable">
+                  <span class="tag tag-danger">不可用</span>
+                </template>
+                <template v-else-if="m.success_rate !== null && m.success_rate < 85">
+                  <span class="tag tag-warning">异常 {{ m.success_rate }}%</span>
+                </template>
+                <template v-else>
+                  <span class="tag tag-success">正常{{ m.success_rate !== null ? ' ' + m.success_rate + '%' : '' }}</span>
+                </template>
+                <button v-if="frozenByModelForSupplier[m.model_name]"
+                        @click="unfreezeOne(frozenByModelForSupplier[m.model_name][0].key_id, m.model_name)"
+                        class="text-[10px] px-1.5 py-0.5 rounded border border-red-500/30 text-red-300 hover:bg-red-500/15 whitespace-nowrap">
+                  解冻熔断
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -381,7 +435,7 @@ import SegmentedControl from '@/components/SegmentedControl.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
 import { maskKey, formatContextLength } from '@/utils/format'
 import { modelTypeColor, modelTypeLabel } from '@/constants/modelType'
-import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, deleteSupplierModel as apiDeleteSupplierModel, getModelQuotas, getProviderTypes, listApiKeys, addApiKey, updateApiKeyStatus, deleteApiKey, getCircuitBreakerStates } from '@/api'
+import { getSuppliers, createSupplier as apiCreateSupplier, updateSupplier as apiUpdateSupplier, deleteSupplier as apiDeleteSupplier, toggleSupplier as apiToggleSupplier, getSupplierModels, bulkSetSupplierModels as apiBulkSetSupplierModels, deleteSupplierModel as apiDeleteSupplierModel, getModelQuotas, getProviderTypes, listApiKeys, addApiKey, updateApiKeyStatus, deleteApiKey, getCircuitBreakerStates, resetCircuitBreaker } from '@/api'
 
 const toast = inject('$toast')
 
@@ -533,6 +587,49 @@ const formatCircuitBreakerTime = (seconds) => {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
+// ── 熔断器手动解冻 ──
+const frozenCircuitsForSupplier = computed(() => {
+  const aid = modelInfoSupplier.value?.id
+  if (aid == null) return []
+  return circuitBreakerStates.value.filter(s => s.account_id === aid)
+})
+const frozenByModelForSupplier = computed(() => {
+  const map = {}
+  for (const s of frozenCircuitsForSupplier.value) {
+    if (!map[s.model_name]) map[s.model_name] = []
+    map[s.model_name].push(s)
+  }
+  return map
+})
+const hasFrozenForSupplier = computed(() => frozenCircuitsForSupplier.value.length > 0)
+
+const unfreezing = ref(false)
+const unfreezeOne = async (keyId, modelName) => {
+  try {
+    await resetCircuitBreaker({ key_id: keyId, model_name: modelName })
+    toast('已解冻：' + modelName, 'success')
+    await loadCircuitBreaker()
+  } catch (e) {
+    toast('解冻失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
+  }
+}
+const unfreezeSupplierAll = async () => {
+  const list = frozenCircuitsForSupplier.value
+  if (!list.length) return
+  unfreezing.value = true
+  try {
+    for (const s of list) {
+      await resetCircuitBreaker({ key_id: s.key_id, model_name: s.model_name })
+    }
+    toast(`已解冻 ${list.length} 个熔断模型`, 'success')
+    await loadCircuitBreaker()
+  } catch (e) {
+    toast('解冻失败: ' + (e.response?.data?.detail || e.message || ''), 'error')
+  } finally {
+    unfreezing.value = false
+  }
+}
+
 const openModelInfo = (acc) => {
   modelInfoSupplier.value = acc
   modelInfoKeyFilter.value = null
@@ -544,7 +641,7 @@ const openModelInfo = (acc) => {
 const showAddDrawer = ref(false)
 const adding = ref(false)
 const addNameInput = ref(null)
-const newSupplier = ref({ name: '', api_key: '', base_url: '', provider_type: '', models: [], api_key_records: [] })
+const newSupplier = ref({ name: '', api_key: '', base_url: '', anthropic_base_url: '', provider_type: '', models: [], api_key_records: [] })
 
 // ── Edit drawer ──
 const showEditDrawer = ref(false)
@@ -767,7 +864,7 @@ watch(modelInfoKeyFilter, () => {
 
 // ── Add (drawer) ──
 const openAdd = async () => {
-  newSupplier.value = { name: '', api_key: '', base_url: '', provider_type: '', models: [], api_key_records: [] }
+  newSupplier.value = { name: '', api_key: '', base_url: '', anthropic_base_url: '', provider_type: '', models: [], api_key_records: [] }
   showAddDrawer.value = true
   await nextTick()
   addNameInput.value?.focus()
@@ -794,6 +891,7 @@ const addSupplier = async () => {
     const res = await apiCreateSupplier({
       name: newSupplier.value.name,
       base_url: newSupplier.value.base_url,
+      anthropic_base_url: newSupplier.value.anthropic_base_url || '',
       provider_type: newSupplier.value.provider_type,
       api_key_records: normalized,
     })
@@ -824,6 +922,7 @@ const openEdit = async (acc) => {
     name: acc.name,
     api_key: acc.api_key,
     base_url: acc.base_url,
+    anthropic_base_url: acc.anthropic_base_url || '',
     provider_type: acc.provider_type || '',
     status: acc.status,
     models: [],
@@ -877,6 +976,7 @@ const saveEdit = async () => {
       name: editingSupplier.value.name,
       api_key: editingSupplier.value.api_key,
       base_url: editingSupplier.value.base_url,
+      anthropic_base_url: editingSupplier.value.anthropic_base_url || '',
       provider_type: editingSupplier.value.provider_type,
       status: editingSupplier.value.status,
       api_key_records: records,

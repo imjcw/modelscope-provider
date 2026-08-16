@@ -187,3 +187,55 @@ def test_single_key_keeps_base_limit(svc):
     )
     assert m1["max_requests"] == 5
     assert m1["window_quota_limit"] == 5
+
+
+def test_model_usage_scoped_to_key(svc):
+    import uuid
+    from datetime import datetime, timezone as _tz
+
+    acc = svc.account_repo.find_by_name("Supplier A")
+    aid = acc["account_id"]
+    sid = acc["id"]
+    now = datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S.") + "000"
+
+    # 前端传的是 account_api_keys.id，需要拿真实 id
+    keys = svc.account_repo.find_all_api_keys(sid)
+    assert len(keys) >= 1
+    pk_key_id = keys[0]["id"]
+
+    # 添加第二个 key
+    svc.account_repo.add_api_key(sid, "k2")
+    keys2 = svc.account_repo.find_all_api_keys(sid)
+    assert len(keys2) == 2
+    sk_key_id = keys2[1]["id"]
+
+    # request_logs 写入逻辑 key_id（0=主, 1=第二）
+    svc.log_repo.create(
+        str(uuid.uuid4()), "m1", "m1", aid, "Supplier A", 200,
+        input_tokens=10, output_tokens=20, api_key_id=0, timestamp=now,
+    )
+    svc.log_repo.create(
+        str(uuid.uuid4()), "m1", "m1", aid, "Supplier A", 200,
+        input_tokens=100, output_tokens=200, api_key_id=1, timestamp=now,
+    )
+
+    svc.quota_repo.update_model_quota(aid, "m1", 50, 200, key_id=1)
+
+    # 传入 account_api_keys.id（模拟前端行为）
+    rows_k0 = {r["model_name"]: r for r in svc.get_model_quotas(days=0, key_id=pk_key_id)}
+    rows_k1 = {r["model_name"]: r for r in svc.get_model_quotas(days=0, key_id=sk_key_id)}
+
+    # token 用量按 key 区分
+    assert rows_k0["m1"]["today_input_tokens"] == 10
+    assert rows_k0["m1"]["today_output_tokens"] == 20
+    assert rows_k1["m1"]["today_input_tokens"] == 100
+    assert rows_k1["m1"]["today_output_tokens"] == 200
+    assert rows_k0["m1"]["today_input_tokens"] != rows_k1["m1"]["today_input_tokens"]
+
+    # 额度也按 key 区分
+    assert rows_k0["m1"]["quota_remaining"] == 80
+    assert rows_k0["m1"]["quota_limit"] == 100
+    assert rows_k1["m1"]["quota_remaining"] == 50
+    assert rows_k1["m1"]["quota_limit"] == 200
+    assert rows_k0["m1"]["quota_remaining"] != rows_k1["m1"]["quota_remaining"]
+    assert rows_k0["m1"]["quota_remaining"] != rows_k1["m1"]["quota_remaining"]

@@ -50,6 +50,7 @@ class QuotaUpdater:
         response_headers: dict,
         model_name: str,
         header_config: dict = None,
+        key_id: int = 0,
     ):
         """根据响应头更新供应商级与模型级配额。
 
@@ -75,11 +76,11 @@ class QuotaUpdater:
             else:
                 quota_remaining, quota_limit = res
                 self.quota_repository.update_quota(
-                    account.account_id, quota_remaining, quota_limit
+                    account.account_id, quota_remaining, quota_limit, key_id=key_id
                 )
                 if quota_remaining == 0:
                     self.quota_repository.mark_model_unavailable(
-                        account.account_id, model_name
+                        account.account_id, model_name, key_id=key_id
                     )
                     logger.warning(
                         f"供应商配额已耗尽: {account.account_id} / model {model_name}"
@@ -94,7 +95,8 @@ class QuotaUpdater:
                 model_remaining, model_limit = mres
                 if model_limit > 0:
                     self.quota_repository.update_model_quota(
-                        account.account_id, model_name, model_remaining, model_limit
+                        account.account_id, model_name, model_remaining,
+                        model_limit, key_id=key_id,
                     )
                     if model_remaining == 0:
                         logger.warning(
@@ -154,7 +156,8 @@ class QuotaUpdater:
         account: ModelScopeAccount,
         input_tokens: int,
         output_tokens: int,
-        model_name: str
+        model_name: str,
+        key_id: int = 0,
     ):
         """Update both supplier-level and model-level token usage tracking.
 
@@ -175,14 +178,16 @@ class QuotaUpdater:
                 account.account_id,
                 input_tokens,
                 output_tokens,
-                model_name
+                model_name,
+                key_id=key_id,
             )
             # Also record model-level usage
             self.quota_repository.record_model_usage(
                 account.account_id,
                 model_name,
                 input_tokens,
-                output_tokens
+                output_tokens,
+                key_id=key_id,
             )
         except Exception as e:
             logger.error(f"Failed to update quota from usage: {e}")

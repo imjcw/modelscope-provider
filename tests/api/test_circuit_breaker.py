@@ -222,7 +222,23 @@ class TestStateMachine:
         for i in range(10):
             cb.record_failure(0, "acc-1", "model-1", 500, strategy)
         strategy.on_circuit_breaker_escalation.assert_called_once_with(
-            "acc-1", "model-1", "server_error"
+            "acc-1", "model-1", "server_error", 0
+        )
+
+    def test_escalation_marks_correct_key_unavailable(self):
+        """Escalation forwards the failing key_id so only that key is marked."""
+        from provider.services.providers.sensetime import SenseTimeStrategy
+
+        quota_repo = Mock()
+        strategy = SenseTimeStrategy(db=None, quota_repository=quota_repo)
+        cb = CircuitBreaker()
+
+        # 10 transient failures on key 2 / model-1 → escalate for key 2 only.
+        for i in range(10):
+            cb.record_failure(2, "acc-1", "model-1", 500, strategy)
+
+        quota_repo.mark_model_unavailable.assert_called_once_with(
+            "acc-1", "model-1", key_id=2
         )
 
     def test_different_keys_are_independent(self):

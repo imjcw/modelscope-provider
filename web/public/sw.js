@@ -30,29 +30,38 @@ self.addEventListener('fetch', (event) => {
   // Let API calls go to network, cache-as-network-races for everything else
   if (url.pathname.startsWith('/web/api/')) {
     event.respondWith(
-      fetch(event.request).catch(() =>
-        caches.match(event.request)
-      )
+      fetch(event.request).catch(() => caches.match(event.request))
     );
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
+    (async () => {
+      const cached = await caches.match(event.request);
       if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        // Only cache same-origin GETs
+      try {
+        const response = await fetch(event.request);
+        // Only cache same-origin GETs that succeeded
         if (response.status === 200 && event.request.method === 'GET') {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      });
-    }).catch(() => {
-      // Offline fallback: serve index.html for navigation requests
-      if (event.request.mode === 'navigate') {
-        return caches.match('/web/');
+      } catch (err) {
+        // Offline fallback: serve the cached app shell for navigation.
+        // Always resolve to a real Response so respondWith() never gets undefined.
+        if (event.request.mode === 'navigate') {
+          const shell = await caches.match('/web/');
+          return shell || new Response('Offline — no cached app shell', {
+            status: 503,
+            statusText: 'Offline',
+            headers: { 'Content-Type': 'text/html' }
+          });
+        }
+        // For non-navigation (e.g. an image/icon we never cached), re-throw so
+        // the browser can surface the real network error instead of swallowing it.
+        throw err;
       }
-    })
+    })()
   );
 });

@@ -21,7 +21,11 @@ RequestLogsClientKeyName = by_version[8]
 
 @pytest.fixture
 def db(tmp_path):
-    return DatabaseManager(f"sqlite:///{tmp_path}/test.db")
+    # Use a distinct file from the autouse _clean_db_file fixture (which owns
+    # tmp_path/test.db and runs the full migration set). These migration unit
+    # tests build a minimal table by hand and then run a single migration, so
+    # they need a DB untouched by the full migration pipeline.
+    return DatabaseManager(f"sqlite:///{tmp_path}/mig_unit_test.db")
 
 
 class TestMigration001_AccountQuotasTokens:

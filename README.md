@@ -38,18 +38,23 @@ MODELSCOPE_ACCOUNTS_JSON='[
   {
     "account_id": "account1",
     "api_key": "your-api-key-1",
-    "base_url": "https://api-inference.modelscope.cn/v1/chat/completions"
+    "base_url": "https://api-inference.modelscope.cn/v1"
   },
   {
     "account_id": "account2",
     "api_key": "your-api-key-2",
-    "base_url": "https://api-inference.modelscope.cn/v1/chat/completions"
+    "base_url": "https://api-inference.modelscope.cn/v1"
   }
 ]'
+
+# Anthropic 原生供应商（provider_type=anthropic）：base_url 为根地址，不带 /v1
+#   "base_url": "https://api.anthropic.com", "provider_type": "anthropic"
 
 DATABASE_URL="D:/workspace/third/provider/modelscope_proxy.db"
 LOG_LEVEL="INFO"
 ```
+
+> **OpenAI 与 Anthropic 双地址供应商**：`.env` 仅支持单一 `base_url`。若一个供应商的 OpenAI 接口与 Anthropic 接口地址不同，请改用 Web 管理后台（供应商管理）或 `POST /api/admin/suppliers` 添加，并通过 `anthropic_base_url` 字段单独指定 Anthropic 侧地址。`provider_type` 是**供应商的类型**（限流策略/展示），**不决定协议**；协议由客户端入口决定：`/openai/...` 走 OpenAI 协议（用 `base_url`），`/anthropic/...` 走 Anthropic 协议（用 `anthropic_base_url`，未填则回落 `base_url`）。
 
 > 账户也可通过 Web 管理后台（供应商管理）维护；数据库优先于 `.env`，首次启动会自动将 `.env` 中的账户迁移进数据库。
 

@@ -68,6 +68,7 @@ const ERROR_CODES = [
 // ── 代码示例（后端只返回 key + base_url）─────────────────────
 const codeTabs = ['cURL', 'Python', 'Node.js']
 const activeCodeTab = ref(0)
+const protocol = ref('openai') // 'openai' | 'anthropic' — 协议由客户端入口决定
 
 function curlSnippet(base, key) {
   return `curl -X POST ${base}/chat/completions \\
@@ -104,13 +105,54 @@ const response = await openai.chat.completions.create({
 console.log(response.choices[0].message.content);`
 }
 
+function curlAnthropicSnippet(base, key) {
+  return `curl -X POST ${base}/v1/messages \\
+  -H "content-type: application/json" \\
+  -H "x-api-key: ${key}" \\
+  -d '{"model": "alias-name", "messages": [{"role": "user", "content": "你好"}], "max_tokens": 1024}'`
+}
+
+function pythonAnthropicSnippet(base, key) {
+  return `import anthropic
+
+client = anthropic.Anthropic(api_key="${key}", base_url="${base}")
+message = client.messages.create(
+    model="alias-name",
+    messages=[{"role": "user", "content": "你好"}],
+    max_tokens=1024
+)
+print(message.content[0].text)`
+}
+
+function nodeAnthropicSnippet(base, key) {
+  return `import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  apiKey: "${key}",
+  baseURL: "${base}"
+});
+
+const message = await client.messages.create({
+  model: "alias-name",
+  messages: [{"role": "user", "content": "你好"}],
+  max_tokens: 1024
+});
+console.log(message.content[0].text);`
+}
+
 function currentCodeSnippet() {
-  const { base_url, key_value } = keyDocsMeta.value
-  if (!base_url) return ''
+  const { base_url, anthropic_base_url, key_value } = keyDocsMeta.value
+  const base = protocol.value === 'anthropic' ? anthropic_base_url : base_url
+  if (!base) return ''
   const idx = activeCodeTab.value
-  if (idx === 0) return curlSnippet(base_url, key_value)
-  if (idx === 1) return pythonSnippet(base_url, key_value)
-  return nodeSnippet(base_url, key_value)
+  if (protocol.value === 'anthropic') {
+    if (idx === 0) return curlAnthropicSnippet(base, key_value)
+    if (idx === 1) return pythonAnthropicSnippet(base, key_value)
+    return nodeAnthropicSnippet(base, key_value)
+  }
+  if (idx === 0) return curlSnippet(base, key_value)
+  if (idx === 1) return pythonSnippet(base, key_value)
+  return nodeSnippet(base, key_value)
 }
 
 function snippetLang() {
@@ -363,15 +405,22 @@ watch(detailPage, () => { if (props.section === 'logs') loadDetailLogs() })
           </div>
 
           <div v-else class="space-y-5">
-            <!-- 基础信息 -->
+            <!-- 基础信息：两个入口地址 + API Key -->
             <div>
               <h3 class="text-sm font-medium text-ls-text">基础信息</h3>
-              <div class="space-y-2 mt-3">
+              <p class="text-[11px] text-ls-muted mt-0.5">协议由客户端入口决定，与供应商类型无关</p>
+              <div class="space-y-2 mt-2">
                 <div class="flex items-center gap-2">
-                  <span class="text-xs text-ls-dim w-24">API 地址</span>
+                  <span class="text-xs text-ls-dim w-24">OpenAI 端</span>
                   <span class="text-xs font-mono text-ls-accent">{{ keyDocsMeta.base_url }}</span>
                   <CopyButton :text="keyDocsMeta.base_url" :size="12"
                     color-class="text-ls-dim hover:text-ls-text" :toast-text="'已复制: ' + keyDocsMeta.base_url" />
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-ls-dim w-24">Anthropic 端</span>
+                  <span class="text-xs font-mono text-ls-accent">{{ keyDocsMeta.anthropic_base_url }}</span>
+                  <CopyButton :text="keyDocsMeta.anthropic_base_url" :size="12"
+                    color-class="text-ls-dim hover:text-ls-text" :toast-text="'已复制: ' + keyDocsMeta.anthropic_base_url" />
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-xs text-ls-dim w-24">API Key</span>
@@ -382,18 +431,37 @@ watch(detailPage, () => { if (props.section === 'logs') loadDetailLogs() })
               </div>
             </div>
 
-            <!-- 快速开始 tab -->
+            <!-- 协议切换 -->
             <div>
-              <h3 class="text-sm font-medium text-ls-text">快速开始</h3>
-              <div class="flex gap-1 mt-3">
+              <h3 class="text-sm font-medium text-ls-text">选择入口（决定协议）</h3>
+              <div class="flex gap-1 mt-2">
+                <button @click="protocol = 'openai'"
+                  :class="protocol === 'openai' ? 'bg-ls-accent text-ls-bg' : 'text-ls-dim hover:text-ls-text'"
+                  class="px-3 py-1.5 text-xs rounded-md transition-colors">
+                  OpenAI（/openai/v1/chat/completions）
+                </button>
+                <button @click="protocol = 'anthropic'"
+                  :class="protocol === 'anthropic' ? 'bg-ls-accent text-ls-bg' : 'text-ls-dim hover:text-ls-text'"
+                  class="px-3 py-1.5 text-xs rounded-md transition-colors">
+                  Anthropic（/anthropic/v1/messages）
+                </button>
+              </div>
+            </div>
+
+            <!-- 快速开始 tab + 代码块 -->
+            <div>
+              <h3 class="text-sm font-medium text-ls-text">
+                快速开始 ·
+                <span class="font-mono text-ls-accent text-xs">{{
+                    protocol === 'openai' ? 'Authorization: Bearer' : 'x-api-key'
+                }}</span>
+              </h3>
+              <div class="flex gap-1 mt-2">
                 <button v-for="(tab, i) in codeTabs" :key="tab" @click="activeCodeTab = i"
                   :class="activeCodeTab === i ? 'bg-ls-accent text-ls-bg' : 'text-ls-dim hover:text-ls-text'"
                   class="px-3 py-1.5 text-xs rounded-md transition-colors">{{ tab }}</button>
               </div>
-
-                <!-- 代码块 -->
-                <CodeBlock v-if="keyDocsMeta.base_url" class="mt-3" :lang="snippetLang()" :code="currentCodeSnippet()" />
-
+              <CodeBlock v-if="keyDocsMeta.base_url || keyDocsMeta.anthropic_base_url" class="mt-2" :lang="snippetLang()" :code="currentCodeSnippet()" />
               <div v-else class="text-center text-ls-muted text-xs py-8">加载失败，请刷新重试</div>
             </div>
 

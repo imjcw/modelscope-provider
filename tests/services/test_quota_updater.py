@@ -21,7 +21,8 @@ def test_update_quota_after_request():
     mock_repo.update_quota.assert_called_once_with(
         "test_account",
         100,
-        1000
+        1000,
+        key_id=0,
     )
 
 
@@ -40,8 +41,8 @@ def test_mark_unavailable_when_quota_exhausted():
 
     updater.update_quota_after_request(account, headers, "hy3")
 
-    mock_repo.update_quota.assert_called_once_with("test_account", 0, 1000)
-    mock_repo.mark_model_unavailable.assert_called_once_with("test_account", "hy3")
+    mock_repo.update_quota.assert_called_once_with("test_account", 0, 1000, key_id=0)
+    mock_repo.mark_model_unavailable.assert_called_once_with("test_account", "hy3", key_id=0)
 
 
 def test_get_quota_info():
@@ -123,7 +124,7 @@ def test_custom_header_names():
         "x-model-remaining": "10",
     }
     updater.update_quota_after_request(account, headers, "hy3", header_config)
-    mock_repo.update_quota.assert_called_once_with("acct", 50, 500)
+    mock_repo.update_quota.assert_called_once_with("acct", 50, 500, key_id=0)
     mock_repo.update_model_quota.assert_called_once_with("acct", "hy3", 10, 200)
 
 
@@ -140,7 +141,7 @@ def test_used_header_derives_remaining():
     headers = {"x-total": "500", "x-used": "120"}
     updater.update_quota_after_request(account, headers, "hy3", header_config)
     # remaining = 500 - 120 = 380
-    mock_repo.update_quota.assert_called_once_with("acct", 380, 500)
+    mock_repo.update_quota.assert_called_once_with("acct", 380, 500, key_id=0)
 
 
 def test_invalid_used_header_skips_update():

@@ -62,7 +62,7 @@ def test_delete_by_supplier(database, supplier_model_repo, sample_supplier):
     assert supplier_model_repo.find_by_supplier(sid) == []
 
 
-def test_bulk_upsert_replaces_all(database, supplier_model_repo, sample_supplier):
+def test_bulk_upsert_appends_and_updates(database, supplier_model_repo, sample_supplier):
     sid = sample_supplier["id"]
     # First upsert
     supplier_model_repo.bulk_upsert(
@@ -75,7 +75,8 @@ def test_bulk_upsert_replaces_all(database, supplier_model_repo, sample_supplier
     models = supplier_model_repo.find_by_supplier(sid)
     assert len(models) == 2
 
-    # Second upsert — replaces all
+    # Second upsert — upsert semantics: existing models are kept/updated,
+    # new models are added (bindings are NOT dropped, by design).
     supplier_model_repo.bulk_upsert(
         sid,
         [
@@ -83,10 +84,28 @@ def test_bulk_upsert_replaces_all(database, supplier_model_repo, sample_supplier
         ],
     )
     models = supplier_model_repo.find_by_supplier(sid)
+    assert len(models) == 3
+
+    by_name = {m["model_name"]: m for m in models}
+    assert "qwen-max" in by_name
+    assert "glm-4" in by_name
+    assert by_name["qwen-vl"]["model_type"] == "image"
+    assert by_name["qwen-vl"]["context_length"] is None
+
+
+def test_bulk_upsert_updates_existing_in_place(database, supplier_model_repo, sample_supplier):
+    sid = sample_supplier["id"]
+    supplier_model_repo.bulk_upsert(
+        sid, [{"model_name": "qwen-max", "model_type": "text", "context_length": 32768}]
+    )
+    # Re-upsert the same model with changed metadata — should UPDATE in place.
+    supplier_model_repo.bulk_upsert(
+        sid, [{"model_name": "qwen-max", "model_type": "image", "context_length": 8192}]
+    )
+    models = supplier_model_repo.find_by_supplier(sid)
     assert len(models) == 1
-    assert models[0]["model_name"] == "qwen-vl"
     assert models[0]["model_type"] == "image"
-    assert models[0]["context_length"] is None
+    assert models[0]["context_length"] == 8192
 
 
 def test_find_suppliers_for_model_only_active(

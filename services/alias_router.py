@@ -112,9 +112,6 @@ class AliasRouter:
             if account_dict.get("status", "active") != "active":
                 continue
             model_name = entry["model_name"]
-            # 跳过配额耗尽的模型
-            if model_name in unavailable_map.get(account_dict["account_id"], set()):
-                continue
 
             # 获取该账号的 Key 记录（全部来自 account_api_keys 表）
             key_records = keys_by_id.get(entry["supplier_id"])
@@ -123,9 +120,14 @@ class AliasRouter:
                 # （accounts.api_key 列已废弃并删除，主键统一存于 account_api_keys）
                 continue
 
-            # 每个活跃 Key 展开为一个独立候选
+            # 每个活跃 Key 展开为一个独立候选；模型不可用判断需精确到 key，
+            # 因为全局额度是按 (account_id, key_id) 计数的（某个 key 耗尽其
+            # 上游日额度不应连累同供应商的其它 key）。
+            acc_id = account_dict["account_id"]
             for kr in key_records:
                 if kr.get("status") == "frozen":
+                    continue
+                if model_name in unavailable_map.get((acc_id, kr["id"]), set()):
                     continue
                 candidates.append((account_dict, model_name, kr))
 

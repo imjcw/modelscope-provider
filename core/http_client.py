@@ -52,7 +52,18 @@ class HttpClient:
         """Close all HTTP clients (alias for compatibility with shutdown code)."""
         await self.close()
 
-    def _build_headers(self, api_key: str) -> dict:
+    def _build_headers(self, api_key: str, auth_style: str = "bearer") -> dict:
+        """Build auth headers. ``auth_style`` controls the header scheme:
+
+        ``"bearer"``   Authorization: Bearer <key>  (OpenAI / ModelScope default)
+        ``"anthropic"`` x-api-key: <key>            (Anthropic native)
+        """
+        if auth_style == "anthropic":
+            return {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            }
         return {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -66,15 +77,19 @@ class HttpClient:
         an explicit ``key_string`` instead.
         """
         records = getattr(account, "api_key_records", None)
-        if records:
+        if isinstance(records, list):
             return [
                 r["api_key"]
                 for r in records
-                if r.get("status") != "frozen" and r.get("api_key")
+                if isinstance(r, dict)
+                and r.get("status") != "frozen"
+                and r.get("api_key")
             ]
 
-        api_keys = getattr(account, "api_keys", None) or [account.api_key]
-        return api_keys
+        api_keys = getattr(account, "api_keys", None)
+        if isinstance(api_keys, list) and api_keys:
+            return [k for k in api_keys if k]
+        return [account.api_key] if getattr(account, "api_key", None) else []
 
     async def request(
         self,
@@ -83,9 +98,14 @@ class HttpClient:
         url: str,
         stream: bool = False,
         key_string: str = None,
+        auth_style: str = "bearer",
         **kwargs
     ):
-        """Make HTTP request to ModelScope API.
+        """Make HTTP request.
+
+        ``auth_style`` controls the auth header scheme:
+        - ``"bearer"``   Authorization: Bearer <key>  (default, OpenAI/ModelScope)
+        - ``"anthropic"`` x-api-key: <key>            (Anthropic native)
 
         ``key_string`` is the API key to use, pre-selected by the router.
         When ``None`` (legacy path), the first active key from the account
@@ -94,7 +114,7 @@ class HttpClient:
         When ``stream=True`` the response body is NOT pre-read: the caller
         gets an httpx.Response whose body must be consumed via
         ``aiter_lines()/aiter_bytes()`` and finally ``aclose()``. This is
-        required for SSE — otherwise httpx buffers the whole body before
+        required for SSE - otherwise httpx buffers the whole body before
         returning, and the client receives everything at once at the end.
         """
         client = await self.create_client()
@@ -110,13 +130,13 @@ class HttpClient:
         # Guard against a missing key. The legacy LoadBalancer path can reach
         # here with no usable key (api_key is None), which would otherwise
         # crash on `len(api_key)` and build a "Bearer None" header. Fail loud
-        # but cleanly — the caller converts this to a 502.
+        # but cleanly - the caller converts this to a 502.
         if not api_key:
             account_id = getattr(account, "account_id", "?")
             logger.error("No usable API key for account %s", account_id)
             raise ValueError(f"No usable API key configured for account {account_id}")
 
-        headers = self._build_headers(api_key)
+        headers = self._build_headers(api_key, auth_style=auth_style)
         key_suffix = api_key[-8:] if len(api_key) > 8 else "***"
         logger.info(
             "Request %s %s with key ending ...%s",

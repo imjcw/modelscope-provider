@@ -67,3 +67,49 @@ DATABASE_URL="sqlite:///modelscope_proxy.db" python3 -m uvicorn provider.main:ap
 - 数据库表结构变更在 `core/database.py` 的 `initialize_tables()` 中处理
 - 迁移逻辑（ALTER TABLE）放在建表之后，用 `try/except OperationalError` 包裹
 - 首次启动自动建表 + seed 默认配置
+
+## API 对接与协议说明
+
+本网关同时提供 **OpenAI 兼容**和 **Anthropic 原生**两种客户端入口；网关对上游供应商说哪种协议，由**客户端入口**决定，与供应商的 `provider_type` 无关。
+
+### 两个客户端入口
+
+| 入口 | 协议 | 鉴权头 | 上游地址字段 | 追加路径 |
+|---|---|---|---|---|
+| `POST /openai/v1/chat/completions` | OpenAI | `Authorization: Bearer` | `base_url` | `chat/completions` |
+| `POST /anthropic/v1/messages` | Anthropic | `x-api-key` | `anthropic_base_url`（回落 `base_url`） | `v1/messages` |
+
+> **协议由入口决定**：`/openai/...` 永远对上游说 OpenAI 协议，`/anthropic/...` 永远对上游说 Anthropic 协议。`provider_type` **不参与协议选择**。
+
+### `provider_type` 的语义
+
+`provider_type` 是**供应商的类型**（用于限流策略 / 展示），取值如 `modelscope` / `sensetime` / `anthropic` / `per_model`。它**不表示供应商支持哪种协议**。
+
+- 一个供应商可以同时支持 OpenAI 和 Anthropic 两种协议（对应两个不同地址）；
+- 协议的选择只看客户端走哪个入口，不看 `provider_type`；
+- `provider_type` 仅影响限流策略的选取与后台展示。
+
+### `base_url` / `anthropic_base_url` 配置规则
+
+> ⚠️ **两种协议的上游地址写法不同（最容易踩坑）**：代码统一用 `url = {上游 base}/{url_path}` 拼接，`url_path` 由入口决定。
+
+- **OpenAI 端（`base_url`）**：`url_path = "chat/completions"`，所以地址要写到 **`/v1`**，如 `https://api-inference.modelscope.cn/v1`，最终请求 `.../v1/chat/completions`。
+- **Anthropic 端（`anthropic_base_url`，未填则回落 `base_url`）**：`url_path = "v1/messages"`，所以地址必须是**根地址、不带 `/v1`**，如 `https://api.anthropic.com`，最终请求 `https://api.anthropic.com/v1/messages`。
+
+两者都**不要**自行带上 `chat/completions` 或 `v1/messages`，代码会自动追加。配置错误会导致路径重复（如 `.../v1/v1/messages`）而 404。
+
+**双地址供应商示例**（`provider_type` 按供应商实际类型填，与协议无关）：
+
+```json
+{
+  "name": "双协议供应商",
+  "base_url": "https://gateway.example.com/openai/v1",
+  "anthropic_base_url": "https://gateway.example.com/anthropic",
+  "provider_type": "anthropic",
+  "api_keys": ["sk-xxxxxxxxxxxxx"]
+}
+```
+
+### `.env` 初始化注意
+
+`MODELSCOPE_ACCOUNTS_JSON` 仅支持单一 `base_url`，**无法表达双地址**。需要双地址的供应商请通过管理后台或 `POST /api/admin/suppliers` 添加，并用 `anthropic_base_url` 指定 Anthropic 端地址。

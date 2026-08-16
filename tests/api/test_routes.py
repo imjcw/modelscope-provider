@@ -7,8 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from provider.main import create_app
+from provider.api.anthropic_adapters import (
+    extract_cache_usage as _extract_cache_usage,
+)
 from provider.api.openai_routes import (
-    _extract_cache_usage,
     stream_response_with_logging,
 )
 

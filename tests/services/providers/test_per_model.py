@@ -102,30 +102,44 @@ class TestCheckRateLimit:
         # acc2 should still be fresh
         assert strategy.check_rate_limit("acc2", "model-a") is True
 
-    def test_key_count_scales_limit(self, database):
-        """key_count multiplies the effective quota (N keys → N× budget)."""
+    def test_key_count_is_ignored_per_key_isolation(self, database):
+        """Each key holds its own quota; key_count does NOT merge budgets.
+
+        Per the per key+model design, key 0 and key 1 each get the per-model
+        limit independently. key_count is accepted for signature compatibility
+        but no longer scales a shared counter.
+        """
         strategy = PerModelFixedWindowStrategy(
             db=database,
             window_seconds=10,
             max_requests=3,
             model_configs={"m": {"window_seconds": 10, "max_requests": 3}},
         )
-        # Single key: blocked at 4th request (limit 3)
+        # key 0: blocked at 4th request (limit 3)
         for _ in range(3):
-            assert strategy.check_rate_limit("acc1", "m") is True
-        assert strategy.check_rate_limit("acc1", "m") is False
-        # Backdate the window past expiry (window_seconds=10) so it resets,
-        # then use key_count=2 → limit 6
-        old_time = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+            assert strategy.check_rate_limit("acc1", "m", key_id=0) is True
+        assert strategy.check_rate_limit("acc1", "m", key_id=0) is False
+        # key 1 is independent — still has its full 3-request budget
+        for _ in range(3):
+            assert strategy.check_rate_limit("acc1", "m", key_id=1) is True
+        assert strategy.check_rate_limit("acc1", "m", key_id=1) is False
+
+    def test_separate_keys_get_separate_windows(self, strategy, database):
+        """Different API keys of the same account have independent windows."""
+        strategy.check_rate_limit("acc1", "model-a", key_id=0)
+        strategy.check_rate_limit("acc1", "model-a", key_id=0)
+        # key 1 should still be fresh
+        assert strategy.check_rate_limit("acc1", "model-a", key_id=1) is True
+
         with database.get_connection() as conn:
-            conn.execute(
-                "UPDATE account_rate_windows SET window_start = ? "
+            rows = conn.execute(
+                "SELECT key_id, request_count FROM account_rate_windows "
                 "WHERE account_id = ? AND model_name = ?",
-                (old_time, "acc1", "m"),
-            )
-        for _ in range(6):
-            assert strategy.check_rate_limit("acc1", "m", key_count=2) is True
-        assert strategy.check_rate_limit("acc1", "m", key_count=2) is False
+                ("acc1", "model-a"),
+            ).fetchall()
+        counts = {r["key_id"]: r["request_count"] for r in rows}
+        assert counts[0] == 2
+        assert counts[1] == 1
 
     def test_key_count_default_is_one(self, strategy):
         """Omitting key_count keeps the original per-key limit."""

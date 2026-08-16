@@ -18,7 +18,7 @@ from pathlib import Path
 # 允许直接以脚本方式运行时导入 api.routes
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from api.openai_routes import _extract_cache_usage  # noqa: E402
+from api.anthropic_adapters import extract_cache_usage  # noqa: E402
 
 USAGE_RE = re.compile(r'"usage"\s*:\s*')
 
@@ -37,7 +37,7 @@ def extract_cache_from_raw(raw_response: str, is_stream: bool):
     if not is_stream:
         try:
             obj = json.loads(raw_response)
-            return _extract_cache_usage(obj.get("usage"))
+            return extract_cache_usage(obj.get("usage"))
         except (json.JSONDecodeError, AttributeError):
             return 0, 0
 
@@ -55,7 +55,7 @@ def extract_cache_from_raw(raw_response: str, is_stream: bool):
         usage = obj.get("usage")
         if not usage:
             continue
-        c, p = _extract_cache_usage(usage)
+        c, p = extract_cache_usage(usage)
         cached = c or cached
         partial = p or partial
     return cached, partial

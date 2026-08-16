@@ -131,7 +131,7 @@ class TestRateLimitCacheCheck:
         db.get_connection.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
         cache = RateLimitCache(db)
         assert cache.check("acc-1", "model-1", 3600, 100) is True
-        assert ("acc-1", "model-1") in cache._dirty
+        assert ("acc-1", "model-1", 0) in cache._dirty
 
     def test_second_request_counts_within_window(self):
         db = _mock_db()
@@ -139,7 +139,7 @@ class TestRateLimitCacheCheck:
         cache = RateLimitCache(db)
         cache.check("acc-1", "model-1", 3600, 100)
         assert cache.check("acc-1", "model-1", 3600, 100) is True
-        w = cache._windows[("acc-1", "model-1")]
+        w = cache._windows[("acc-1", "model-1", 0)]
         assert w.count == 2
 
     def test_quota_exhausted_returns_false(self):
@@ -166,7 +166,7 @@ class TestRateLimitCacheCheck:
         db.get_connection.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
         cache = RateLimitCache(db)
         cache.check("acc-1", "m1", 1, 100)
-        w = cache._windows[("acc-1", "m1")]
+        w = cache._windows[("acc-1", "m1", 0)]
         # Replace the in-window timestamp with only a stale one at the front.
         w.timestamps.clear()
         w.timestamps.append(time.time() - 100)
@@ -191,6 +191,28 @@ class TestRateLimitCacheCheck:
         cache.check("acc-1", "m1", 3600, 1)
         assert cache.check("acc-1", "m1", 3600, 1) is False
         assert cache.check("acc-1", "m2", 3600, 1) is True
+
+    def test_different_keys_independent(self):
+        db = _mock_db()
+        db.get_connection.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
+        cache = RateLimitCache(db)
+        # Exhaust key 0
+        cache.check("acc-1", "m1", 3600, 1, key_id=0)
+        assert cache.check("acc-1", "m1", 3600, 1, key_id=0) is False
+        # key 1 should still be allowed (per key+model isolation)
+        assert cache.check("acc-1", "m1", 3600, 1, key_id=1) is True
+
+    def test_get_model_count_across_keys_sums(self):
+        db = _mock_db()
+        db.get_connection.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
+        cache = RateLimitCache(db)
+        cache.check("acc-1", "m1", 3600, 100, key_id=0)
+        cache.check("acc-1", "m1", 3600, 100, key_id=0)
+        cache.check("acc-1", "m1", 3600, 100, key_id=1)
+        info = cache.get_model_count_across_keys("acc-1", "m1", 3600, 100)
+        assert info["request_count"] == 3
+        # A model with no window returns None
+        assert cache.get_model_count_across_keys("acc-1", "mX", 3600, 100) is None
 
 
 class TestRateLimitCacheFlush:
@@ -254,6 +276,18 @@ class TestRateLimitCacheGetQuotaInfo:
         assert info["quota_remaining"] == 98
         assert info["quota_limit"] == 100
 
+    def test_get_quota_info_specific_key(self):
+        db = _mock_db()
+        db.get_connection.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
+        cache = RateLimitCache(db)
+        cache.check("acc-1", "m1", 3600, 100, key_id=1)
+        cache.check("acc-1", "m1", 3600, 100, key_id=1)  # 2 used on key 1
+        info = cache.get_quota_info("acc-1", "m1", key_id=1)
+        assert info["request_count"] == 2
+        # key 0 has its own (empty) window
+        info0 = cache.get_quota_info("acc-1", "m1", key_id=0)
+        assert info0["request_count"] is None
+
 
 class TestRateLimitCacheLoadAll:
     """RateLimitCache loads existing windows from the database on init."""
@@ -261,15 +295,15 @@ class TestRateLimitCacheLoadAll:
     def test_load_all_from_db(self):
         db = _mock_db()
         fake_rows = [
-            {"account_id": "acc-1", "model_name": "m1",
+            {"account_id": "acc-1", "model_name": "m1", "key_id": 0,
              "window_start": "2026-07-26T10:00:00", "request_count": 5,
              "timestamps": json.dumps([time.time()] * 5)},
-            {"account_id": "acc-2", "model_name": "m2",
+            {"account_id": "acc-2", "model_name": "m2", "key_id": 0,
              "window_start": "2026-07-26T10:00:00", "request_count": 3,
              "timestamps": json.dumps([time.time()] * 3)},
         ]
         db.get_connection.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = fake_rows
         cache = RateLimitCache(db)
         assert len(cache._windows) == 2
-        assert cache._windows[("acc-1", "m1")].count == 5
-        assert cache._windows[("acc-2", "m2")].count == 3
+        assert cache._windows[("acc-1", "m1", 0)].count == 5
+        assert cache._windows[("acc-2", "m2", 0)].count == 3

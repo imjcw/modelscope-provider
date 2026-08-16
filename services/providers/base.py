@@ -1,6 +1,7 @@
 """供应商限流策略抽象基类。"""
 
 from abc import ABC, abstractmethod
+from typing import Optional
 
 
 class RateLimitStrategy(ABC):
@@ -12,17 +13,27 @@ class RateLimitStrategy(ABC):
     """
 
     @abstractmethod
-    def check_rate_limit(self, account_id: str, model_name: str, key_count: int = 1) -> bool:
+    def check_rate_limit(
+        self,
+        account_id: str,
+        model_name: str,
+        key_count: int = 1,
+        key_id: int = 0,
+    ) -> bool:
         """Pre-request check. Return True if the request may proceed.
 
         For proactive providers (e.g. SenseTime), this atomically increments
         the request counter and returns False when the limit is reached.
         For reactive providers (e.g. ModelScope), this always returns True.
 
-        ``key_count`` is the number of active API keys on the account; the
-        effective quota limit is ``config_limit × key_count`` (each key holds
-        its own upstream quota, so an account with N keys has N× the budget).
-        Defaults to 1 (single-key accounts unchanged).
+        ``key_id`` is the specific API key serving this request. Strategies that
+        track quota per key+model scope their counters to ``(account_id,
+        model_name, key_id)`` so each of a supplier's N keys holds its own
+        upstream quota for the model. ``key_id = 0`` denotes the primary key.
+
+        ``key_count`` is the number of active API keys on the account; strategies
+        that do NOT key per key (e.g. SenseTime's supplier-wide window) use it to
+        scale the effective limit by N. Defaults to 1.
         """
 
     @abstractmethod
@@ -69,3 +80,18 @@ class RateLimitStrategy(ABC):
         raise NotImplementedError(
             "Per-model quota not supported by this strategy"
         )
+
+    def on_circuit_breaker_escalation(
+        self,
+        account_id: str,
+        model_name: str,
+        error_type: Optional[str],
+        key_id: int = 0,
+    ) -> None:
+        """Called by ``CircuitBreaker`` when a ``(key_id, model)`` circuit escalates.
+
+        Strategies that want to react (e.g. mark the model unavailable for the day)
+        should override this and scope the action to ``key_id`` so only the failing
+        key is affected — not every key of the supplier. ``key_id = 0`` denotes the
+        primary key. The default is a no-op.
+        """

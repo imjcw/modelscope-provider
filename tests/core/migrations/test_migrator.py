@@ -8,7 +8,9 @@ from core.migrations.migrator import Migrator
 @pytest.fixture
 def db(tmp_path):
     """Fresh in-memory-style DB with schema_versions table."""
-    database = DatabaseManager(f"sqlite:///{tmp_path}/test.db")
+    # Distinct file from the autouse _clean_db_file fixture (tmp_path/test.db),
+    # so the full migration set is not pre-applied before these unit tests run.
+    database = DatabaseManager(f"sqlite:///{tmp_path}/mig_migrator_test.db")
     yield database
 
 

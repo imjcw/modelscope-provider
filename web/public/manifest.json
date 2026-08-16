@@ -2,7 +2,7 @@
   "name": "AI Provider Console",
   "short_name": "AI Provider",
   "description": "AI provider management console — supplier routing, quota, logging, and diagnostics",
-  "start_url": "/web",
+  "start_url": "/web/",
   "scope": "/web/",
   "display": "standalone",
   "orientation": "any",

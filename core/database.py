@@ -229,6 +229,7 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS account_quotas (
                     account_id TEXT NOT NULL,
                     quota_date TEXT NOT NULL,
+                    key_id INTEGER NOT NULL DEFAULT 0,
                     quota_remaining INTEGER NOT NULL DEFAULT 0,
                     quota_limit INTEGER NOT NULL DEFAULT 0,
                     total_input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -236,7 +237,7 @@ class DatabaseManager:
                     unavailable_models TEXT DEFAULT '[]',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (account_id, quota_date)
+                    PRIMARY KEY (account_id, key_id, quota_date)
                 )
             """)
 
@@ -244,6 +245,7 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS model_quotas (
                     account_id TEXT NOT NULL,
                     model_name TEXT NOT NULL,
+                    key_id INTEGER NOT NULL DEFAULT 0,
                     quota_date TEXT NOT NULL,
                     quota_remaining INTEGER NOT NULL DEFAULT 0,
                     quota_limit INTEGER NOT NULL DEFAULT 0,
@@ -251,7 +253,7 @@ class DatabaseManager:
                     total_output_tokens INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (account_id, model_name, quota_date)
+                    PRIMARY KEY (account_id, model_name, key_id, quota_date)
                 )
             """)
 
@@ -301,10 +303,11 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS account_rate_windows (
                     account_id TEXT NOT NULL,
                     model_name TEXT NOT NULL DEFAULT '__global__',
+                    key_id INTEGER NOT NULL DEFAULT 0,
                     window_start TEXT NOT NULL,
                     request_count INTEGER NOT NULL DEFAULT 0,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (account_id, model_name)
+                    PRIMARY KEY (account_id, model_name, key_id)
                 )
             """)
 
@@ -462,6 +465,11 @@ class DatabaseManager:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_logs_account
                 ON request_logs(account_id)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_logs_api_key
+                ON request_logs(api_key_id)
             """)
 
             cursor.execute("""

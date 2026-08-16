@@ -52,11 +52,15 @@ class MockAccountRepo:
 
 class MockQuotaRepo:
     def __init__(self, unavailable=None):
-        # unavailable: dict[account_id(str), set(model_names)]
+        # unavailable: dict[(account_id(str), key_id(int)), set(model_names)]
         self._unavailable = unavailable or {}
 
     def get_unavailable_models_batch(self, account_ids):
-        return {aid: self._unavailable.get(aid, set()) for aid in account_ids}
+        return {
+            (aid, kid): models
+            for (aid, kid), models in self._unavailable.items()
+            if aid in account_ids
+        }
 
 
 class MockConfigRepo:
@@ -334,7 +338,7 @@ class TestAliasRouterFiltering:
     def test_skips_unavailable_models(self):
         """配额耗尽的 (账号, 模型) 候选被过滤。"""
         accounts = {1: _make_account(1), 2: _make_account(2)}
-        quota_repo = MockQuotaRepo(unavailable={"acc-1": {"qwen"}})
+        quota_repo = MockQuotaRepo(unavailable={("acc-1", 0): {"qwen"}})
         router = AliasRouter(
             mapping_model_repo=MockMappingModelRepo({
                 "my-alias": [

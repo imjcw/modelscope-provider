@@ -336,16 +336,57 @@ curl http://127.0.0.1:8000/api/v1/models
 
 **新增供应商**：
 
+必填：`name`、`base_url`，以及 `api_keys`（字符串数组，至少 1 个）。
+`provider_type` 是**供应商的类型**（用于限流策略 / 展示），如 `modelscope` / `sensetime` / `anthropic` / `per_model`，**它不决定协议**——协议由客户端入口决定（见下）。默认 `modelscope`。
+
+可选：`anthropic_base_url`。当一个供应商**同时提供 OpenAI 兼容接口和 Anthropic 原生接口、且两者地址不同**时，用它单独指定 Anthropic 侧的地址；不填则 Anthropic 协议回落到 `base_url`。
+
+> **协议由客户端入口决定**：网关对上游说哪种协议，取决于客户端访问的是哪个入口，与 `provider_type` 无关：
+> - 客户端访问 **`/openai/...`** → 网关对上游说 **OpenAI 协议**，使用 `base_url`（`Authorization: Bearer`）。
+> - 客户端访问 **`/anthropic/...`** → 网关对上游说 **Anthropic 协议**，使用 `anthropic_base_url`（回落到 `base_url`），`x-api-key` 鉴权。
+>
+> 因此「一个供应商两个协议、两个地址」只需配两行 URL：`base_url` 填 **OpenAI 端地址（末尾带 `/v1`）**，`anthropic_base_url` 填 **Anthropic 端地址（根地址、不带 `/v1`）**。`provider_type` 按供应商实际类型填写（若该供应商走 Anthropic 式限流就填 `anthropic`）即可，它与协议选择无关。
+
 ```bash
+# OpenAI / ModelScope 兼容供应商（provider_type 省略即默认）
 curl -X POST http://127.0.0.1:8000/api/admin/suppliers \
   -H "Content-Type: application/json" \
   -d '{
     "name": "供应商A",
-    "api_key": "ms-xxxxxxxxxxxxx",
     "base_url": "https://api-inference.modelscope.cn/v1",
-    "region": "china"
+    "api_keys": ["ms-xxxxxxxxxxxxx"]
+  }'
+
+# Anthropic 原生供应商
+curl -X POST http://127.0.0.1:8000/api/admin/suppliers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Anthropic官方",
+    "base_url": "https://api.anthropic.com",
+    "provider_type": "anthropic",
+    "api_keys": ["sk-ant-xxxxxxxxxxxxx"]
+  }'
+
+# 同一供应商、OpenAI 与 Anthropic 接口地址不同（双地址）
+#   base_url          → OpenAI 端（客户端走 /openai/... 时命中）
+#   anthropic_base_url → Anthropic 端（客户端走 /anthropic/... 时命中）
+curl -X POST http://127.0.0.1:8000/api/admin/suppliers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "双协议供应商",
+    "base_url": "https://gateway.example.com/openai/v1",
+    "anthropic_base_url": "https://gateway.example.com/anthropic",
+    "provider_type": "anthropic",
+    "api_keys": ["sk-xxxxxxxxxxxxx"]
   }'
 ```
+
+> ⚠️ **两种协议的地址写法不同（最容易踩坑）**：
+> 代码统一用 `url = {上游 base}/{url_path}` 拼接，`url_path` 由入口决定（`/openai` → `chat/completions`，`/anthropic` → `v1/messages`）：
+> - **OpenAI 端用 `base_url`**：`url_path = "chat/completions"`，所以 `base_url` 要写到 **`/v1`**（如 `https://api-inference.modelscope.cn/v1`），最终请求 `.../v1/chat/completions`。
+> - **Anthropic 端用 `anthropic_base_url`**（未填则回落 `base_url`）：`url_path = "v1/messages"`，所以该地址必须是**根地址、不带 `/v1`**（如 `https://api.anthropic.com`），最终请求 `https://api.anthropic.com/v1/messages`。
+>
+> 即：OpenAI 侧地址末尾带 `/v1`，Anthropic 侧地址**不带 `/v1`**。两者都不要自行带上 `chat/completions` 或 `v1/messages`，代码会自动追加。配置错误会导致路径重复（如 `.../v1/v1/messages`）而 404。
 
 **更新供应商**：
 

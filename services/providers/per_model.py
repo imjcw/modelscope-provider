@@ -59,9 +59,13 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
         account_id: str,
         model_name: str,
         error_type: Optional[str],
+        key_id: int = 0,
     ) -> None:
         """熔断升级：连续 10 次瞬态失败后，标记模型今日不可用，
         让路由直接跳过该候选，而不是等 1 小时冻结窗口过去再试。
+
+        ``key_id`` 透传自熔断器的 ``(key_id, model)`` 维度，因此只标记该 key
+        的模型不可用，而不影响同供应商的其它 key。
         """
         if error_type not in self._TRANSIENT_ERROR_TYPES:
             logger.debug(
@@ -72,16 +76,16 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
             return
         if self.quota_repository is None:
             logger.warning(
-                "Circuit-breaker escalation for %s/%s but quota_repository is None — "
+                "Circuit-breaker escalation for %s/%s (key %s) but quota_repository is None — "
                 "cannot mark model unavailable",
-                account_id, model_name,
+                account_id, model_name, key_id,
             )
             return
         logger.warning(
-            "Circuit-breaker escalation: marking %s/%s unavailable (error_type=%s)",
-            account_id, model_name, error_type,
+            "Circuit-breaker escalation: marking %s/%s (key %s) unavailable (error_type=%s)",
+            account_id, model_name, key_id, error_type,
         )
-        self.quota_repository.mark_model_unavailable(account_id, model_name)
+        self.quota_repository.mark_model_unavailable(account_id, model_name, key_id=key_id)
 
     def _get_model_config(self, model_name: str) -> Tuple[int, int]:
         """Get (window_seconds, max_requests) for a specific model.
@@ -94,22 +98,26 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
             cfg.get("max_requests", self.default_max_requests),
         )
 
-    def check_rate_limit(self, account_id: str, model_name: str, key_count: int = 1) -> bool:
-        """Check and increment the per-model request counter.
+    def check_rate_limit(
+        self, account_id: str, model_name: str, key_count: int = 1, key_id: int = 0
+    ) -> bool:
+        """Check and increment the per-(key, model) request counter.
+
+        Each API key of a supplier holds its own upstream quota for a model, so
+        the window is scoped to ``(account_id, model_name, key_id)`` — NOT shared
+        across the supplier's keys. ``key_count`` is accepted for signature
+        compatibility but deliberately NOT used to scale the limit: scaling would
+        collapse N independent per-key budgets back into one shared counter.
 
         Uses in-memory ``RateLimitCache`` when available (fast path),
         otherwise falls back to the database.
-
-        ``key_count`` scales the effective quota limit: an account with N
-        active keys holds N× the per-key ``max_requests`` budget.
         """
         window_seconds, max_requests = self._get_model_config(model_name)
-        max_requests = max_requests * max(1, key_count)
 
         if self._cache is not None:
             return self._cache.check(
                 account_id, model_name,
-                window_seconds, max_requests,
+                window_seconds, max_requests, key_id=key_id,
             )
 
         # Fallback: database atomic counting
@@ -119,19 +127,19 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
         with self.db.get_connection() as conn:
             row = conn.execute(
                 "SELECT window_start, request_count FROM account_rate_windows "
-                "WHERE account_id = ? AND model_name = ?",
-                (account_id, model_name),
+                "WHERE account_id = ? AND model_name = ? AND key_id = ?",
+                (account_id, model_name, key_id),
             ).fetchone()
 
             if row is None:
                 # First request — create window
                 conn.execute(
-                    "INSERT INTO account_rate_windows (account_id, model_name, window_start, request_count, updated_at) "
-                    "VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)",
-                    (account_id, model_name, now_iso),
+                    "INSERT INTO account_rate_windows (account_id, model_name, key_id, window_start, request_count, updated_at) "
+                    "VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)",
+                    (account_id, model_name, key_id, now_iso),
                 )
                 logger.info(
-                    f"Per-model rate window created for {account_id}/{model_name}: 1/{max_requests}"
+                    f"Per-model rate window created for {account_id}/{model_name}/{key_id}: 1/{max_requests}"
                 )
                 return True
 
@@ -146,11 +154,11 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
                 # Window expired — reset
                 conn.execute(
                     "UPDATE account_rate_windows SET window_start = ?, request_count = 1, updated_at = CURRENT_TIMESTAMP "
-                    "WHERE account_id = ? AND model_name = ?",
-                    (now_iso, account_id, model_name),
+                    "WHERE account_id = ? AND model_name = ? AND key_id = ?",
+                    (now_iso, account_id, model_name, key_id),
                 )
                 logger.info(
-                    f"Per-model rate window reset for {account_id}/{model_name}: 1/{max_requests}"
+                    f"Per-model rate window reset for {account_id}/{model_name}/{key_id}: 1/{max_requests}"
                 )
                 return True
 
@@ -158,18 +166,18 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
                 # Within limit — increment
                 conn.execute(
                     "UPDATE account_rate_windows SET request_count = request_count + 1, updated_at = CURRENT_TIMESTAMP "
-                    "WHERE account_id = ? AND model_name = ?",
-                    (account_id, model_name),
+                    "WHERE account_id = ? AND model_name = ? AND key_id = ?",
+                    (account_id, model_name, key_id),
                 )
                 new_count = request_count + 1
                 logger.debug(
-                    f"Per-model rate count for {account_id}/{model_name}: {new_count}/{max_requests}"
+                    f"Per-model rate count for {account_id}/{model_name}/{key_id}: {new_count}/{max_requests}"
                 )
                 return True
 
             # Quota exhausted
             logger.warning(
-                f"Per-model rate limit reached for {account_id}/{model_name}: "
+                f"Per-model rate limit reached for {account_id}/{model_name}/{key_id}: "
                 f"{request_count}/{max_requests} in current window"
             )
             return False
@@ -223,47 +231,54 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
     def get_model_quota_info(self, account_id: str, model_name: str) -> dict:
         """Return quota info for a specific (account_id, model_name) pair.
 
+        The per-model window is keyed per API key, so this aggregates every
+        key's window for the model (sum of used requests across keys). The
+        limit is the per-key ``max_requests`` (each key holds its own quota).
+
         Uses in-memory cache when available for fast reads.
         """
         window_seconds, max_requests = self._get_model_config(model_name)
 
         if self._cache is not None:
-            return self._cache.get_quota_info(
-                account_id, model_name, window_seconds, max_requests,
+            info = self._cache.get_model_count_across_keys(
+                account_id, model_name, window_seconds, max_requests
             )
+            if info is not None:
+                used = info["request_count"]
+                return {
+                    "quota_remaining": max(0, max_requests - used),
+                    "quota_limit": max_requests,
+                    "window_seconds": window_seconds,
+                }
 
-        # Fallback: database query
+        # Fallback: database query — sum used across all keys for this model
         now = datetime.now(timezone.utc)
 
         with self.db.get_connection() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 "SELECT window_start, request_count FROM account_rate_windows "
                 "WHERE account_id = ? AND model_name = ?",
                 (account_id, model_name),
-            ).fetchone()
+            ).fetchall()
 
-        if row is None:
+        if not rows:
             return {
                 "quota_remaining": max_requests,
                 "quota_limit": max_requests,
                 "window_seconds": window_seconds,
             }
 
-        window_start = datetime.fromisoformat(row["window_start"])
-        elapsed = (now - window_start).total_seconds()
+        used = 0
+        for row in rows:
+            window_start = datetime.fromisoformat(row["window_start"])
+            elapsed = (now - window_start).total_seconds()
+            if elapsed > window_seconds:
+                # expired window contributes nothing
+                continue
+            used += row["request_count"]
 
-        if elapsed > window_seconds:
-            # Window expired — full quota available
-            return {
-                "quota_remaining": max_requests,
-                "quota_limit": max_requests,
-                "window_seconds": window_seconds,
-            }
-
-        remaining = max(0, max_requests - row["request_count"])
         return {
-            "quota_remaining": remaining,
+            "quota_remaining": max(0, max_requests - used),
             "quota_limit": max_requests,
             "window_seconds": window_seconds,
-            "window_start": row["window_start"],
         }

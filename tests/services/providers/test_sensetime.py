@@ -64,29 +64,25 @@ class TestCheckRateLimit:
         # acc2 should still be fresh
         assert strategy.check_rate_limit("acc2", "m") is True
 
-    def test_key_count_scales_limit(self, database):
-        """key_count multiplies the effective quota (N keys → N× budget)."""
+    def test_per_key_isolation(self, database):
+        """Each key_id holds its own window (per-key quota, not scaled)."""
         strategy = SenseTimeStrategy(db=database, window_seconds=10, max_requests=3)
 
-        # Single key: blocked at 4th request (limit 3)
+        # key 0: blocked at 4th request (limit 3)
         for _ in range(3):
-            assert strategy.check_rate_limit("acc1", "m") is True
-        assert strategy.check_rate_limit("acc1", "m") is False
+            assert strategy.check_rate_limit("acc1", "m", key_id=0) is True
+        assert strategy.check_rate_limit("acc1", "m", key_id=0) is False
 
-        # Backdate the window past expiry (window_seconds=10) so it resets,
-        # then use key_count=2 → limit 6
-        old_time = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
-        with database.get_connection() as conn:
-            conn.execute(
-                "UPDATE account_rate_windows SET window_start = ? WHERE account_id = ? AND model_name = ?",
-                (old_time, "acc1", "__global__"),
-            )
-        for _ in range(6):
-            assert strategy.check_rate_limit("acc1", "m", key_count=2) is True
-        assert strategy.check_rate_limit("acc1", "m", key_count=2) is False
+        # key 1: independent budget, still fresh
+        for _ in range(3):
+            assert strategy.check_rate_limit("acc1", "m", key_id=1) is True
+        assert strategy.check_rate_limit("acc1", "m", key_id=1) is False
+
+        # key 0 still blocked (its own window unchanged by key 1's usage)
+        assert strategy.check_rate_limit("acc1", "m", key_id=0) is False
 
     def test_key_count_default_is_one(self, strategy):
-        """Omitting key_count keeps the original per-key limit."""
+        """Omitting key_id uses key 0 with the original per-key limit."""
         for _ in range(5):
             assert strategy.check_rate_limit("acc1", "m") is True
         assert strategy.check_rate_limit("acc1", "m") is False

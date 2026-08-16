@@ -7,7 +7,9 @@ from provider.core.migrations import Migrator, get_all_migrations
 
 @pytest.fixture
 def db(tmp_path):
-    return DatabaseManager(f"sqlite:///{tmp_path}/test.db")
+    # Distinct file from the autouse _clean_db_file fixture (which owns
+    # tmp_path/test.db and pre-applies the full migration set).
+    return DatabaseManager(f"sqlite:///{tmp_path}/mig_int_test.db")
 
 
 class TestFreshInstall:
@@ -19,7 +21,7 @@ class TestFreshInstall:
         migrator.run()
 
         status = migrator.status()
-        assert len(status) == 22
+        assert len(status) == 27
         assert all(s["applied"] for s in status)
 
     def test_idempotent_on_fresh_install(self, db):
@@ -29,7 +31,7 @@ class TestFreshInstall:
         migrator.run()  # second run no-op
 
         status = migrator.status()
-        assert len(status) == 22
+        assert len(status) == 27
         assert all(s["applied"] for s in status)
 
 
@@ -90,7 +92,7 @@ class TestOldDatabaseUpgrade:
         migrator.run()
 
         status = migrator.status()
-        assert len(status) == 22
+        assert len(status) == 27
         assert all(s["applied"] for s in status)
 
         with db.get_connection() as conn:
@@ -110,6 +112,6 @@ class TestOldDatabaseUpgrade:
 class TestMigrationCount:
     def test_all_migrations_registered(self):
         migrations = get_all_migrations()
-        assert len(migrations) == 21
+        assert len(migrations) == 27
         versions = [m.version for m in migrations]
-        assert versions == list(range(1, 22))
+        assert versions == list(range(1, 28))

@@ -47,6 +47,7 @@ def test_summarize_empty(database):
     s = repo.query_stats_summarize("1990-01-01 00:00:00", "1990-01-01 00:05:00")
     assert s == {
         "total": 0, "success": 0, "total_tokens": 0, "avg_latency_ms": None,
+        "input_tokens": 0, "output_tokens": 0, "cached_tokens": 0,
     }
 
 
@@ -358,11 +359,12 @@ def test_today_token_usage(database):
     _insert_stats(repo, database, datetime(2024, 1, 1, 11, 0, tzinfo=timezone.utc),
                   model="m1", account_id="a1", input_tokens=20, output_tokens=10)
 
-    inp, out = repo.query_stats_today_token_usage(
+    inp, out, cached = repo.query_stats_today_token_usage(
         "a1", "m1", "2024-01-01 00:00:00", "2024-01-01 23:59:59",
     )
     assert inp == 30
     assert out == 15
+    assert cached == 0
 
 
 # ── Log retention cleanup ──────────────────────────────────────────────────

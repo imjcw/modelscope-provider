@@ -15,12 +15,24 @@ import copy
 import json
 import asyncio
 import logging
-import time
-import httpx
+import uuid
 from datetime import datetime, timezone
 from services.models_cache import get_models
 
 logger = logging.getLogger(__name__)
+
+from .anthropic_adapters import (
+    resolve_upstream_base,
+    extract_cache_usage,
+    safe_read_response_body,
+    safe_aclose,
+    anthropic_stop_to_openai_finish,
+    get_admin_service,
+    get_services,
+    _authenticate_client_key,
+    _log_error_request,
+    request_with_429_backoff,
+)
 
 router = APIRouter()
 
@@ -62,28 +74,6 @@ class ChatCompletionRequest(BaseModel):
 class ErrorResponse(BaseModel):
     """Error response format."""
     error: dict
-
-
-def _extract_cache_usage(usage) -> tuple:
-    """从上游 usage 提取 (cached_tokens, prompt_partial_cached)。
-
-    兼容 OpenAI 风格 prompt_tokens_details.cached_tokens /
-    prompt_partial_cached_tokens，以及 DeepSeek 风格顶层
-    prompt_cache_hit_tokens。
-    """
-    if not isinstance(usage, dict):
-        return 0, 0
-    details = usage.get("prompt_tokens_details")
-    if not isinstance(details, dict):
-        details = {}
-    cached = details.get("cached_tokens")
-    if not cached:
-        cached = usage.get("prompt_cache_hit_tokens", 0)
-    partial = details.get("prompt_partial_cached_tokens", 0) or 0
-    try:
-        return int(cached or 0), int(partial)
-    except (TypeError, ValueError):
-        return 0, 0
 
 
 def _is_openai_response(resp_json: dict) -> bool:
@@ -137,150 +127,6 @@ def _normalize_response(response_converter, resp_json: dict) -> dict:
         return resp_json
 
 
-async def _safe_read_response_body(response, max_len: int = 50000) -> str:
-    """安全读取上游 HTTP 响应的 body 文本，失败时返回空字符串。"""
-    try:
-        try:
-            text = response.text
-        except Exception:
-            await response.aread()
-            text = response.text
-        if text and len(text) > max_len:
-            return text[:max_len] + "...(truncated)"
-        return text or ""
-    except Exception:
-        return ""
-
-
-async def _safe_aclose(response) -> None:
-    """安全关闭上游流式响应，避免错误路径上的连接泄露。"""
-    try:
-        await response.aclose()
-    except Exception:
-        pass
-
-
-async def _log_error_request(
-    admin_service,
-    request_model: str,
-    actual_model_id: str,
-    selected_account,
-    client_key_name: str,
-    status_code: int,
-    error_message: str,
-    request_body: dict,
-    request_start: str,
-    first_response: str = None,
-    raw_response: str = None,
-    is_stream: bool = False,
-    key_id: int = 0,
-    error_source: str = None,
-):
-    """记录失败请求到数据库，确保错误路径也有日志可查。
-
-    error_source 标记错误来源:
-      - None / ""     来自上游供应商的直接返回（上游本身返回了该状态码）
-      - "upstream"    上游供应商直接返回的错误
-      - "circuit_open" 熔断器主动拒绝（策略层拦截）
-      - "rate_limit"  限流/配额耗尽（策略层拦截）
-      - "internal"    服务自身产生的错误（非上游）
-    """
-    if not admin_service:
-        return
-    end_time = datetime.now(timezone.utc).isoformat()
-    try:
-        await asyncio.to_thread(admin_service.log_request,
-            model=request_model,
-            actual_model_id=actual_model_id,
-            account_id=selected_account.account_id,
-            account_name=selected_account.name,
-            status_code=status_code,
-            input_tokens=0,
-            output_tokens=0,
-            is_stream=is_stream,
-            error_message=error_message,
-            raw_request=json.dumps(request_body, ensure_ascii=False),
-            raw_response=raw_response or "",
-            request_start=request_start,
-            first_response=first_response,
-            end_time=end_time,
-            cached_tokens=0,
-            prompt_partial_cached=0,
-            client_key_name=client_key_name,
-            api_key_id=key_id,
-            error_source=error_source,
-        )
-    except Exception as le:
-        logger.error(f"Failed to log error request: {le}", exc_info=True)
-
-
-def get_admin_service(request: Request):
-    """Get admin service from app state."""
-    try:
-        svc = request.app.state.admin_service
-    except AttributeError:
-        return None
-    return svc
-
-
-def _authenticate_client_key(request: Request):
-    """Authenticate request using client API key."""
-    admin_service = get_admin_service(request)
-    if admin_service is None or admin_service.client_key_repo is None:
-        return None, None
-
-    auth_header = request.headers.get("Authorization", "")
-    client_key = None
-    if auth_header.startswith("Bearer "):
-        client_key = auth_header[7:].strip()
-    elif auth_header.startswith("bearer "):
-        client_key = auth_header[7:].strip()
-
-    if not client_key:
-        client_key = request.headers.get("X-API-Key", "").strip()
-
-    if not client_key:
-        return None, None
-
-    key_record = admin_service.client_key_repo.find_by_key_value(client_key)
-    if not key_record:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error": {
-                    "message": "Invalid API key",
-                    "type": "invalid_request_error",
-                    "param": None,
-                    "code": "invalid_api_key",
-                }
-            },
-        )
-    if key_record["status"] != "active":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": {
-                    "message": "API key is disabled",
-                    "type": "permission_denied",
-                    "param": None,
-                    "code": "key_disabled",
-                }
-            },
-        )
-    return key_record["name"], client_key
-
-
-def get_services(request: Request):
-    """Get services from the *request's* app state."""
-    try:
-        services = request.app.state.services
-    except AttributeError:
-        raise HTTPException(status_code=503, detail="Services not initialized")
-    if services is None:
-        raise HTTPException(status_code=503, detail="Services not initialized")
-    return services
-
-
 def refresh_load_balancer(request: Request):
     """Refresh the LoadBalancer with current accounts from the database.
 
@@ -310,7 +156,7 @@ def refresh_load_balancer(request: Request):
             unavailable_map = {}
             if quota_repo is not None:
                 try:
-                    unavailable_map = quota_repo.get_unavailable_models_batch(
+                    unavailable_map = quota_repo.get_unavailable_models_by_account(
                         [a["account_id"] for a in db_accounts]
                     )
                 except Exception:
@@ -358,11 +204,12 @@ async def stream_response(
     decoder = json.JSONDecoder()
     yielded_any = False
     saw_done = False
+    _closed = False
 
     try:
         async for line in response.aiter_lines():
             stripped = line.strip()
-            if stripped == "[DONE]":
+            if stripped in ("[DONE]", "data: [DONE]"):
                 yield "data: [DONE]\n\n"
                 saw_done = True
                 return
@@ -386,12 +233,21 @@ async def stream_response(
 
                 yielded_any = True
                 yield f"data: {json.dumps(chunk)}\n\n"
+    except GeneratorExit:
+        # Client disconnected. Yield is illegal inside `finally` during
+        # close (RuntimeError "async generator ignored GeneratorExit" on
+        # Python 3.12+), so skip the empty-stream marker.
+        _closed = True
+        raise
+    except asyncio.CancelledError:
+        _closed = True
+        raise
     finally:
-        await _safe_aclose(response)
+        await safe_aclose(response)
         # If the stream produced no useful data at all (no data: lines, or
         # only non-choices heartbeat chunks), emit an error marker so the
         # client sees a clear error instead of a silent empty stream.
-        if not yielded_any and not saw_done:
+        if not _closed and not yielded_any and not saw_done:
             error_json = json.dumps({
                 "error": {
                     "message": "Upstream returned empty stream (no data received)",
@@ -471,7 +327,7 @@ async def stream_response_with_logging(
                     usage = json_data.get("usage", {})
                     input_tokens = usage.get("prompt_tokens", 0) or input_tokens
                     output_tokens = usage.get("completion_tokens", 0) or output_tokens
-                    _cached, _partial = _extract_cache_usage(usage)
+                    _cached, _partial = extract_cache_usage(usage)
                     cached_tokens = _cached or cached_tokens
                     prompt_partial_cached = _partial or prompt_partial_cached
             except Exception:
@@ -535,7 +391,7 @@ async def stream_response_with_logging(
         raw_response_fallback = None
         if len(raw_chunks) == 0 and not stream_failed and not stream_interrupted:
             try:
-                _lost_body = await _safe_read_response_body(response, max_len=50000)
+                _lost_body = await safe_read_response_body(response, max_len=50000)
                 if _lost_body:
                     logger.warning(
                         "Stream produced 0 chunks for %s/%s — captured body: %s",
@@ -598,14 +454,159 @@ async def stream_response_with_logging(
         try:
             if input_tokens > 0 or output_tokens > 0:
                 await asyncio.to_thread(quota_updater.update_quota_from_usage,
-                    account, input_tokens, output_tokens, actual_model_id or model_name
+                    account, input_tokens, output_tokens, actual_model_id or model_name,
+                    key_id,
                 )
             if response_headers:
                 await asyncio.to_thread(quota_updater.update_quota_after_request,
-                    account, response_headers, actual_model_id or model_name
+                    account, response_headers, actual_model_id or model_name,
+                    None,
+                    key_id,
                 )
         except Exception as e:
             logger.warning(f"Failed to update streaming quota: {e}")
+
+
+async def stream_response_with_logging_anthropic_upstream(
+    response, account, model_name, request_body, actual_model_id,
+    admin_service, request_start,
+    quota_updater=None, client_key_name=None,
+    circuit_breaker=None, alias_router=None, key_id: int = 0,
+):
+    """Log quota for an Anthropic-native SSE stream, converting to OpenAI SSE.
+
+    Anthropic upstream emits its own event types (message_start,
+    content_block_delta, message_delta, message_stop) — we convert
+    these to OpenAI-compatible SSE (``{"choices": [{"delta": ...}]}``).
+    """
+    output_tokens = 0
+    input_tokens = 0
+    response_headers = {}
+    raw_chunks = []
+    first_response = None
+    stream_status_code = 200
+    stream_failed = False
+    stream_interrupted = False
+    interrupt_reason = None
+
+    try:
+        async for chunk_data in _stream_openai_from_anthropic(response, actual_model_id, _capture_headers=True):
+            data_str = chunk_data.removeprefix("data: ").strip()
+            is_special_chunk = False
+
+            if data_str:
+                try:
+                    obj, _ = json.JSONDecoder().raw_decode(data_str)
+                    if isinstance(obj, dict) and "__hdrs__" in obj:
+                        response_headers = obj["__hdrs__"]
+                        is_special_chunk = True
+                except Exception:
+                    pass
+
+            if is_special_chunk:
+                continue
+
+            if first_response is None:
+                first_response = datetime.now(timezone.utc).isoformat()
+            yield chunk_data
+            raw_chunks.append(chunk_data)
+
+    except GeneratorExit:
+        stream_interrupted = True
+        interrupt_reason = "client disconnected"
+        raise
+    except asyncio.CancelledError:
+        stream_interrupted = True
+        interrupt_reason = "client disconnected"
+        raise
+    except Exception as stream_exc:
+        stream_failed = True
+        stream_interrupted = True
+        interrupt_reason = str(stream_exc)
+        if circuit_breaker is not None:
+            try:
+                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id or model_name, -1)
+            except Exception:
+                pass
+        raise
+    finally:
+        await safe_aclose(response)
+
+        if alias_router is not None:
+            try:
+                alias_router.release(key_id, actual_model_id or model_name)
+            except Exception:
+                pass
+
+        if not stream_failed and len(raw_chunks) > 0 and circuit_breaker is not None:
+            try:
+                circuit_breaker.record_success(key_id, actual_model_id or model_name)
+            except Exception:
+                pass
+
+        if stream_failed and not stream_interrupted and circuit_breaker is not None:
+            try:
+                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id or model_name, 502)
+            except Exception:
+                pass
+
+        end_time = datetime.now(timezone.utc).isoformat()
+        _stream_ended = stream_interrupted or stream_failed
+        _is_empty = len(raw_chunks) == 0
+        log_status = -1 if (_stream_ended or _is_empty) else stream_status_code
+        log_error = (
+            f"Streaming interrupted: {interrupt_reason}"
+            if interrupt_reason
+            else f"Empty stream" if _is_empty else None
+        )
+
+        _raw_response_text = "\n".join(raw_chunks[:100]) if raw_chunks else ""
+        if len(_raw_response_text) > 50000:
+            _raw_response_text = _raw_response_text[:50000] + "...(truncated)"
+
+        if admin_service:
+            try:
+                await asyncio.to_thread(admin_service.log_request,
+                    model=model_name,
+                    actual_model_id=actual_model_id or model_name,
+                    account_id=account.account_id,
+                    account_name=account.name,
+                    status_code=log_status,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    is_stream=True,
+                    error_message=log_error,
+                    raw_request=json.dumps(request_body, ensure_ascii=False),
+                    raw_response=_raw_response_text,
+                    request_start=request_start,
+                    first_response=first_response,
+                    end_time=end_time,
+                    client_key_name=client_key_name,
+                    api_key_id=key_id,
+                    response_headers=json.dumps(response_headers, ensure_ascii=False) if response_headers else None,
+                    error_source=None if log_status == 200 else "upstream",
+                )
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Failed to log Anthropic upstream stream: {e}")
+
+        if quota_updater:
+            try:
+                if input_tokens > 0 or output_tokens > 0:
+                    await asyncio.to_thread(quota_updater.update_quota_from_usage,
+                        account, input_tokens, output_tokens, actual_model_id or model_name,
+                        key_id,
+                    )
+                if response_headers:
+                    await asyncio.to_thread(quota_updater.update_quota_after_request,
+                        account, response_headers, actual_model_id or model_name,
+                        None,
+                        key_id,
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to update streaming quota: {e}")
+
 
 # ── Endpoints ────────────────────────────────────────────────────────────
 
@@ -656,6 +657,341 @@ async def _build_request_body(data: ChatCompletionRequest, actual_model_id: str)
     return body
 
 
+# ── OpenAI ↔ Anthropic conversion (for Anthropic upstreams) ─────────────
+
+
+def _openai_message_to_anthropic(msg: dict) -> dict:
+    """Convert one OpenAI message to Anthropic format."""
+    if not isinstance(msg, dict):
+        return {}
+    role = msg.get("role", "user")
+    content = msg.get("content", "") or ""
+    tool_calls = msg.get("tool_calls") or []
+    tool_call_id = msg.get("tool_call_id")
+
+    # OpenAI tool role → Anthropic tool_result in user message
+    if role == "tool":
+        tool_content = content
+        if isinstance(content, list):
+            # Convert OpenAI content-block array to Anthropic format
+            anthro_parts = []
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        anthro_parts.append({"type": "text", "text": block.get("text", "")})
+                    elif block.get("type") == "image_url":
+                        url_data = block.get("image_url", {})
+                        url = url_data if isinstance(url_data, str) else url_data.get("url", "")
+                        anthro_parts.append({"type": "image", "source": {"type": "url", "url": url}})
+            tool_content = anthro_parts if anthro_parts else ""
+        blocks = [{"type": "tool_result", "tool_use_id": tool_call_id or "",
+                   "content": [{"type": "text", "text": str(tool_content)}] if isinstance(tool_content, str) else tool_content}]
+        return {"role": "user", "content": blocks}
+
+    if role == "assistant":
+        blocks = []
+        if content:
+            blocks.append({"type": "text", "text": content})
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                fc = tc.get("function", {})
+                blocks.append({
+                    "type": "tool_use",
+                    "id": tc.get("id", ""),
+                    "name": fc.get("name", ""),
+                    "input": fc.get("arguments"),
+                })
+                if isinstance(fc.get("arguments"), str):
+                    try:
+                        blocks[-1]["input"] = json.loads(fc["arguments"])
+                    except Exception:
+                        # Anthropic requires tool_use.input to be an object;
+                        # never forward the raw JSON string (upstream 400).
+                        blocks[-1]["input"] = {}
+        return {"role": "assistant", "content": blocks}
+
+    # user/system messages: convert to Anthropic text blocks
+    if isinstance(content, str):
+        blocks = [{"type": "text", "text": content}]
+    elif isinstance(content, list):
+        blocks = []
+        for item in content:
+            if isinstance(item, dict):
+                if item.get("type") == "text":
+                    blocks.append({"type": "text", "text": item.get("text", "")})
+                elif item.get("type") == "image_url":
+                    url_data = item.get("image_url", {})
+                    if isinstance(url_data, str):
+                        blocks.append({"type": "image", "source": {"type": "url", "url": url_data}})
+                    elif isinstance(url_data, dict):
+                        blocks.append({"type": "image", "source": {"type": "url", "url": url_data.get("url", "")}})
+            else:
+                blocks.append({"type": "text", "text": str(item)})
+    else:
+        blocks = [{"type": "text", "text": str(content)}]
+
+    return {"role": role, "content": blocks}
+
+
+def _anthropic_message_to_openai(msg_dict: dict, model_name: str) -> dict:
+    """Convert an Anthropic Message response to OpenAI ChatCompletion format."""
+    content_blocks = msg_dict.get("content", []) or []
+    stop_reason = msg_dict.get("stop_reason", "end_turn")
+    usage = msg_dict.get("usage", {}) or {}
+
+    # Convert content blocks to OpenAI message
+    text_parts = []
+    tool_calls = []
+    for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            text_parts.append(block.get("text", ""))
+        elif block.get("type") == "tool_use":
+            tool_calls.append({
+                "id": block.get("id", ""),
+                "type": "function",
+                "function": {
+                    "name": block.get("name", ""),
+                    "arguments": json.dumps(block.get("input", {})),
+                },
+            })
+
+    message = {"role": "assistant", "content": "\n".join(text_parts) if text_parts else None}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+
+    itokens = usage.get("input_tokens", 0) or 0
+    otokens = usage.get("output_tokens", 0) or 0
+
+    return {
+        "id": msg_dict.get("id", f"chatcmpl_{uuid.uuid4().hex[:24]}"),
+        "object": "chat.completion",
+        "created": int(datetime.now(timezone.utc).timestamp()),
+        "model": msg_dict.get("model", model_name),
+        "choices": [{
+            "index": 0,
+            "message": message,
+            "finish_reason": anthropic_stop_to_openai_finish(stop_reason),
+        }],
+        "usage": {
+            "prompt_tokens": itokens,
+            "completion_tokens": otokens,
+            "total_tokens": itokens + otokens,
+        },
+    }
+
+
+async def _openai_to_anthropic_body(data, actual_model_id: str) -> dict:
+    """Convert an OpenAI ChatCompletionRequest to an Anthropic-format request body."""
+    body = {
+        "model": actual_model_id,
+        "max_tokens": data.max_tokens or 4096,
+    }
+    if data.temperature is not None:
+        body["temperature"] = data.temperature
+    if data.top_p is not None:
+        body["top_p"] = data.top_p
+    if data.stop is not None:
+        body["stop_sequences"] = data.stop if isinstance(data.stop, list) else [data.stop]
+    if data.tools is not None:
+        body["tools"] = [
+            {"name": t.get("function", {}).get("name", ""),
+             "description": t.get("function", {}).get("description", ""),
+             "input_schema": t.get("function", {}).get("parameters", {})}
+            for t in data.tools if isinstance(t, dict)
+        ]
+    if data.tool_choice is not None:
+        tc = data.tool_choice
+        if tc == "auto":
+            body["tool_choice"] = {"type": "auto"}
+        elif tc == "required":
+            body["tool_choice"] = {"type": "any"}
+        elif tc == "none":
+            pass  # no equivalent; just don't forward
+        elif isinstance(tc, dict) and tc.get("type") == "function":
+            fn = tc.get("function", {})
+            body["tool_choice"] = {"type": "tool", "name": fn.get("name", "")}
+
+    # Extract system messages to Anthropic's top-level `system` field.
+    # Anthropic does NOT allow role:system in the messages array.
+    system_parts = []
+    messages = []
+    for msg in (data.messages or []):
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") == "system":
+            content = msg.get("content", "")
+            if isinstance(content, str) and content:
+                system_parts.append(content)
+            elif isinstance(content, list):
+                # OpenAI system content can be a list of content blocks
+                # (text, image_url, etc.). Extract the text parts.
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text:
+                            system_parts.append(text)
+        else:
+            anthro_msg = _openai_message_to_anthropic(msg)
+            if anthro_msg:
+                messages.append(anthro_msg)
+    if system_parts:
+        body["system"] = "\n".join(system_parts)
+    if messages:
+        body["messages"] = messages
+
+    if data.stream:
+        body["stream"] = True
+
+    return body
+
+
+async def _stream_openai_from_anthropic(
+    response,
+    actual_model_id: str,
+    _capture_headers: bool = False,
+) -> AsyncGenerator[str, None]:
+    """Convert an Anthropic-native SSE stream to OpenAI-compatible SSE format.
+
+    Anthropic events → OpenAI:
+      content_block_delta(text) → data: {"choices": [{"delta": {"content": "..."}}]}
+      content_block_delta(input_json_delta) → data: {"choices": [{"delta": {"tool_calls": [...]}}]}
+      message_delta           → data: {"choices": [{"finish_reason": "..."}], "usage": {...}}
+      message_stop            → data: [DONE]
+
+    Anthropic SSE pairs each ``event: <type>`` with a ``data: <json>`` line.
+    We iterate line-by-line with a simple state machine: when we see an
+    ``event:`` line we store the type; when we see the following ``data:``
+    line we dispatch on the stored type. This avoids calling
+    ``await anext()`` on a separate iterator inside the main ``async for``
+    loop (which would create a second independent iterator over the same
+    httpx stream and cause data loss / race conditions).
+    """
+    decoder = json.JSONDecoder()
+    first_chunk = True
+    saw_finish = False
+    yielded_any = False
+    total_output_tokens = 0
+    total_input_tokens = 0
+    tool_idx = 0
+    pending_event_type: str | None = None
+    _closed = False
+
+    if _capture_headers:
+        hdrs = {}
+        try:
+            hdrs = dict(response.headers)
+        except Exception:
+            pass
+        yield f"data: {json.dumps({'__hdrs__': hdrs})}\n\n"
+
+    try:
+        async for line in response.aiter_lines():
+            stripped = line.strip()
+            if not stripped:
+                # Blank line = SSE event delimiter; reset pending event
+                pending_event_type = None
+                continue
+
+            if stripped.startswith("event:"):
+                pending_event_type = stripped[6:].strip()
+                continue
+
+            if not stripped.startswith("data:"):
+                continue
+
+            data_str = stripped[5:].strip()
+            if not data_str:
+                continue
+
+            try:
+                obj, _ = decoder.raw_decode(data_str)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+
+            event_type = pending_event_type
+            pending_event_type = None  # consumed
+
+            if event_type == "content_block_delta":
+                delta = obj.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    text = delta.get("text", "")
+                    if text:
+                        if first_chunk:
+                            yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': text}}]})}\n\n"
+                            first_chunk = False
+                        else:
+                            yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'content': text}}]})}\n\n"
+                        yielded_any = True
+                elif delta.get("type") == "input_json_delta":
+                    partial = delta.get("partial_json", "")
+                    if partial:
+                        yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'tool_calls': [{'index': tool_idx - 1, 'function': {'arguments': partial}}]}}]})}\n\n"
+                        yielded_any = True
+
+            elif event_type == "content_block_start":
+                content_block = obj.get("content_block", {})
+                if content_block.get("type") == "tool_use":
+                    # Emit the tool call header with id, name, and index
+                    tc_id = content_block.get("id", "")
+                    tc_name = content_block.get("name", "")
+                    yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'tool_calls': [{'index': tool_idx, 'id': tc_id, 'type': 'function', 'function': {'name': tc_name, 'arguments': ''}}]}}]})}\n\n"
+                    if first_chunk:
+                        first_chunk = False
+                    yielded_any = True
+                    tool_idx += 1
+
+            elif event_type == "message_start":
+                message = obj.get("message", {})
+                usage = message.get("usage", {}) or {}
+                total_input_tokens = usage.get("input_tokens", 0) or 0
+
+            elif event_type == "message_delta":
+                if not saw_finish:
+                    saw_finish = True
+                    delta = obj.get("delta", {})
+                    stop_reason = delta.get("stop_reason", "end_turn")
+                    usage = obj.get("usage", {})
+                    total_output_tokens = usage.get("output_tokens", 0) or 0
+                    finish_reason = anthropic_stop_to_openai_finish(stop_reason)
+                    openai_delta = {"finish_reason": finish_reason}
+                    if total_output_tokens or total_input_tokens:
+                        openai_delta["usage"] = {
+                            "prompt_tokens": total_input_tokens,
+                            "completion_tokens": total_output_tokens,
+                            "total_tokens": total_input_tokens + total_output_tokens,
+                        }
+                    yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': openai_delta}]})}\n\n"
+                    yielded_any = True
+
+            elif event_type == "message_stop":
+                if not saw_finish:
+                    yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'finish_reason': 'stop'}}]})}\n\n"
+                yield "data: [DONE]\n\n"
+                yielded_any = True
+
+            elif event_type == "error":
+                yield f"data: {json.dumps(obj)}\n\n"
+                yielded_any = True
+
+    except GeneratorExit:
+        # Client disconnected mid-stream. Yield is illegal inside `finally`
+        # during close (Python 3.12+ RuntimeError), so skip the marker.
+        _closed = True
+        raise
+    except asyncio.CancelledError:
+        _closed = True
+        raise
+    finally:
+        await safe_aclose(response)
+        if not _closed and not yielded_any and not saw_finish:
+            empty_err = json.dumps({"error": {"code": "empty_stream", "message": "Upstream returned empty stream"}})
+            yield f"data: {empty_err}\n\n"
+
+
 async def _try_candidate(
     *,
     request: ChatCompletionRequest,
@@ -693,7 +1029,7 @@ async def _try_candidate(
     strategies = services.get("rate_limit_strategies", {})
     rate_strategy = strategies.get(provider_type)
     if rate_strategy and not rate_strategy.check_rate_limit(
-            account.account_id, actual_model_id):
+            account.account_id, actual_model_id, key_id=key_id):
         await _log_error_request(
             admin_service, request.model, actual_model_id, account,
             client_key_name, 429,
@@ -705,6 +1041,12 @@ async def _try_candidate(
             "error": {"message": f"供应商 {account.name or account.account_id} 的 {request.model} 配额已耗尽",
                       "type": "rate_limit_exceeded", "param": None, "code": "rate_limit_exceeded"}})
 
+    # The client reached the OpenAI entry point, so we ALWAYS speak the OpenAI
+    # protocol to the upstream here. ``provider_type`` is the *supplier's type*
+    # (used for rate-limit strategy / display) — it is NOT the protocol, and a
+    # single supplier can expose both OpenAI and Anthropic endpoints. The OpenAI
+    # endpoint is always ``base_url``.
+    is_anthropic = False  # /openai entry → upstream speaks OpenAI; no conversion
     body["model"] = actual_model_id
     if request.stream:
         body["stream"] = True
@@ -715,21 +1057,30 @@ async def _try_candidate(
             body["stream_options"] = existing
         else:
             body["stream_options"] = {"include_usage": True}
+    url = f"{resolve_upstream_base(account, 'openai')}/chat/completions"
+    auth_style = "bearer"
 
-    url = f"{account.base_url.rstrip('/')}/chat/completions"
-
-    # Make upstream request via the injected http_client service (pooled,
-    # handles auth + base_url). stream=... is essential: without it httpx
-    # buffers the entire upstream body and SSE arrives in one chunk at the
-    # end (looks non-streaming to the client).
-    try:
-        response = await http_client.request(
+    # Make upstream request via the injected http_client service.
+    # On upstream 429 the same candidate is retried with exponential backoff
+    # (honoring Retry-After); the final response is returned for the normal
+    # error path below to record + fall back if it is still a 429.
+    async def _do_upstream_request():
+        return await http_client.request(
             account,
             "POST",
             url,
             json=body,
             stream=request.stream,
             key_string=api_key,
+            auth_style=auth_style,
+        )
+
+    try:
+        response = await request_with_429_backoff(
+            _do_upstream_request,
+            account_id=account.account_id,
+            actual_model_id=actual_model_id,
+            close_fn=safe_aclose,
         )
         first_response = datetime.now(timezone.utc).isoformat()
     except Exception as exc:
@@ -750,7 +1101,7 @@ async def _try_candidate(
 
     # 4xx / 5xx from upstream → record failure and raise to trigger fallback
     if response.status_code >= 400:
-        error_body = await _safe_read_response_body(response)
+        error_body = await safe_read_response_body(response)
         error_code = response.status_code
         detail_msg = f"Supplier error {error_code}: {error_body[:200]}" if error_body else f"Supplier error {error_code}"
 
@@ -762,7 +1113,7 @@ async def _try_candidate(
             except Exception:
                 pass
 
-        await _safe_aclose(response)
+        await safe_aclose(response)
         await _log_error_request(
             admin_service, request.model, actual_model_id, account,
             client_key_name, error_code, detail_msg, body, request_start,
@@ -781,7 +1132,7 @@ async def _try_candidate(
             if raw_text:
                 resp_json = json.loads(raw_text)
             else:
-                raw_text = await _safe_read_response_body(response)
+                raw_text = await safe_read_response_body(response)
                 resp_json = json.loads(raw_text) if raw_text else {}
 
             # Validate the response body. An empty body or a body with no
@@ -814,63 +1165,67 @@ async def _try_candidate(
                         }
                     },
                 )
-            choices = resp_json.get("choices")
-            if not choices or not isinstance(choices, list) or len(choices) == 0:
-                if circuit_breaker is not None:
-                    try:
-                        circuit_breaker.record_failure(
-                            key_id, account.account_id, actual_model_id, 502,
-                        )
-                    except Exception:
-                        pass
-                await _log_error_request(
-                    admin_service, request.model, actual_model_id, account,
-                    client_key_name, 502,
-                    f"Invalid response from upstream: no choices in {resp_json.get('id', '?')}",
-                    body, request_start, first_response, is_stream=request.stream,
-                    key_id=key_id, error_source="upstream",
-                )
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "error": {
-                            "message": "Supplier returned response with no choices",
-                            "type": "server_error",
-                            "param": None,
-                            "code": "no_choices",
-                        }
-                    },
-                )
-            # Verify the first choice has a message block. Some upstreams
-            # return ``choices`` without ``message`` (e.g. only ``finish_reason``),
-            # which is not a valid OpenAI response.
-            first_choice = choices[0]
-            if not isinstance(first_choice, dict) or not first_choice.get("message"):
-                if circuit_breaker is not None:
-                    try:
-                        circuit_breaker.record_failure(
-                            key_id, account.account_id, actual_model_id, 502,
-                        )
-                    except Exception:
-                        pass
-                await _log_error_request(
-                    admin_service, request.model, actual_model_id, account,
-                    client_key_name, 502,
-                    f"Invalid response from upstream: no message in {resp_json.get('id', '?')}",
-                    body, request_start, first_response, is_stream=request.stream,
-                    key_id=key_id, error_source="upstream",
-                )
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "error": {
-                            "message": "Supplier returned response with no message",
-                            "type": "server_error",
-                            "param": None,
-                            "code": "no_message",
-                        }
-                    },
-                )
+            # For Anthropic upstreams, the response is in Anthropic format
+            # (has ``content`` blocks, no ``choices``). Skip the OpenAI-
+            # specific validation and convert to OpenAI format below.
+            if not is_anthropic:
+                choices = resp_json.get("choices")
+                if not choices or not isinstance(choices, list) or len(choices) == 0:
+                    if circuit_breaker is not None:
+                        try:
+                            circuit_breaker.record_failure(
+                                key_id, account.account_id, actual_model_id, 502,
+                            )
+                        except Exception:
+                            pass
+                    await _log_error_request(
+                        admin_service, request.model, actual_model_id, account,
+                        client_key_name, 502,
+                        f"Invalid response from upstream: no choices in {resp_json.get('id', '?')}",
+                        body, request_start, first_response, is_stream=request.stream,
+                        key_id=key_id, error_source="upstream",
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail={
+                            "error": {
+                                "message": "Supplier returned response with no choices",
+                                "type": "server_error",
+                                "param": None,
+                                "code": "no_choices",
+                            }
+                        },
+                    )
+                # Verify the first choice has a message block. Some upstreams
+                # return ``choices`` without ``message`` (e.g. only ``finish_reason``),
+                # which is not a valid OpenAI response.
+                first_choice = choices[0]
+                if not isinstance(first_choice, dict) or not first_choice.get("message"):
+                    if circuit_breaker is not None:
+                        try:
+                            circuit_breaker.record_failure(
+                                key_id, account.account_id, actual_model_id, 502,
+                            )
+                        except Exception:
+                            pass
+                    await _log_error_request(
+                        admin_service, request.model, actual_model_id, account,
+                        client_key_name, 502,
+                        f"Invalid response from upstream: no message in {resp_json.get('id', '?')}",
+                        body, request_start, first_response, is_stream=request.stream,
+                        key_id=key_id, error_source="upstream",
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail={
+                            "error": {
+                                "message": "Supplier returned response with no message",
+                                "type": "server_error",
+                                "param": None,
+                                "code": "no_message",
+                            }
+                        },
+                    )
         except HTTPException:
             raise
         except Exception:
@@ -889,6 +1244,11 @@ async def _try_candidate(
         # captures what the supplier actually sent — useful for debugging when
         # the converter transforms non-standard formats.
         raw_upstream_response = json.dumps(resp_json, ensure_ascii=False)
+
+        # Convert Anthropic-format response to OpenAI format
+        if is_anthropic:
+            resp_json = _anthropic_message_to_openai(resp_json, actual_model_id)
+
         response_converter = services.get("response_converter")
         if response_converter is not None:
             resp_json = _normalize_response(response_converter, resp_json)
@@ -900,7 +1260,7 @@ async def _try_candidate(
         resp_usage = resp_json.get("usage", {}) or {}
         input_tokens = resp_usage.get("prompt_tokens", 0) or 0
         output_tokens = resp_usage.get("completion_tokens", 0) or 0
-        cached_tokens, prompt_partial_cached = _extract_cache_usage(resp_usage)
+        cached_tokens, prompt_partial_cached = extract_cache_usage(resp_usage)
         end_time = datetime.now(timezone.utc).isoformat()
 
         if admin_service:
@@ -940,11 +1300,14 @@ async def _try_candidate(
                 await asyncio.to_thread(
                     quota_updater.update_quota_from_usage,
                     account, input_tokens, output_tokens, actual_model_id,
+                    key_id,
                 )
             if quota_updater and response is not None:
                 await asyncio.to_thread(
                     quota_updater.update_quota_after_request,
                     account, dict(response.headers), actual_model_id,
+                    None,
+                    key_id,
                 )
         except Exception as qe:
             logger.warning(f"Failed to update quota: {qe}")
@@ -984,14 +1347,25 @@ async def _try_candidate(
         )
 
     # ── Streaming success ──
-    return StreamingResponse(
-        stream_response_with_logging(
+    if is_anthropic:
+        # Anthropic upstream → convert Anthropic SSE → OpenAI SSE
+        stream_gen = stream_response_with_logging_anthropic_upstream(
             response, account, request.model, body,
             actual_model_id, admin_service, request_start,
             quota_updater=quota_updater, client_key_name=client_key_name,
             circuit_breaker=circuit_breaker,
             alias_router=alias_router, key_id=key_id,
-        ),
+        )
+    else:
+        stream_gen = stream_response_with_logging(
+            response, account, request.model, body,
+            actual_model_id, admin_service, request_start,
+            quota_updater=quota_updater, client_key_name=client_key_name,
+            circuit_breaker=circuit_breaker,
+            alias_router=alias_router, key_id=key_id,
+        )
+    return StreamingResponse(
+        stream_gen,
         media_type="text/event-stream",
     )
 

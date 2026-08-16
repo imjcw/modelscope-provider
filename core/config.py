@@ -78,7 +78,7 @@ class ConfigManager:
         unavailable_map = {}
         try:
             from repositories.quota_repository import QuotaRepository
-            unavailable_map = QuotaRepository(self.db).get_unavailable_models_batch(
+            unavailable_map = QuotaRepository(self.db).get_unavailable_models_by_account(
                 [a["account_id"] for a in db_accounts]
             )
         except Exception:

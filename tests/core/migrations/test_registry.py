@@ -5,10 +5,20 @@ from core.migrations.registry import clear_registry, get_all_migrations, registe
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
-    """每个测试前后清空注册表，保证隔离。"""
+    """Snapshot and restore the global registry around each test.
+
+    The migration modules register themselves at import time (once per
+    session). Clearing the global list after a test would leave it empty for
+    the rest of the session, which breaks every other test module that relies
+    on ``Migrator.run()`` applying the real migrations. So we clear before the
+    test for isolation, then restore the real registry afterwards.
+    """
+    from core.migrations.registry import _ALL_MIGRATIONS
+
+    saved = list(_ALL_MIGRATIONS)
     clear_registry()
     yield
-    clear_registry()
+    _ALL_MIGRATIONS[:] = saved
 
 
 def test_register_and_get_all_migrations():
