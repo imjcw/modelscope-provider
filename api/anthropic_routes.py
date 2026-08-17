@@ -539,9 +539,13 @@ async def _try_anthropic_candidate(
     # For Anthropic upstream, the body already has the correct format
 
     # Dual-protocol suppliers may expose OpenAI and Anthropic endpoints at
-    # different URLs. For Anthropic upstreams prefer the dedicated
-    # anthropic_base_url, falling back to base_url when unset.
-    protocol = "anthropic" if auth_style == "anthropic" else "openai"
+    # different URLs. The path (``url_path``) determines which endpoint we hit:
+    # ``v1/messages`` → the Anthropic endpoint (anthropic_base_url, falling back
+    # to base_url), ``chat/completions`` → the OpenAI endpoint (base_url). The
+    # auth scheme is decoupled from this and taken from ``auth_style`` so a
+    # supplier can expose an Anthropic-shaped /v1/messages that still wants
+    # ``Authorization: Bearer`` (e.g. SenseTime) rather than native ``x-api-key``.
+    protocol = "anthropic" if url_path == "v1/messages" else "openai"
     upstream_base = resolve_upstream_base(account, protocol)
     url = f"{upstream_base}/{url_path.lstrip('/')}"
 
@@ -1163,8 +1167,12 @@ async def messages(data: AnthropicMessagesRequest, fastapi_request: Request):
                     # display), not the protocol — a single supplier can expose
                     # both OpenAI and Anthropic endpoints. The Anthropic endpoint
                     # is ``anthropic_base_url`` (falling back to ``base_url``).
+                    # The auth scheme follows the supplier's declared
+                    # ``anthropic_auth_style`` (native ``x-api-key`` by default;
+                    # ``bearer`` for suppliers whose /v1/messages still wants
+                    # ``Authorization: Bearer``, e.g. SenseTime).
                     body = await _build_anthropic_body(data, actual_model_id)
-                    auth_style = "anthropic"
+                    auth_style = getattr(account, "anthropic_auth_style", "anthropic") or "anthropic"
                     url_path = "v1/messages"
 
                     try:
@@ -1268,9 +1276,12 @@ async def messages(data: AnthropicMessagesRequest, fastapi_request: Request):
             # The client reached the Anthropic entry point, so we ALWAYS speak
             # the Anthropic protocol to the upstream here. ``provider_type`` is
             # the supplier's *type*, not the protocol — the Anthropic endpoint is
-            # ``anthropic_base_url`` (falling back to ``base_url``).
+            # ``anthropic_base_url`` (falling back to ``base_url``). The auth
+            # scheme follows the supplier's declared ``anthropic_auth_style``
+            # (native ``x-api-key`` by default; ``bearer`` for suppliers whose
+            # /v1/messages still wants ``Authorization: Bearer``, e.g. SenseTime).
             body = await _build_anthropic_body(data, actual_model_id)
-            auth_style = "anthropic"
+            auth_style = getattr(account, "anthropic_auth_style", "anthropic") or "anthropic"
             url_path = "v1/messages"
 
             return await _try_anthropic_candidate(

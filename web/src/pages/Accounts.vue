@@ -35,7 +35,7 @@
                 <div class="relative group/cb">
                   <p class="font-medium text-ls-text flex items-center gap-2">
                     {{ acc.name }}
-                    <span v-if="cbByAccount[acc.id]?.length"
+                    <span v-if="cbBySupplier[acc.id]?.length"
                       class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/25 font-medium whitespace-nowrap"
                       :title="formatCircuitBreakerTooltip(acc.id)">
                       <span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>
@@ -47,15 +47,15 @@
                     +{{ acc.api_keys.length - 1 }} 个密钥
                     <span v-if="acc.api_key_records && acc.api_key_records.some(r => r.status === 'frozen')"
                       class="text-yellow-400"> · 有已冻结密钥</span>
-                    <span v-if="cbByAccount[acc.id]?.length"
+                    <span v-if="cbBySupplier[acc.id]?.length"
                       class="text-red-400 font-medium">
-                      · {{ cbByAccount[acc.id].length }} 个模型熔断中
+                      · {{ cbBySupplier[acc.id].length }} 个模型熔断中
                     </span>
                   </p>
-                  <p v-else-if="cbByAccount[acc.id]?.length"
+                  <p v-else-if="cbBySupplier[acc.id]?.length"
                     class="text-xs text-red-400 font-medium">
                     <CIcon name="alert-triangle" :size="11" :stroke-width="2.5" class="inline mr-1" />
-                    {{ cbByAccount[acc.id].length }} 个模型被熔断器冻结
+                    {{ cbBySupplier[acc.id].length }} 个模型被熔断器冻结
                   </p>
                 </div>
               </div>
@@ -466,12 +466,20 @@ const loadProviderTypes = async () => {
 // ── 模型用量数据（/api/model-quota） ──
 const modelQuotaMap = ref({}) // { [supplier_id]: [quotaItems] }
 const circuitBreakerStates = ref([]) // { key_id, account_id, model_name, frozen_remaining, error_type, ... }
-const cbByAccount = computed(() => {
+const cbBySupplier = computed(() => {
   const map = {}
-  for (const s of circuitBreakerStates.value) {
-    const aid = s.account_id
-    if (!map[aid]) map[aid] = []
-    map[aid].push(s)
+  for (const acc of (suppliers.value || [])) {
+    // 熔断状态按 (key_id, model) 维度记录，key_id 即 account_api_keys.id。
+    // 同时熔断状态的 account_id 是该供应商 accounts 表的 UUID 哈希（== acc.account_id），
+    // 与 api_key_records[].account_id（accounts.id 整数外键）不是同一字段。
+    // 因此匹配用「key_id ∈ api_key_records[].id」或「account_id === acc.account_id（UUID）」，
+    // 二者皆可命中；绝不能拿 api_key_records[].account_id（整数）去比 UUID，否则永远匹配不上，
+    // 导致熔断徽标与解冻按钮全部隐藏。
+    const keyIds = new Set((acc.api_key_records || []).map(r => r.id))
+    const states = circuitBreakerStates.value.filter(
+      s => keyIds.has(s.key_id) || s.account_id === acc.account_id
+    )
+    if (states.length) map[acc.id] = states
   }
   return map
 })
@@ -573,7 +581,7 @@ const modelInfoAvailable = computed(() =>
 )
 
 const formatCircuitBreakerTooltip = (accountId) => {
-  const states = cbByAccount.value[accountId] || []
+  const states = cbBySupplier.value[accountId] || []
   if (states.length === 0) return ''
   return states.map(s =>
     `${s.model_name} (${s.error_type || 'error'}) — 剩余 ${formatCircuitBreakerTime(s.frozen_remaining || 0)}`
@@ -589,9 +597,16 @@ const formatCircuitBreakerTime = (seconds) => {
 
 // ── 熔断器手动解冻 ──
 const frozenCircuitsForSupplier = computed(() => {
-  const aid = modelInfoSupplier.value?.id
-  if (aid == null) return []
-  return circuitBreakerStates.value.filter(s => s.account_id === aid)
+  const supplier = modelInfoSupplier.value
+  if (!supplier) return []
+  // 熔断状态按 (key_id, model) 记录，key_id 即 account_api_keys.id（== api_key_records[].id）。
+  // 同时熔断状态的 account_id 是该供应商 accounts 表的 UUID 哈希（== supplier.account_id）。
+  // 匹配用 key_id ∈ api_key_records[].id，或 account_id === supplier.account_id（UUID）；
+  // 不能用 api_key_records[].account_id（整数外键）去比 UUID，否则永远匹配不上。
+  const keyIds = new Set((supplier.api_key_records || []).map(r => r.id))
+  return circuitBreakerStates.value.filter(
+    s => keyIds.has(s.key_id) || s.account_id === supplier.account_id
+  )
 })
 const frozenByModelForSupplier = computed(() => {
   const map = {}
@@ -635,6 +650,9 @@ const openModelInfo = (acc) => {
   modelInfoKeyFilter.value = null
   showModelInfoDrawer.value = true
   loadModelQuotas(modelInfoDays.value, null)
+  // 重新拉取熔断状态：circuitBreakerStates 只在页面挂载时加载一次，
+  // 若冻结发生在本次会话之后，不刷新就会读过期数据、解冻按钮不显示。
+  loadCircuitBreaker()
 }
 
 // ── Add drawer ──

@@ -211,6 +211,24 @@
         <div class="h-full overflow-y-auto px-4 py-4 space-y-4"
           :class="{ 'invisible': sidebarCollapsed }"
           :style="sidebarCollapsed ? { 'pointer-events': 'none' } : {}">
+          <FormField label="协议">
+            <div class="flex rounded-lg border border-ls-border overflow-hidden text-xs font-medium">
+              <button type="button" @click="form.protocol = 'openai'"
+                class="flex-1 py-1.5 transition-colors"
+                :class="form.protocol === 'openai' ? 'bg-blue-600 text-white' : 'text-ls-muted hover:text-ls-text'">
+                OpenAI
+              </button>
+              <button type="button" @click="form.protocol = 'anthropic'"
+                class="flex-1 py-1.5 border-l border-ls-border transition-colors"
+                :class="form.protocol === 'anthropic' ? 'bg-blue-600 text-white' : 'text-ls-muted hover:text-ls-text'">
+                Anthropic
+              </button>
+            </div>
+            <p class="mt-1 text-[10px] text-ls-dim font-mono">
+              {{ form.protocol === 'anthropic' ? '/anthropic/v1/messages' : '/openai/v1/chat/completions' }}
+            </p>
+          </FormField>
+
           <FormField label="供应商">
             <CSelect v-model="form.supplierId" :options="SUPPLIER_OPTIONS" placeholder="选择供应商" />
           </FormField>
@@ -369,6 +387,7 @@ const form = ref({
   supplierId: '',
   model: '',
   apiKey: '',
+  protocol: 'openai', // 'openai' | 'anthropic' — 决定打到 /openai 还是 /anthropic 入口
   systemPrompt: 'You are a helpful assistant.',
   temperature: 0.7,
   maxTokens: 2048,
@@ -532,7 +551,7 @@ const msgTokens = computed(() => {
   return ''
 })
 
-const readStream = async (res, msg) => {
+const readStream = async (res, msg, protocol) => {
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
@@ -542,16 +561,37 @@ const readStream = async (res, msg) => {
       const { done, value } = await reader.read()
       if (done) break
       buf += decoder.decode(value, { stream: true })
-      const lines = buf.split('\n')
-      buf = lines.pop()
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data:')) continue
-        const data = trimmed.slice(5).trim()
-        if (data === '[DONE]') continue
-        try {
-          const obj = JSON.parse(data)
-          // 流式错误
+      // SSE 帧以空行分隔；每帧可能含 event: 与 data: 两行
+      const frames = buf.split('\n\n')
+      buf = frames.pop()
+      for (const frame of frames) {
+        let eventType = ''
+        let dataStr = ''
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event:')) eventType = line.slice(6).trim()
+          else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
+        }
+        if (!dataStr) continue
+        let obj
+        try { obj = JSON.parse(dataStr) } catch { continue }
+
+        if (protocol === 'anthropic') {
+          // Anthropic 流式：content_block_delta(text_delta) / message_delta(usage)
+          if ((obj.type === 'error') || eventType === 'error' || obj.error) {
+            const err = obj.error || obj
+            msg.content = '模型请求失败: ' + (err.message || JSON.stringify(err))
+            msg.status = 'error'
+            return
+          }
+          if (eventType === 'content_block_delta' && obj.delta && obj.delta.type === 'text_delta') {
+            msg.content += obj.delta.text
+          }
+          if (eventType === 'message_delta' && obj.usage) {
+            const u = obj.usage
+            tokens = (u.input_tokens || 0) + (u.output_tokens || 0)
+          }
+        } else {
+          // OpenAI 流式：choices[].delta / message
           if (obj.error) {
             msg.content = '模型请求失败: ' + (obj.error.message || JSON.stringify(obj.error))
             msg.status = 'error'
@@ -564,8 +604,8 @@ const readStream = async (res, msg) => {
           if (obj.usage) {
             tokens = obj.usage.total_tokens || ((obj.usage.prompt_tokens || 0) + (obj.usage.completion_tokens || 0))
           }
-          await nextTick()
-        } catch { /* ignore non-JSON chunks */ }
+        }
+        await nextTick()
       }
     }
   } catch (e) {
@@ -645,28 +685,86 @@ const replayMessage = async (idx) => {
 }
 
 /**
- * 公共发送函数：构造 headers / body、发起 POST 请求、解析响应。
- * 供 sendMessage / replayMessage 复用。
+ * 把一条消息的 content（可能是字符串或 OpenAI 多模态数组）转换为
+ * Anthropic 格式：字符串原样保留；图片由 image_url 转为 base64 source。
  */
-const sendChatRequest = async (msg) => {
-  const headers = { 'Content-Type': 'application/json' }
-  if (form.value.apiKey) headers['Authorization'] = 'Bearer ' + form.value.apiKey
+const toAnthropicContent = (content) => {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (part.type === 'image_url' && part.image_url && part.image_url.url) {
+        const url = part.image_url.url
+        const m = url.match(/^data:([^;]+);base64,(.*)$/)
+        if (m) {
+          return { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } }
+        }
+        // 远程 URL 直接透传（部分上游支持 url 类型）
+        return { type: 'image', source: { type: 'url', url } }
+      }
+      if (part.type === 'text') return { type: 'text', text: part.text }
+      return part
+    })
+  }
+  return content
+}
+
+/**
+ * 按所选协议构造请求体。
+ * - OpenAI：system 放进 messages 首条，content 保持原样。
+ * - Anthropic：system 作为顶层字段，messages 不含 system 角色；图片转 base64。
+ */
+const buildBody = () => {
+  const protocol = form.value.protocol
+  const history = messages.value.map(m => ({
+    role: m.role,
+    content: protocol === 'anthropic' ? toAnthropicContent(m.content) : m.content,
+  }))
+
+  if (protocol === 'anthropic') {
+    const body = {
+      model: form.value.model,
+      max_tokens: form.value.maxTokens,
+      messages: history,
+    }
+    if (form.value.systemPrompt) body.system = form.value.systemPrompt
+    if (form.value.stream) body.stream = true
+    if (form.value.temperature !== null && form.value.temperature !== undefined) {
+      body.temperature = form.value.temperature
+    }
+    return body
+  }
 
   const body = {
     model: form.value.model,
     messages: [
       ...(form.value.systemPrompt ? [{ role: 'system', content: form.value.systemPrompt }] : []),
-      ...messages.value.map(m => ({ role: m.role, content: m.content })),
+      ...history,
     ],
   }
   if (form.value.stream) body.stream = true
-  if (form.value.temperature !== null) body.temperature = form.value.temperature
+  if (form.value.temperature !== null && form.value.temperature !== undefined) {
+    body.temperature = form.value.temperature
+  }
   if (form.value.maxTokens !== null) body.max_tokens = form.value.maxTokens
+  return body
+}
+
+/**
+ * 公共发送函数：按协议选择入口、构造 body、发起 POST、解析响应。
+ * 供 sendMessage / replayMessage 复用。
+ */
+const sendChatRequest = async (msg) => {
+  const protocol = form.value.protocol
+  const headers = { 'Content-Type': 'application/json' }
+  if (form.value.apiKey) headers['Authorization'] = 'Bearer ' + form.value.apiKey
+
+  const url = protocol === 'anthropic' ? '/anthropic/v1/messages' : '/openai/v1/chat/completions'
+  const body = buildBody()
 
   sending.value = true
 
   try {
-    const res = await fetch('/openai/v1/chat/completions', {
+    const res = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -677,18 +775,27 @@ const sendChatRequest = async (msg) => {
 
     const ctype = res.headers.get('content-type') || ''
     if (res.ok && form.value.stream && ctype.includes('text/event-stream')) {
-      await readStream(res, msg)
+      await readStream(res, msg, protocol)
     } else {
       const text = await res.text()
       if (res.ok) {
         try {
           const p = JSON.parse(text)
-          if (p.usage) msg.tokens = p.usage.total_tokens
-          const reply = (p.choices && p.choices[0] && p.choices[0].message) || {}
-          msg.content = reply.content || ''
-          msg.reasoning = reply.reasoning_content || reply.reasoning || ''
-        } catch {
+          if (protocol === 'anthropic') {
+            if (p.type === 'error' || p.error) throw new Error((p.error && p.error.message) || 'upstream error')
+            const blocks = (p.content || []).filter(b => b.type === 'text')
+            msg.content = blocks.map(b => b.text).join('')
+            if (p.usage) msg.tokens = (p.usage.input_tokens || 0) + (p.usage.output_tokens || 0)
+          } else {
+            if (p.usage) msg.tokens = p.usage.total_tokens
+            const reply = (p.choices && p.choices[0] && p.choices[0].message) || {}
+            msg.content = reply.content || ''
+            msg.reasoning = reply.reasoning_content || reply.reasoning || ''
+          }
+        } catch (parseErr) {
+          // JSON 解析失败，或 Anthropic 返回了 error 对象（上面主动 throw）
           msg.raw = text
+          if (!msg.content) msg.content = formatError(text)
         }
         msg.status = 'done'
       } else {

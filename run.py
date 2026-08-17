@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import webbrowser
+import subprocess
 import logging
 from pathlib import Path
 
@@ -42,6 +43,37 @@ os.environ.setdefault("LOG_LEVEL", "INFO")
 _HOST = os.getenv("HOST", "127.0.0.1")  # 托盘版默认只监听本机
 _PORT = int(os.getenv("PORT", "8000"))
 _APP_URL = f"http://127.0.0.1:{_PORT}"
+
+
+def _find_chrome():
+    """定位 Chrome 可执行文件，用于在应用模式下打开已安装的 PWA 独立窗口。
+
+    优先读注册表 App Paths，再回退到常见安装目录；找不到返回 None。
+    """
+    try:
+        import winreg
+    except Exception:
+        winreg = None
+    if winreg is not None:
+        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                with winreg.OpenKey(
+                    root,
+                    r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
+                ) as k:
+                    path, _ = winreg.QueryValueEx(k, "")
+                    if path and os.path.exists(path):
+                        return path
+            except OSError:
+                pass
+    for cand in (
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+    ):
+        if os.path.exists(cand):
+            return cand
+    return None
 
 # ── 托盘支持（仅 Windows）──────────────────────────────────────
 _TRAY_AVAILABLE = False
@@ -238,8 +270,25 @@ class TrayRunner:
             self._menu_open = False
 
     def _open(self):
+        # 用 Chrome 应用模式（--app）打开，得到无地址栏的独立 PWA 窗口，
+        # 而不是默认浏览器里的普通标签页。未找到 Chrome 时回退到默认浏览器。
+        # 用 localhost 而非 127.0.0.1，以匹配从 http://localhost:8000 安装的 PWA 源。
+        url = f"http://localhost:{self.port}/web"
+        chrome = _find_chrome()
+        if chrome:
+            try:
+                subprocess.Popen(
+                    [chrome, f"--app={url}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True,
+                )
+                logger.info("以 PWA 应用模式打开: %s", url)
+                return
+            except Exception as _e:
+                logger.warning("Chrome 应用模式启动失败，回退默认浏览器: %s", _e)
         try:
-            webbrowser.open(f"http://127.0.0.1:{self.port}/web")
+            webbrowser.open(url)
         except Exception:
             pass
 

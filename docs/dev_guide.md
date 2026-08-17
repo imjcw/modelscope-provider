@@ -113,3 +113,48 @@ DATABASE_URL="sqlite:///modelscope_proxy.db" python3 -m uvicorn provider.main:ap
 ### `.env` 初始化注意
 
 `MODELSCOPE_ACCOUNTS_JSON` 仅支持单一 `base_url`，**无法表达双地址**。需要双地址的供应商请通过管理后台或 `POST /api/admin/suppliers` 添加，并用 `anthropic_base_url` 指定 Anthropic 端地址。
+
+### 客户端调用示例（Anthropic 入口）
+
+网关对客户端鉴权接受两种 header（HTTP header 名大小写不敏感，所以小写的 `x-api-key` 也能用）：
+
+- `Authorization: Bearer <CLIENT_API_KEY>`（推荐，最贴近 Anthropic 官方）
+- `x-api-key: <CLIENT_API_KEY>`
+
+**curl 示例**（把请求体放到 UTF-8 文件再发送，避免中文乱码）：
+
+```bash
+# 1) 用 python 把含中文的 body 写成 UTF-8 文件（python 默认 UTF-8，最稳）
+python -c "open('payload.json','w',encoding='utf-8').write('{\"model\":\"GLM5.2\",\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}],\"max_tokens\":1024}')"
+
+# 2) 发送（二选一即可）
+curl -X POST http://127.0.0.1:8000/anthropic/v1/messages \
+  -H "Authorization: Bearer <CLIENT_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d @payload.json
+
+curl -X POST http://127.0.0.1:8000/anthropic/v1/messages \
+  -H "x-api-key: <CLIENT_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d @payload.json
+```
+
+**Anthropic Python SDK 示例**（SDK 自动追加 `/v1/messages`，所以 `base_url` 写到 `/anthropic` 即可；SDK 原生发的就是 `x-api-key`，网关可直接识别）：
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    api_key="<CLIENT_API_KEY>",
+    base_url="http://127.0.0.1:8000/anthropic",  # 注意：写到 /anthropic，SDK 会补 /v1/messages
+)
+
+resp = client.messages.create(
+    model="GLM5.2",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "你好"}],
+)
+print(resp)
+```
+
+> ⚠️ **Windows / GBK 终端中文坑**：在 Git Bash / cmd 等默认非 UTF-8 的终端里，**直接把中文写进 `-d '{...}'` 内联字符串**会导致实际发送字节与 `Content-Length` 不一致，网关读 body 失败，返回 `400 There was an error parsing the body`。解决办法：把含中文的请求体写入 UTF-8 文件后用 `-d @payload.json` 发送（见上方示例），或改用 `python -c` 生成文件。**纯 ASCII 内容可放心内联 `-d`**。真实业务调用（SDK / Postman / 后端服务）都发正确 UTF-8 字节，不会遇到此问题。

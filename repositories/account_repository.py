@@ -72,7 +72,8 @@ class AccountRepository:
     def create(self, name: str, base_url: str,
                status: str = "active", provider_type: str = DEFAULT_PROVIDER_TYPE,
                api_keys: Optional[List[str]] = None,
-                anthropic_base_url: str = "") -> dict:
+                anthropic_base_url: str = "",
+                anthropic_auth_style: str = "anthropic") -> dict:
         """Create a new account. account_id is auto-generated as UUID.
 
         All API keys are stored in ``account_api_keys`` (the legacy single
@@ -81,6 +82,9 @@ class AccountRepository:
 
         ``anthropic_base_url`` optionally points the Anthropic-native protocol at
         a different upstream than ``base_url`` (dual-protocol suppliers).
+        ``anthropic_auth_style`` is the auth scheme for that supplier's
+        Anthropic endpoint (``x-api-key`` native, or ``bearer`` for suppliers
+        like SenseTime).
         """
         keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
         if not keys:
@@ -89,9 +93,11 @@ class AccountRepository:
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO accounts
-                   (account_id, name, base_url, provider_type, status, anthropic_base_url)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (account_id, name, base_url, provider_type, status, anthropic_base_url or ""),
+                   (account_id, name, base_url, provider_type, status,
+                    anthropic_base_url, anthropic_auth_style)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (account_id, name, base_url, provider_type, status,
+                 anthropic_base_url or "", anthropic_auth_style or "anthropic"),
             )
             new_id = cursor.lastrowid
             for sort_order, key in enumerate(keys):
@@ -113,7 +119,7 @@ class AccountRepository:
         """
         # NOTE: "api_key" removed — the column no longer exists (migration 023).
         allowed = {"base_url", "status", "account_id", "name",
-                   "provider_type", "anthropic_base_url"}
+                   "provider_type", "anthropic_base_url", "anthropic_auth_style"}
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
             return None

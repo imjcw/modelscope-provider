@@ -59,3 +59,12 @@ web/dist/
 .superpowers/
 docs/superpowers/
 .agents/
+
+# Build output (PyInstaller exe, etc.)
+build_out/
+build_tmp/
+AIProvider.exe
+
+# Temporary scratch scripts
+tmp_*.mjs
+tmp_*.js

@@ -24,6 +24,12 @@ class ModelScopeAccount:
     # ``base_url`` to the OpenAI endpoint and ``anthropic_base_url`` to the
     # Anthropic one. Empty means "fall back to base_url for Anthropic too".
     anthropic_base_url: str = ""
+    # Auth scheme used when speaking to this supplier's Anthropic endpoint
+    # (``/v1/messages``). Native Anthropic providers use ``"anthropic"``
+    # (``x-api-key``); some dual-protocol suppliers (e.g. SenseTime) expose an
+    # Anthropic-compatible ``/v1/messages`` but still require ``Authorization:
+    # Bearer``, in which case this is ``"bearer"``.
+    anthropic_auth_style: str = "anthropic"
     provider_type: str = DEFAULT_PROVIDER_TYPE
     name: str = ""
     quota_limit: int = 0
@@ -74,6 +80,7 @@ def build_ms_account(
         name=account_dict.get("name", ""),
         base_url=account_dict["base_url"],
         anthropic_base_url=account_dict.get("anthropic_base_url", "") or "",
+        anthropic_auth_style=account_dict.get("anthropic_auth_style", "anthropic") or "anthropic",
         provider_type=account_dict.get("provider_type", DEFAULT_PROVIDER_TYPE),
         api_key_records=api_key_records if api_key_records is not None
         else account_dict.get("api_key_records"),

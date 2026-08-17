@@ -143,11 +143,16 @@ class AdminService:
     def create_supplier(self, name: str, base_url: str,
                         provider_type: str = DEFAULT_PROVIDER_TYPE,
                         api_keys: list = None, api_key_records: list = None,
-                        anthropic_base_url: str = "") -> dict:
+                        anthropic_base_url: str = "",
+                        anthropic_auth_style: str = "anthropic") -> dict:
         """Create a supplier. Requires at least one API key (stored in account_api_keys).
 
         ``anthropic_base_url`` optionally points the Anthropic-native protocol at
         a different upstream than ``base_url`` (dual-protocol suppliers).
+        ``anthropic_auth_style`` is the auth scheme used when calling that
+        supplier's Anthropic endpoint (``x-api-key`` for native Anthropic,
+        ``bearer`` for suppliers like SenseTime that expose an Anthropic-shaped
+        ``/v1/messages`` but still require ``Authorization: Bearer``).
         """
         if api_key_records:
             keys = [r.get("api_key", "").strip() for r in api_key_records
@@ -155,6 +160,7 @@ class AdminService:
             created = self.account_repo.create(
                 name, base_url, provider_type=provider_type, api_keys=keys,
                 anthropic_base_url=anthropic_base_url,
+                anthropic_auth_style=anthropic_auth_style,
             )
             if self.account_repo is not None:
                 self.account_repo.replace_api_keys_with_records(
@@ -168,6 +174,7 @@ class AdminService:
         return self.account_repo.create(
             name, base_url, provider_type=provider_type, api_keys=keys,
             anthropic_base_url=anthropic_base_url,
+            anthropic_auth_style=anthropic_auth_style,
         )
 
     def update_supplier(self, supplier_id: int, **kwargs) -> dict:

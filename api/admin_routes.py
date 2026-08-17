@@ -63,6 +63,7 @@ class SupplierCreate(BaseModel):
     api_keys: List[str] = Field(default_factory=list, description="API keys (stored in account_api_keys)")
     api_key_records: List[dict] = Field(default_factory=list, description="API key records with status (id, api_key, status)")
     anthropic_base_url: str = Field(default="", description="Optional separate Anthropic-native base URL (e.g. https://api.anthropic.com). Used for the /anthropic entry point; falls back to base_url when empty.")
+    anthropic_auth_style: str = Field(default="anthropic", description="Auth scheme for this supplier's Anthropic endpoint: 'anthropic' (x-api-key, native) or 'bearer' (Authorization: Bearer, e.g. SenseTime).")
 
 
 class SupplierUpdate(BaseModel):
@@ -73,6 +74,7 @@ class SupplierUpdate(BaseModel):
     api_keys: Optional[List[str]] = None
     api_key_records: Optional[List[dict]] = None
     anthropic_base_url: Optional[str] = None
+    anthropic_auth_style: Optional[str] = None
 
 
 class MappingUpsert(BaseModel):
@@ -286,6 +288,7 @@ def create_supplier(body: SupplierCreate, request: Request, service=Depends(get_
             api_keys=body.api_keys,
             api_key_records=body.api_key_records,
             anthropic_base_url=body.anthropic_base_url,
+            anthropic_auth_style=body.anthropic_auth_style,
         )
         _refresh_after_account_change(request)
         return result
