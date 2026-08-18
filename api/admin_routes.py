@@ -625,7 +625,8 @@ def get_app_info(request: Request):
     """Return runtime info: version, uptime, Python, uvicorn, db_size."""
     import importlib.metadata as im
 
-    version = "0.2.0"
+    # 复用 main 的自动版本，与 exe 文件属性、/health 保持一致，避免硬编码漂移。
+    from main import __version__ as version
     try:
         uvicorn_version = im.version("uvicorn")
     except Exception:

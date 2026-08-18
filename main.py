@@ -263,13 +263,21 @@ async def limit_request_body(request, call_next):
     return await call_next(request)
 
 
+VERSION = "0.2.0"
+
+try:
+    from _version import __version__  # 打包时由 build_exe.py 自动生成
+except ImportError:
+    __version__ = VERSION
+
+
 def create_app():
     """Create and configure FastAPI application."""
     # Create FastAPI app with lifespan
     app = FastAPI(
         title="AI Provider API",
         description="OpenAI-compatible AI provider gateway with multi-vendor load balancing, quota management, and circuit breaking",
-        version="0.2.0",
+        version=__version__,
         lifespan=lifespan
     )
 
@@ -305,7 +313,7 @@ def create_app():
     @app.get("/health")
     def health_check():
         """Health check endpoint."""
-        return {"status": "healthy", "version": "0.2.0"}
+        return {"status": "healthy", "version": __version__}
 
     # Serve static frontend files (no cache in dev for hot refresh)
     if getattr(sys, "frozen", False):
