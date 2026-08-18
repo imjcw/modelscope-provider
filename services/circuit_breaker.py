@@ -233,8 +233,11 @@ class CircuitBreaker:
         ``window_mode`` is ``"count"`` for request-count-window models
         (``fixed_window`` / ``fixed_window_per_model``, metered by
         ``max_requests``) and ``"token"`` otherwise.  Count-window models get a
-        higher escalation threshold and are never frozen on ``rate_limited``
-        (a 429 there just means the window is full, not a fault).
+        higher escalation threshold and are never frozen on transient
+        upstream faults (``rate_limited`` / ``server_error`` / ``network_error``
+        / ``timeout``) — a 429 means the window is full, a 5xx/timeout is a
+        transient upstream hiccup, and a single-account model has nothing to
+        fail over to, so freezing would only amplify the outage.
 
         Escalation never marks a model unavailable — it only lengthens the
         freeze via exponential backoff, capped at the window duration
@@ -281,15 +284,20 @@ class CircuitBreaker:
                     state.consecutive_failures,
                 )
 
-            # Count-window models: a 429 / rate_limited is the *expected* signal
-            # that the request-count window is full, not an upstream fault. Never
-            # freeze on it — escalation above only lengthens the freeze for other
-            # error types, so a 429 stays open for the fallback loop to retry.
-            if window_mode == "count" and state.error_type == "rate_limited":
+            # Count-window models: transient upstream faults (rate_limited /
+            # server_error / network_error / timeout) are the *expected* signal
+            # for a request-count-metered model — the window being full, or a
+            # brief upstream hiccup. Never freeze on them: a single-account
+            # model (e.g. 商汤 GLM-5.2) has no fallback to fail over to, so a
+            # freeze would just hard-block the whole model. Only permanent
+            # errors (bad_request / auth_error) still freeze.
+            if window_mode == "count" and state.error_type in (
+                "rate_limited", "server_error", "network_error", "timeout",
+            ):
                 logger.info(
-                    "Circuit breaker: key %s / %s (count-window) rate_limited (status=%s), "
-                    "not freezing — window full is expected, allowing fallback to retry",
-                    key_id, model_name, status_code,
+                    "Circuit breaker: key %s / %s (count-window) transient %s (status=%s), "
+                    "not freezing — allowing client/retry instead of hard-block",
+                    key_id, model_name, state.error_type, status_code,
                 )
                 return
 

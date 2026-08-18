@@ -414,9 +414,14 @@ class TestIntegrationCircuitBreaker:
 class TestCountWindowModels:
     """Request-count-window models (fixed_window / fixed_window_per_model).
 
-    For these, a 429 / rate_limited just means the request-count window is
-    full (expected), so the circuit must never freeze on it, and the
-    escalation (mark-unavailable) threshold is raised from 10 to 20.
+    For these, transient upstream faults (429 / rate_limited, 5xx server_error,
+    network_error, timeout) just mean the request-count window is full or a
+    brief upstream hiccup — expected, not a hard failure. The circuit must
+    never freeze on them: a single-account model (e.g. 商汤 GLM-5.2) has no
+    fallback to fail over to, so a freeze would only hard-block it. The error
+    passes through to the client / fallback loop instead. Escalation (the
+    mark-unavailable flag) threshold is still raised from 10 to 20 for
+    bookkeeping, but it never produces a freeze for transient errors.
     """
 
     @staticmethod
@@ -456,13 +461,24 @@ class TestCountWindowModels:
             cb.record_failure(0, "acc-1", "model-1", 500)
         assert cb.get_state(0, "model-1").escalated is True
 
-    def test_count_window_server_error_still_freezes_from_second(self):
-        """Non-rate_limited transient errors behave like token-window (2nd freezes)."""
+    def test_count_window_server_error_never_freezes(self):
+        """Count-window models never freeze on transient upstream errors
+        (server_error / network_error / timeout), not just rate_limited.
+
+        A single-account count-window model (e.g. 商汤 GLM-5.2) has no fallback,
+        so a freeze would only hard-block the whole model. Instead the error
+        passes through to the client / fallback loop. Failures are still
+        recorded (consecutive_failures increments, escalation still triggers
+        at 20) — only the freeze itself is suppressed.
+        """
         cb = self._count_cb()
-        cb.record_failure(0, "acc-1", "model-1", 500)
-        assert cb.check(0, "model-1") is True  # 1st does not freeze
-        cb.record_failure(0, "acc-1", "model-1", 500)
-        assert cb.check(0, "model-1") is False  # 2nd freezes
+        for _ in range(25):
+            cb.record_failure(0, "acc-1", "model-1", 500)
+            assert cb.check(0, "model-1") is True  # never frozen, even 25x
+        state = cb.get_state(0, "model-1")
+        assert state.error_type == "server_error"
+        assert state.escalated is True  # escalation still triggered (>=20)
+        assert state.frozen_until <= time.time()  # but never frozen
 
     def test_token_window_429_freezes_from_second(self):
         """Token-window (default) keeps the original 429-freezes-on-2nd behaviour."""
@@ -480,17 +496,19 @@ class TestCountWindowModels:
         cb.record_failure(0, "acc-1", "model-1", 429, window_mode="token")
         assert cb.check(0, "model-1") is False
 
-    def test_count_window_escalation_capped_at_window(self):
-        """Escalated count-window freeze is capped at the window duration."""
+    def test_count_window_escalated_transient_never_freezes(self):
+        """Even after escalation (>=20 consecutive), a count-window transient
+        error stays open. Escalation only lengthens a freeze that never occurs
+        for transient errors, so frozen_until remains unset — there is no
+        window cap to apply because there is no freeze.
+        """
         cb = self._count_cb()  # resolver says "count"
         cb.window_seconds_resolver = lambda account_id, model_name: 18000.0
         for _ in range(20):  # count-window escalation threshold
             cb.record_failure(0, "acc-1", "model-1", 500)
         state = cb.get_state(0, "model-1")
         assert state.escalated is True
-        assert state.frozen_until > time.time()
-        # Capped at the window (18000s), not end-of-day.
-        assert state.frozen_until <= time.time() + 18000 + 5
+        assert state.frozen_until <= time.time()  # never frozen, even escalated
 
     def test_token_window_escalation_capped_at_end_of_day(self):
         """Escalated token-window (no count window) freeze is capped at 24:00."""
@@ -502,15 +520,18 @@ class TestCountWindowModels:
         assert state.frozen_until > time.time()
         assert state.frozen_until <= time.time() + 86400 + 5
 
-    def test_escalated_freeze_grows_beyond_normal_cap(self):
-        """Once escalated, the backoff ceiling rises above the normal 480s cap."""
+    def test_count_window_escalated_stays_open_past_normal_cap(self):
+        """Once escalated, a count-window transient circuit stays open — there
+        is no freeze whose backoff could exceed the normal 480s cap, because
+        transient errors never freeze. frozen_until stays at/before now.
+        """
         cb = self._count_cb()
         cb.window_seconds_resolver = lambda account_id, model_name: 18000.0
         for _ in range(20):
             cb.record_failure(0, "acc-1", "model-1", 500)
         state = cb.get_state(0, "model-1")
-        # Normal backoff ceiling is 480s; an escalated freeze must exceed it.
-        assert state.frozen_until - time.time() > 480
+        assert state.escalated is True
+        assert state.frozen_until <= time.time()
 
 
 class TestBuildCircuitBreakerResolvers:

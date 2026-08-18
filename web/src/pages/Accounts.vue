@@ -476,8 +476,11 @@ const cbBySupplier = computed(() => {
     // 二者皆可命中；绝不能拿 api_key_records[].account_id（整数）去比 UUID，否则永远匹配不上，
     // 导致熔断徽标与解冻按钮全部隐藏。
     const keyIds = new Set((acc.api_key_records || []).map(r => r.id))
+    // 只统计「真正冻结」的电路（frozen_remaining > 0）。电路里有失败计数
+    // （consecutive_failures > 0）但还未冻结时，不应显示熔断徽标/解冻按钮，
+    // 否则商汤 GLM-5.2 这类不断收到 429 的模型会一直误报「熔断」。
     const states = circuitBreakerStates.value.filter(
-      s => keyIds.has(s.key_id) || s.account_id === acc.account_id
+      s => (keyIds.has(s.key_id) || s.account_id === acc.account_id) && (s.frozen_remaining || 0) > 0
     )
     if (states.length) map[acc.id] = states
   }
@@ -604,8 +607,11 @@ const frozenCircuitsForSupplier = computed(() => {
   // 匹配用 key_id ∈ api_key_records[].id，或 account_id === supplier.account_id（UUID）；
   // 不能用 api_key_records[].account_id（整数外键）去比 UUID，否则永远匹配不上。
   const keyIds = new Set((supplier.api_key_records || []).map(r => r.id))
+  // 只返回「真正冻结」的电路（frozen_remaining > 0）。仅累计了失败计数
+  // （consecutive_failures > 0）但还未冻结的电路不应出现在这里，否则会误报
+  // 「熔断」并给出无意义的「解冻」按钮（商汤 GLM-5.2 这类持续 429 的模型最明显）。
   return circuitBreakerStates.value.filter(
-    s => keyIds.has(s.key_id) || s.account_id === supplier.account_id
+    s => (keyIds.has(s.key_id) || s.account_id === supplier.account_id) && (s.frozen_remaining || 0) > 0
   )
 })
 const frozenByModelForSupplier = computed(() => {
