@@ -19,12 +19,14 @@ Exponential backoff schedule (applies to ``server_error`` / ``network_error``):
 
     1st → 1 min, 2nd → 2 min, 3rd → 4 min, 4th+ → 8 min (cap)
 
-After ``CONSECUTIVE_FAILURE_THRESHOLD`` (10) consecutive failures the circuit
-escalates to the provider's ``RateLimitStrategy`` via ``on_circuit_breaker_escalation``.
-This lets the strategy decide the final action (mark model unavailable, freeze
-account, etc.). Escalation also applies a long freeze (``escalation_freeze_seconds``,
-default 1 hour); once it expires the circuit goes half-open and can recover via
-a successful probe — escalation is no longer permanent.
+After the consecutive-failure threshold (``failure_threshold_token`` = 10 for
+token-window models, ``failure_threshold_count`` = 20 for count-window models)
+the circuit is *escalated*. Escalation does **not** mark the model unavailable —
+it only lengthens the freeze: the exponential backoff ceiling rises from the
+normal 8 min to a window-aware cap (the window duration for count-window models,
+end-of-day 24:00 for token-window models). Once the freeze expires the circuit
+goes half-open and can recover via a successful probe — escalation is no longer
+permanent.
 
 State machine
 -------------
@@ -40,6 +42,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -145,7 +148,7 @@ class CircuitBreaker:
         cb.record_success(key_id, model_name)
 
         # After failed request
-        cb.record_failure(key_id, account_id, model_name, status_code, strategy)
+        cb.record_failure(key_id, account_id, model_name, status_code)
     """
 
     def __init__(self):
@@ -157,7 +160,27 @@ class CircuitBreaker:
         self.freeze_durations = dict(_FREEZE_DURATIONS)
         self.backoff_schedule = list(_BACKOFF_SCHEDULE)
         self.failure_threshold = _CONSECUTIVE_FAILURE_THRESHOLD
+        # Consecutive failures before escalation, per window mode:
+        #  - token-window models keep the original 10.
+        #  - count-window models (fixed_window / fixed_window_per_model) are
+        #    raised to 20, because a 429 / rate_limited there is the *expected*
+        #    "window full" signal, not a fault — we don't want a burst of
+        #    rate-limit hits to mark the model unavailable.
+        self.failure_threshold_token = _CONSECUTIVE_FAILURE_THRESHOLD  # 10
+        self.failure_threshold_count = 20
         self.escalation_freeze_seconds = _ESCALATION_FREEZE_SECONDS
+        # Optional resolver: ``(account_id, model_name) -> "count" | "token"``.
+        # When set, ``record_failure`` uses it to pick the per-model freeze /
+        # escalation thresholds instead of the default ``window_mode`` argument.
+        # Installed by ``core/service_init.py`` from the supplier config so the
+        # route layer doesn't need to thread the strategy through manually.
+        self.window_mode_resolver = None
+        # Optional resolver: ``(account_id, model_name) -> float`` (window
+        # duration in seconds). When set and a count-window circuit escalates,
+        # the freeze ceiling is this window duration instead of the default.
+        # Token-window (no count window) models are capped at end-of-day
+        # instead. Installed by ``core/service_init.py``.
+        self.window_seconds_resolver = None
 
         # Guards all access to the shared ``_states`` dict.
         self._lock = threading.Lock()
@@ -198,7 +221,7 @@ class CircuitBreaker:
         account_id: str,
         model_name: str,
         status_code: int,
-        strategy: Any = None,
+        window_mode: Optional[str] = None,
     ) -> None:
         """Record a failure and (possibly) freeze the circuit.
 
@@ -206,6 +229,16 @@ class CircuitBreaker:
         is stored for display only.  ``status_code`` can be an HTTP status code
         or a negative number for network errors (e.g. ``-1`` for timeout,
         ``-2`` for connection error).
+
+        ``window_mode`` is ``"count"`` for request-count-window models
+        (``fixed_window`` / ``fixed_window_per_model``, metered by
+        ``max_requests``) and ``"token"`` otherwise.  Count-window models get a
+        higher escalation threshold and are never frozen on ``rate_limited``
+        (a 429 there just means the window is full, not a fault).
+
+        Escalation never marks a model unavailable — it only lengthens the
+        freeze via exponential backoff, capped at the window duration
+        (count-window) or end-of-day (token-window).
         """
         with self._lock:
             key = (key_id, model_name)
@@ -220,29 +253,51 @@ class CircuitBreaker:
             state.last_failure_time = time.time()
             state.error_type = self._classify_error(status_code)
 
-            # ----- Escalation check -----
+            # Resolve window mode (count vs token) unless explicitly provided.
+            if window_mode is None:
+                window_mode = self._resolve_window_mode(account_id, model_name)
+
+            # ----- Escalation (threshold is window-mode aware) -----
+            # Once the consecutive-failure threshold is hit, the circuit is
+            # "escalated": it no longer uses the short backoff ceiling but backs
+            # off exponentially up to a window-aware ceiling (see
+            # ``_escalation_cap``).  Escalation does NOT mark the model
+            # unavailable — it only lengthens the freeze.  The actual freeze is
+            # applied below via ``_get_freeze_seconds``.
+            esc_threshold = (
+                self.failure_threshold_count
+                if window_mode == "count"
+                else self.failure_threshold_token
+            )
             if (
-                state.consecutive_failures >= self.failure_threshold
+                state.consecutive_failures >= esc_threshold
                 and not state.escalated
             ):
                 state.escalated = True
-                # Apply a long (but finite) freeze so the circuit can recover
-                # via a half-open probe after it expires, rather than staying
-                # permanently blocked until a process restart.
-                state.frozen_until = time.time() + self.escalation_freeze_seconds
                 logger.warning(
-                    "Circuit breaker: key %s / %s (account %s) reached %d consecutive "
-                    "failures, escalating to supplier strategy (freezing %.0fs)",
-                    key_id, model_name, account_id, state.consecutive_failures,
-                    self.escalation_freeze_seconds,
+                    "Circuit breaker: key %s / %s (account %s, mode=%s) reached %d "
+                    "consecutive failures — escalating (longer backoff, no mark-unavailable)",
+                    key_id, model_name, account_id, window_mode,
+                    state.consecutive_failures,
                 )
-                self._escalate(strategy, account_id, model_name, state.error_type, key_id)
+
+            # Count-window models: a 429 / rate_limited is the *expected* signal
+            # that the request-count window is full, not an upstream fault. Never
+            # freeze on it — escalation above only lengthens the freeze for other
+            # error types, so a 429 stays open for the fallback loop to retry.
+            if window_mode == "count" and state.error_type == "rate_limited":
+                logger.info(
+                    "Circuit breaker: key %s / %s (count-window) rate_limited (status=%s), "
+                    "not freezing — window full is expected, allowing fallback to retry",
+                    key_id, model_name, status_code,
+                )
                 return
 
             # 瞬时错误（server_error / network_error / timeout / rate_limited）第 1 次
             # 失败不冻结 — 允许下一次请求继续尝试，避免单一候选场景因一次上游抖动
             # （含偶发 429）就整条路由冻住。第 2 次起才进入冻结 + exponential backoff。
             # bad_request / auth_error 不在此列：这些错误重试无意义，立即冻结。
+            # （count-window 模型的 rate_limited 已在上一个分支处理。）
             if state.consecutive_failures == 1 and state.error_type in (
                 "server_error", "network_error", "timeout", "rate_limited",
             ):
@@ -253,9 +308,16 @@ class CircuitBreaker:
                 )
                 return
 
-            # ----- Freeze -----
+            # ----- Freeze (exponential backoff, capped) -----
+            # Non-escalated: capped at the normal backoff ceiling. Escalated:
+            # capped at the window duration (count-window) or end-of-day (token).
+            cap = (
+                self._escalation_cap(window_mode, account_id, model_name)
+                if state.escalated
+                else self.backoff_schedule[-1]
+            )
             freeze_seconds = self._get_freeze_seconds(
-                state.error_type, state.consecutive_failures,
+                state.error_type, state.consecutive_failures, cap=cap,
             )
             state.frozen_until = time.time() + freeze_seconds
 
@@ -334,15 +396,39 @@ class CircuitBreaker:
             return "network_error"
         return _ERROR_CLASSIFICATION.get(status_code, "server_error")
 
+    def _resolve_window_mode(self, account_id: str, model_name: str) -> str:
+        """Return ``"count"`` or ``"token"`` for a circuit, via the resolver.
+
+        Falls back to ``"token"`` when no resolver is installed or it raises —
+        token-window is the stricter (lower-threshold) behaviour, so it's the
+        safe default.
+        """
+        if self.window_mode_resolver is None:
+            return "token"
+        try:
+            return self.window_mode_resolver(account_id, model_name) or "token"
+        except Exception:
+            logger.exception(
+                "Circuit breaker window_mode_resolver failed for %s/%s",
+                account_id, model_name,
+            )
+            return "token"
+
     def _get_freeze_seconds(
-        self, error_type: str, consecutive_failures: int,
+        self,
+        error_type: str,
+        consecutive_failures: int,
+        cap: Optional[float] = None,
     ) -> float:
         """Calculate freeze duration.
 
         * ``bad_request`` / ``auth_error``: a fixed long duration — retry
           won't resolve the issue.
-        * Transient errors (``server_error``, ``timeout``, ``network_error``):
-          exponential backoff.
+        * Transient errors (``server_error``, ``timeout``, ``network_error``,
+          ``rate_limited``): exponential backoff. ``cap`` bounds the ceiling —
+          for escalated circuits this is the window duration (count) or
+          end-of-day (token); for normal circuits it is the backoff schedule
+          maximum.
         """
         base = self.freeze_durations.get(error_type, 60.0)
 
@@ -352,32 +438,42 @@ class CircuitBreaker:
         if consecutive_failures <= 1:
             return base
 
-        idx = min(consecutive_failures - 2, len(self.backoff_schedule) - 1)
-        return self.backoff_schedule[idx]
+        idx = consecutive_failures - 2
+        if idx < len(self.backoff_schedule):
+            return self.backoff_schedule[idx]
+        # Beyond the explicit schedule: keep doubling from the last step, bounded
+        # by ``cap`` (falls back to the schedule maximum when ``cap`` is None).
+        last = self.backoff_schedule[-1]
+        extra = idx - len(self.backoff_schedule) + 1
+        val = last * (2 ** extra)
+        if cap is not None:
+            val = min(val, cap)
+        return val
+
+    def _escalation_cap(self, window_mode: str, account_id: str, model_name: str) -> float:
+        """Freeze ceiling once a circuit is escalated.
+
+        Count-window models: the window duration (from ``window_seconds_resolver``,
+        falling back to ``escalation_freeze_seconds``).  Token-window / no-window
+        models: until the end of the current day (24:00).
+        """
+        if window_mode == "count":
+            if self.window_seconds_resolver is not None:
+                try:
+                    w = self.window_seconds_resolver(account_id, model_name)
+                    if w:
+                        return float(w)
+                except Exception:
+                    logger.exception(
+                        "Circuit breaker window_seconds_resolver failed for %s/%s",
+                        account_id, model_name,
+                    )
+            return float(self.escalation_freeze_seconds)
+        return self._seconds_until_end_of_day()
 
     @staticmethod
-    def _escalate(
-        strategy: Any,
-        account_id: str,
-        model_name: str,
-        error_type: Optional[str],
-        key_id: int = 0,
-    ) -> None:
-        """Notify the supplier strategy that the circuit breaker escalated.
-
-        ``key_id`` is forwarded so the strategy can mark the model unavailable for
-        the specific key (matching the breaker's own ``(key_id, model)`` scope),
-        rather than blocking every key of the supplier.
-        """
-        if strategy is None:
-            return
-        handler = getattr(strategy, "on_circuit_breaker_escalation", None)
-        if handler is None:
-            return
-        try:
-            handler(account_id, model_name, error_type, key_id)
-        except Exception:
-            logger.exception(
-                "Circuit breaker escalation handler failed for %s/%s (key %s)",
-                account_id, model_name, key_id,
-            )
+    def _seconds_until_end_of_day() -> float:
+        """Seconds from now until 24:00 (start of the next day)."""
+        now = datetime.now()
+        end = datetime(now.year, now.month, now.day) + timedelta(days=1)
+        return max(0.0, (end - now).total_seconds())

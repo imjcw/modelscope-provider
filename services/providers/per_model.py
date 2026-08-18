@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
 from core.database import DatabaseManager
-from repositories.quota_repository import QuotaRepository
 from services.providers.base import RateLimitStrategy
 
 logger = logging.getLogger(__name__)
@@ -33,6 +32,10 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
     back to the database for atomic counting.
     """
 
+    # Request-count window → circuit breaker uses the higher count-window
+    # freeze / escalation thresholds.
+    window_mode = "count"
+
     def __init__(
         self,
         db: DatabaseManager,
@@ -40,7 +43,6 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
         max_requests: int = _DEFAULT_MAX_REQUESTS,
         model_configs: Optional[Dict[str, Dict[str, int]]] = None,
         rate_limit_cache=None,
-        quota_repository: QuotaRepository = None,
     ):
         self.db = db
         self.default_window_seconds = window_seconds
@@ -48,44 +50,6 @@ class PerModelFixedWindowStrategy(RateLimitStrategy):
         # model_configs: {model_name: {"window_seconds": ..., "max_requests": ...}}
         self.model_configs = model_configs or {}
         self._cache = rate_limit_cache  # Optional RateLimitCache
-        self.quota_repository = quota_repository
-
-    # 仅瞬态错误触发标记 unavailable；auth_error 和 bad_request 属于
-    # 密钥/配置问题，不应标记模型不可用。
-    _TRANSIENT_ERROR_TYPES = {"server_error", "timeout", "network_error", "rate_limited"}
-
-    def on_circuit_breaker_escalation(
-        self,
-        account_id: str,
-        model_name: str,
-        error_type: Optional[str],
-        key_id: int = 0,
-    ) -> None:
-        """熔断升级：连续 10 次瞬态失败后，标记模型今日不可用，
-        让路由直接跳过该候选，而不是等 1 小时冻结窗口过去再试。
-
-        ``key_id`` 透传自熔断器的 ``(key_id, model)`` 维度，因此只标记该 key
-        的模型不可用，而不影响同供应商的其它 key。
-        """
-        if error_type not in self._TRANSIENT_ERROR_TYPES:
-            logger.debug(
-                "Circuit-breaker escalation skipped (non-transient error): "
-                "%s/%s error_type=%s",
-                account_id, model_name, error_type,
-            )
-            return
-        if self.quota_repository is None:
-            logger.warning(
-                "Circuit-breaker escalation for %s/%s (key %s) but quota_repository is None — "
-                "cannot mark model unavailable",
-                account_id, model_name, key_id,
-            )
-            return
-        logger.warning(
-            "Circuit-breaker escalation: marking %s/%s (key %s) unavailable (error_type=%s)",
-            account_id, model_name, key_id, error_type,
-        )
-        self.quota_repository.mark_model_unavailable(account_id, model_name, key_id=key_id)
 
     def _get_model_config(self, model_name: str) -> Tuple[int, int]:
         """Get (window_seconds, max_requests) for a specific model.

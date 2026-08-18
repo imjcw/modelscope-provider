@@ -1,7 +1,6 @@
 """供应商限流策略抽象基类。"""
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 
 class RateLimitStrategy(ABC):
@@ -10,7 +9,16 @@ class RateLimitStrategy(ABC):
     Each provider implements its own rate-limiting semantics:
     - ModelScope: reactive, header-driven (reads modelscope-ratelimit-* headers)
     - SenseTime: proactive, local fixed-window counter (1500 req / 5h)
+
+    ``window_mode`` marks how this strategy meters its limit:
+    ``"token"`` (default) = quota is token-based (reactive, header-driven,
+    e.g. ModelScope); ``"count"`` = quota is a request-count window
+    (``max_requests``), e.g. SenseTime / per-model fixed windows. The circuit
+    breaker reads this to tune its freeze threshold per model.
     """
+
+    # Token-based by default; count-window strategies override this.
+    window_mode: str = "token"
 
     @abstractmethod
     def check_rate_limit(
@@ -81,17 +89,3 @@ class RateLimitStrategy(ABC):
             "Per-model quota not supported by this strategy"
         )
 
-    def on_circuit_breaker_escalation(
-        self,
-        account_id: str,
-        model_name: str,
-        error_type: Optional[str],
-        key_id: int = 0,
-    ) -> None:
-        """Called by ``CircuitBreaker`` when a ``(key_id, model)`` circuit escalates.
-
-        Strategies that want to react (e.g. mark the model unavailable for the day)
-        should override this and scope the action to ``key_id`` so only the failing
-        key is affected — not every key of the supplier. ``key_id = 0`` denotes the
-        primary key. The default is a no-op.
-        """

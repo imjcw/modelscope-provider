@@ -42,6 +42,50 @@ def _resolve_read_timeout(config_repo) -> float:
         return 3600.0
 
 
+def _build_circuit_breaker_resolvers(accounts, rate_limit_strategies):
+    """Build the circuit-breaker resolvers from the live account set.
+
+    Returns ``(window_mode_resolver, window_seconds_resolver)``.  The maps are
+    derived from the same ``accounts`` list used to construct the LoadBalancer,
+    so circuit keys stay aligned with the routes' account objects.  Rebuild via
+    this helper both at startup and whenever the LoadBalancer is refreshed
+    (accounts added/edited via admin) so window-mode thresholds track the live
+    account set instead of going stale.
+    """
+    _account_window_mode = {}
+    _account_strategy = {}
+    for _acct in (accounts or []):
+        _pt = getattr(_acct, "provider_type", None) or DEFAULT_PROVIDER_TYPE
+        _st = rate_limit_strategies.get(_pt)
+        _account_window_mode[_acct.account_id] = getattr(_st, "window_mode", "token")
+        _account_strategy[_acct.account_id] = _st
+
+    def _window_mode_resolver(aid, _m):
+        return _account_window_mode.get(aid, "token")
+
+    def _window_seconds_resolver(aid, model_name):
+        _st = _account_strategy.get(aid)
+        if _st is None:
+            return None
+        if getattr(_st, "window_mode", "token") != "count":
+            return None
+        # Per-model strategies (e.g. PerModelFixedWindowStrategy) expose a
+        # per-model window override via ``_get_model_config``; honour it so an
+        # escalated freeze is capped at that specific model's window. Fall back
+        # to the strategy-wide ``window_seconds`` / ``default_window_seconds``.
+        get_cfg = getattr(_st, "_get_model_config", None)
+        if get_cfg is not None:
+            try:
+                return get_cfg(model_name)[0]
+            except Exception:
+                pass
+        return getattr(_st, "window_seconds", None) or getattr(
+            _st, "default_window_seconds", None
+        )
+
+    return _window_mode_resolver, _window_seconds_resolver
+
+
 class ServiceInitializer:
     """Initialize all services."""
 
@@ -148,6 +192,16 @@ class ServiceInitializer:
             # but never assigned (fixed by initializing to None above).
             provider_type_repo = None
 
+        # Circuit breaker: pre-build (account_id -> window_mode) and
+        # (account_id -> strategy) maps so it can apply count-window vs
+        # token-window freeze / escalation thresholds — without the route layer
+        # threading anything through manually.
+        circuit_breaker = CircuitBreaker()
+        (
+            circuit_breaker.window_mode_resolver,
+            circuit_breaker.window_seconds_resolver,
+        ) = _build_circuit_breaker_resolvers(accounts, rate_limit_strategies)
+
         services = {
             "database": database,
             "http_client": http_client,
@@ -163,7 +217,7 @@ class ServiceInitializer:
             "alias_router": alias_router,
             "accounts": accounts,
             "rate_limit_strategies": rate_limit_strategies,
-            "circuit_breaker": CircuitBreaker(),
+            "circuit_breaker": circuit_breaker,
             "config_cache": config_cache,
             "rate_limit_cache": rate_limit_cache,
         }

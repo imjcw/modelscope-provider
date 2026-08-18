@@ -175,6 +175,20 @@ def refresh_load_balancer(request: Request):
             services["load_balancer"] = LoadBalancer(
                 accounts, supplier_model_repo=supplier_model_repo
             )
+
+            # Keep the circuit-breaker window-mode resolvers in sync with the
+            # refreshed account set — otherwise count-window accounts added or
+            # edited via admin would keep falling back to token behaviour (429
+            # freezes on the 2nd hit, escalation threshold 10) until a restart.
+            cb = services.get("circuit_breaker")
+            rls = services.get("rate_limit_strategies")
+            if cb is not None and rls is not None:
+                from core.service_init import _build_circuit_breaker_resolvers
+                (
+                    cb.window_mode_resolver,
+                    cb.window_seconds_resolver,
+                ) = _build_circuit_breaker_resolvers(accounts, rls)
+
             logger.info(
                 f"LoadBalancer refreshed with {len(accounts)} accounts"
             )

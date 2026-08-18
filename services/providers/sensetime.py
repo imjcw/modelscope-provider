@@ -5,10 +5,8 @@ Coding Plan: 每 5 小时 1500 次请求，所有请求（含失败）均计入�
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 from core.database import DatabaseManager
-from repositories.quota_repository import QuotaRepository
 from services.providers.base import RateLimitStrategy
 
 logger = logging.getLogger(__name__)
@@ -32,57 +30,21 @@ class SenseTimeStrategy(RateLimitStrategy):
     back to the database for atomic counting.
     """
 
+    # Request-count window → circuit breaker uses the higher count-window
+    # freeze / escalation thresholds.
+    window_mode = "count"
+
     def __init__(
         self,
         db: DatabaseManager,
         window_seconds: int = DEFAULT_WINDOW_SECONDS,
         max_requests: int = DEFAULT_MAX_REQUESTS,
         rate_limit_cache=None,
-        quota_repository: QuotaRepository = None,
     ):
         self.db = db
         self.window_seconds = window_seconds
         self.max_requests = max_requests
         self._cache = rate_limit_cache  # Optional RateLimitCache
-        self.quota_repository = quota_repository
-
-    # 仅瞬态错误触发标记 unavailable；auth_error 和 bad_request 属于
-    # 密钥/配置问题，不应标记模型不可用。
-    _TRANSIENT_ERROR_TYPES = {"server_error", "timeout", "network_error", "rate_limited"}
-
-    def on_circuit_breaker_escalation(
-        self,
-        account_id: str,
-        model_name: str,
-        error_type: Optional[str],
-        key_id: int = 0,
-    ) -> None:
-        """熔断升级：连续 10 次瞬态失败后，标记模型今日不可用，
-        让路由直接跳过该候选，而不是等 1 小时冻结窗口过去再试。
-
-        ``key_id`` 透传自熔断器的 ``(key_id, model)`` 维度，因此只标记该 key
-        的模型不可用（SenseTime 的全局窗口也已是 per-key），而不影响同供应商
-        的其它 key。
-        """
-        if error_type not in self._TRANSIENT_ERROR_TYPES:
-            logger.debug(
-                "Circuit-breaker escalation skipped (non-transient error): "
-                "%s/%s error_type=%s",
-                account_id, model_name, error_type,
-            )
-            return
-        if self.quota_repository is None:
-            logger.warning(
-                "Circuit-breaker escalation for %s/%s (key %s) but quota_repository is None — "
-                "cannot mark model unavailable",
-                account_id, model_name, key_id,
-            )
-            return
-        logger.warning(
-            "Circuit-breaker escalation: marking %s/%s (key %s) unavailable (error_type=%s)",
-            account_id, model_name, key_id, error_type,
-        )
-        self.quota_repository.mark_model_unavailable(account_id, model_name, key_id=key_id)
 
     def check_rate_limit(
         self, account_id: str, model_name: str, key_count: int = 1, key_id: int = 0

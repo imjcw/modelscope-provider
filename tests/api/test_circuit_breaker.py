@@ -15,6 +15,7 @@ Tests cover:
 import json
 import os
 import time
+import types
 import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -23,6 +24,10 @@ from fastapi.testclient import TestClient
 
 from provider.main import create_app
 from services.circuit_breaker import CircuitBreaker, CircuitState
+from core.service_init import _build_circuit_breaker_resolvers
+from services.providers.sensetime import SenseTimeStrategy
+from services.providers.per_model import PerModelFixedWindowStrategy
+from services.providers.modelscope import ModelScopeStrategy
 
 # ---------------------------------------------------------------------------
 # Unit tests — pure CircuitBreaker logic
@@ -178,9 +183,8 @@ class TestStateMachine:
 
     def test_10_consecutive_failures_escalates(self):
         cb = CircuitBreaker()
-        strategy = Mock()
         for i in range(10):
-            cb.record_failure(0, "acc-1", "model-1", 500, strategy)
+            cb.record_failure(0, "acc-1", "model-1", 500)
         state = cb.get_state(0, "model-1")
         assert state is not None
         assert state.escalated is True
@@ -194,15 +198,16 @@ class TestStateMachine:
         assert cb.get_state(0, "model-1") is None
 
     def test_escalation_applies_finite_freeze(self):
-        """Escalation sets a long but finite freeze (not permanent)."""
+        """Escalation sets a finite freeze — capped at end-of-day for a
+        token-window model (no count window), not permanent."""
         cb = CircuitBreaker()
         for i in range(10):
             cb.record_failure(0, "acc-1", "model-1", 500)
         state = cb.get_state(0, "model-1")
         assert state.escalated is True
-        # frozen_until should be ~ escalation_freeze_seconds in the future
         assert state.frozen_until > time.time()
-        assert state.frozen_until <= time.time() + cb.escalation_freeze_seconds + 5
+        # token-window → capped at end of day (~86400s), not the old flat 1h.
+        assert state.frozen_until <= time.time() + 86400 + 5
 
     def test_single_429_does_not_freeze(self):
         """A first 429 (rate_limited) should not freeze — allow retry."""
@@ -214,32 +219,6 @@ class TestStateMachine:
         # 2nd consecutive 429 → now freezes
         cb.record_failure(0, "acc-1", "model-1", 429)
         assert cb.check(0, "model-1") is False
-
-    def test_escalation_notifies_strategy(self):
-        cb = CircuitBreaker()
-        strategy = Mock()
-        strategy.on_circuit_breaker_escalation = Mock()
-        for i in range(10):
-            cb.record_failure(0, "acc-1", "model-1", 500, strategy)
-        strategy.on_circuit_breaker_escalation.assert_called_once_with(
-            "acc-1", "model-1", "server_error", 0
-        )
-
-    def test_escalation_marks_correct_key_unavailable(self):
-        """Escalation forwards the failing key_id so only that key is marked."""
-        from provider.services.providers.sensetime import SenseTimeStrategy
-
-        quota_repo = Mock()
-        strategy = SenseTimeStrategy(db=None, quota_repository=quota_repo)
-        cb = CircuitBreaker()
-
-        # 10 transient failures on key 2 / model-1 → escalate for key 2 only.
-        for i in range(10):
-            cb.record_failure(2, "acc-1", "model-1", 500, strategy)
-
-        quota_repo.mark_model_unavailable.assert_called_once_with(
-            "acc-1", "model-1", key_id=2
-        )
 
     def test_different_keys_are_independent(self):
         """Different (key_id, model) pairs are tracked independently."""
@@ -425,3 +404,174 @@ class TestIntegrationCircuitBreaker:
         assert resp.json()["scope"] == "one"
         remaining = {s["account_id"] for s in cb.get_all_states()}
         assert remaining == {"acc-2"}
+
+
+# ---------------------------------------------------------------------------
+# Count-window models: higher freeze / escalation thresholds
+# ---------------------------------------------------------------------------
+
+
+class TestCountWindowModels:
+    """Request-count-window models (fixed_window / fixed_window_per_model).
+
+    For these, a 429 / rate_limited just means the request-count window is
+    full (expected), so the circuit must never freeze on it, and the
+    escalation (mark-unavailable) threshold is raised from 10 to 20.
+    """
+
+    @staticmethod
+    def _count_cb() -> CircuitBreaker:
+        cb = CircuitBreaker()
+        cb.window_mode_resolver = lambda account_id, model_name: "count"
+        return cb
+
+    def test_count_window_429_never_freezes_directly(self):
+        """Consecutive 429s never freeze a count-window model — not even after
+        the 20-escalation threshold.
+
+        A 429 there just means the request-count window is full, so the circuit
+        must stay open (not frozen). Escalation only lengthens the freeze for
+        *other* error types; a 429 stays open for the fallback loop to retry.
+        """
+        cb = self._count_cb()
+        for _ in range(19):
+            cb.record_failure(0, "acc-1", "model-1", 429)
+            assert cb.check(0, "model-1") is True  # not frozen on any single 429
+        state = cb.get_state(0, "model-1")
+        assert state.error_type == "rate_limited"
+        assert state.escalated is False  # below the raised threshold
+        # 20th consecutive 429 → escalated (flag set) but STILL not frozen.
+        cb.record_failure(0, "acc-1", "model-1", 429)
+        assert cb.get_state(0, "model-1").escalated is True
+        assert cb.check(0, "model-1") is True  # rate_limited never freezes
+
+    def test_count_window_escalation_threshold_is_20(self):
+        """Escalation for count-window models triggers at 20, not 10."""
+        cb = self._count_cb()
+        for _ in range(10):
+            cb.record_failure(0, "acc-1", "model-1", 500)
+        # 10 failures: token-window would escalate, count-window must not yet.
+        assert cb.get_state(0, "model-1").escalated is False
+        for _ in range(10):  # 20 total
+            cb.record_failure(0, "acc-1", "model-1", 500)
+        assert cb.get_state(0, "model-1").escalated is True
+
+    def test_count_window_server_error_still_freezes_from_second(self):
+        """Non-rate_limited transient errors behave like token-window (2nd freezes)."""
+        cb = self._count_cb()
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        assert cb.check(0, "model-1") is True  # 1st does not freeze
+        cb.record_failure(0, "acc-1", "model-1", 500)
+        assert cb.check(0, "model-1") is False  # 2nd freezes
+
+    def test_token_window_429_freezes_from_second(self):
+        """Token-window (default) keeps the original 429-freezes-on-2nd behaviour."""
+        cb = CircuitBreaker()  # no resolver → "token"
+        cb.record_failure(0, "acc-1", "model-1", 429)
+        assert cb.check(0, "model-1") is True
+        cb.record_failure(0, "acc-1", "model-1", 429)
+        assert cb.check(0, "model-1") is False
+
+    def test_explicit_window_mode_overrides_resolver(self):
+        """An explicit window_mode arg wins over the installed resolver."""
+        cb = self._count_cb()  # resolver says "count"
+        # Explicit "token" → 429 freezes on 2nd like a token-window model.
+        cb.record_failure(0, "acc-1", "model-1", 429, window_mode="token")
+        cb.record_failure(0, "acc-1", "model-1", 429, window_mode="token")
+        assert cb.check(0, "model-1") is False
+
+    def test_count_window_escalation_capped_at_window(self):
+        """Escalated count-window freeze is capped at the window duration."""
+        cb = self._count_cb()  # resolver says "count"
+        cb.window_seconds_resolver = lambda account_id, model_name: 18000.0
+        for _ in range(20):  # count-window escalation threshold
+            cb.record_failure(0, "acc-1", "model-1", 500)
+        state = cb.get_state(0, "model-1")
+        assert state.escalated is True
+        assert state.frozen_until > time.time()
+        # Capped at the window (18000s), not end-of-day.
+        assert state.frozen_until <= time.time() + 18000 + 5
+
+    def test_token_window_escalation_capped_at_end_of_day(self):
+        """Escalated token-window (no count window) freeze is capped at 24:00."""
+        cb = CircuitBreaker()  # no resolver → "token", no window_seconds_resolver
+        for _ in range(10):  # token-window escalation threshold
+            cb.record_failure(0, "acc-1", "model-1", 500)
+        state = cb.get_state(0, "model-1")
+        assert state.escalated is True
+        assert state.frozen_until > time.time()
+        assert state.frozen_until <= time.time() + 86400 + 5
+
+    def test_escalated_freeze_grows_beyond_normal_cap(self):
+        """Once escalated, the backoff ceiling rises above the normal 480s cap."""
+        cb = self._count_cb()
+        cb.window_seconds_resolver = lambda account_id, model_name: 18000.0
+        for _ in range(20):
+            cb.record_failure(0, "acc-1", "model-1", 500)
+        state = cb.get_state(0, "model-1")
+        # Normal backoff ceiling is 480s; an escalated freeze must exceed it.
+        assert state.frozen_until - time.time() > 480
+
+
+class TestBuildCircuitBreakerResolvers:
+    """``_build_circuit_breaker_resolvers`` maps accounts -> window mode."""
+
+    @staticmethod
+    def _strategies():
+        return {
+            "sensetime": SenseTimeStrategy(
+                db=Mock(), window_seconds=18000, max_requests=1500
+            ),
+            "pt-per-model": PerModelFixedWindowStrategy(
+                db=Mock(),
+                model_configs={"m1": {"window_seconds": 600, "max_requests": 5}},
+            ),
+            "modelscope": ModelScopeStrategy(
+                quota_updater=Mock(), quota_repository=Mock()
+            ),
+        }
+
+    @staticmethod
+    def _accounts():
+        return [
+            types.SimpleNamespace(account_id="acc-sensetime", provider_type="sensetime"),
+            types.SimpleNamespace(
+                account_id="acc-per-model", provider_type="pt-per-model"
+            ),
+            types.SimpleNamespace(
+                account_id="acc-modelscope", provider_type="modelscope"
+            ),
+        ]
+
+    def test_window_mode_resolves_per_account(self):
+        wmode, _wsec = _build_circuit_breaker_resolvers(
+            self._accounts(), self._strategies()
+        )
+        assert wmode("acc-sensetime", "m1") == "count"
+        assert wmode("acc-per-model", "m1") == "count"
+        assert wmode("acc-modelscope", "m1") == "token"
+
+    def test_unknown_account_falls_back_to_token(self):
+        wmode, wsec = _build_circuit_breaker_resolvers(
+            self._accounts(), self._strategies()
+        )
+        assert wmode("does-not-exist", "m1") == "token"
+        assert wsec("does-not-exist", "m1") is None
+
+    def test_count_window_uses_per_model_window_override(self):
+        _wmode, wsec = _build_circuit_breaker_resolvers(
+            self._accounts(), self._strategies()
+        )
+        # Per-model strategy honours the model-specific window via
+        # ``_get_model_config`` (escalated-freeze cap uses it).
+        assert wsec("acc-per-model", "m1") == 600.0
+        # SenseTime (count, no per-model config) falls back to window_seconds.
+        assert wsec("acc-sensetime", "anything") == 18000.0
+
+    def test_missing_provider_type_defaults_to_default(self):
+        acct = types.SimpleNamespace(account_id="acc-default")  # no provider_type
+        wmode, _wsec = _build_circuit_breaker_resolvers(
+            [acct], self._strategies()
+        )
+        # DEFAULT_PROVIDER_TYPE -> header_based -> token.
+        assert wmode("acc-default", "m1") == "token"
