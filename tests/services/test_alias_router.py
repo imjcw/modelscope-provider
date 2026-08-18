@@ -114,7 +114,7 @@ def test_alias_router_uses_batch_queries():
     
     # 验证结果
     assert len(candidates) == 3
-    for (account_dict, model_name, _key_record) in candidates:
+    for (account_dict, model_name, _key_record, _key_index) in candidates:
         assert account_dict["name"] in ["Supplier 1", "Supplier 2", "Supplier 3"]
         assert model_name == "model1"
     

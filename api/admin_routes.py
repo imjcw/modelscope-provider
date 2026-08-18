@@ -346,7 +346,9 @@ def list_api_keys(supplier_id: int, service=Depends(get_admin_service)):
 def add_api_key(supplier_id: int, body: ApiKeyCreate, request: Request, service=Depends(get_admin_service)):
     """Add an additional API key for a supplier."""
     try:
-        return service.add_api_key(supplier_id, body.api_key)
+        result = service.add_api_key(supplier_id, body.api_key)
+        _refresh_after_account_change(request)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -358,7 +360,9 @@ def update_api_key_status(
 ):
     """Freeze or unfreeze an API key."""
     try:
-        return service.update_api_key_status(key_id, body.status)
+        result = service.update_api_key_status(key_id, body.status)
+        _refresh_after_account_change(request)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

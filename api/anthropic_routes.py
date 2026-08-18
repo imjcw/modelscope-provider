@@ -597,6 +597,7 @@ async def _try_anthropic_candidate(
         )
 
     key_id = getattr(account, "_key_id", 0) or 0
+    raw_key_id = getattr(account, "_raw_key_id", key_id) or 0
     api_key = getattr(account, "_key_string", None) or account.api_key
 
     request_start = datetime.now(timezone.utc).isoformat()
@@ -651,7 +652,7 @@ async def _try_anthropic_candidate(
     except Exception as exc:
         if circuit_breaker is not None:
             try:
-                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id, -1)
+                circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id, -1)
             except Exception:
                 pass
         error_msg = f"Failed to reach supplier: {exc}"
@@ -668,7 +669,7 @@ async def _try_anthropic_candidate(
         detail_msg = f"Supplier error {error_code}: {error_body[:200]}" if error_body else f"Supplier error {error_code}"
         if circuit_breaker is not None:
             try:
-                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id, error_code)
+                circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id, error_code)
             except Exception:
                 pass
         await safe_aclose(response)
@@ -693,7 +694,7 @@ async def _try_anthropic_candidate(
             if not resp_json:
                 if circuit_breaker is not None:
                     try:
-                        circuit_breaker.record_failure(key_id, account.account_id, actual_model_id, 502)
+                        circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id, 502)
                     except Exception:
                         pass
                 await _log_error_request(
@@ -709,7 +710,7 @@ async def _try_anthropic_candidate(
             if url_path == "chat/completions" and (not choices or not isinstance(choices, list) or len(choices) == 0):
                 if circuit_breaker is not None:
                     try:
-                        circuit_breaker.record_failure(key_id, account.account_id, actual_model_id, 502)
+                        circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id, 502)
                     except Exception:
                         pass
                 await _log_error_request(
@@ -780,6 +781,7 @@ async def _try_anthropic_candidate(
                 logger.error(f"Failed to log non-stream Anthropic request: {le}", exc_info=True)
 
         key_id = getattr(account, "_key_id", 0) or 0
+        raw_key_id = getattr(account, "_raw_key_id", key_id) or 0
         try:
             if quota_updater and (input_tokens > 0 or output_tokens > 0):
                 await asyncio.to_thread(
@@ -799,7 +801,7 @@ async def _try_anthropic_candidate(
 
         if circuit_breaker is not None:
             try:
-                circuit_breaker.record_success(key_id, actual_model_id)
+                circuit_breaker.record_success(raw_key_id, actual_model_id)
             except Exception:
                 pass
         if alias_router is not None:
@@ -809,7 +811,7 @@ async def _try_anthropic_candidate(
                 pass
         if alias_router is not None:
             try:
-                alias_router.release(key_id, actual_model_id)
+                alias_router.release(raw_key_id, actual_model_id)
             except Exception:
                 pass
 
@@ -944,26 +946,26 @@ async def _stream_anthropic_with_logging(
         interrupt_reason = str(stream_exc)
         if circuit_breaker is not None:
             try:
-                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id, -1)
+                circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id, -1)
             except Exception:
                 pass
         raise
     finally:
         if alias_router is not None:
             try:
-                alias_router.release(key_id, actual_model_id)
+                alias_router.release(raw_key_id, actual_model_id)
             except Exception:
                 pass
 
         if not stream_failed and len(raw_chunks) > 0 and circuit_breaker is not None:
             try:
-                circuit_breaker.record_success(key_id, actual_model_id)
+                circuit_breaker.record_success(raw_key_id, actual_model_id)
             except Exception:
                 pass
 
         if stream_failed and not stream_interrupted and circuit_breaker is not None:
             try:
-                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id, 502)
+                circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id, 502)
             except Exception:
                 pass
 
@@ -1120,7 +1122,7 @@ async def _stream_anthropic_direct_with_logging(
         interrupt_reason = str(stream_exc)
         if circuit_breaker is not None:
             try:
-                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id, -1)
+                circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id, -1)
             except Exception:
                 pass
         raise
@@ -1129,19 +1131,19 @@ async def _stream_anthropic_direct_with_logging(
 
         if alias_router is not None:
             try:
-                alias_router.release(key_id, actual_model_id)
+                alias_router.release(raw_key_id, actual_model_id)
             except Exception:
                 pass
 
         if not stream_failed and len(raw_chunks) > 0 and circuit_breaker is not None:
             try:
-                circuit_breaker.record_success(key_id, actual_model_id)
+                circuit_breaker.record_success(raw_key_id, actual_model_id)
             except Exception:
                 pass
 
         if stream_failed and not stream_interrupted and circuit_breaker is not None:
             try:
-                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id, 502)
+                circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id, 502)
             except Exception:
                 pass
 
@@ -1241,7 +1243,12 @@ async def messages(data: AnthropicMessagesRequest, fastapi_request: Request):
                     account = candidate.account
                     actual_model_id = candidate.model_name
 
-                    account._key_id = candidate.key_id
+                    # 与 OpenAI 路径一致：_key_id 用逻辑 Key 序号，供 request_logs /
+                    # model_quotas / account_rate_windows 使用；_raw_key_id 用
+                    # account_api_keys.id（自增主键），供 circuit_breaker 与
+                    # alias_router 在途计数——二者按自增主键计，不可混用。
+                    account._key_id = candidate.key_index
+                    account._raw_key_id = candidate.key_id
                     account._key_string = candidate.key_string
 
                     if circuit_breaker is not None and not circuit_breaker.check(
@@ -1368,6 +1375,7 @@ async def messages(data: AnthropicMessagesRequest, fastapi_request: Request):
             # In the non-candidate fallback path the key_id is 0 (primary key)
             # and we reuse the account's own API key.
             account._key_id = 0
+            account._raw_key_id = 0
             account._key_string = account.api_key
 
             if circuit_breaker is not None and not circuit_breaker.check(

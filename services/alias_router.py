@@ -20,6 +20,11 @@ class RoutingResult:
     model_name: str       # 直接发给下游的模型名
     key_id: int = 0       # account_api_keys.id；0 表示主密钥（accounts 表）
     key_string: str = ""  # 实际用于 HTTP 请求的 API Key 字符串
+    key_index: int = 0    # 逻辑 Key 序号（0=主密钥, 1=第2个Key...），按
+                          # (sort_order, id) 排序后的 0 基位置。request_logs /
+                          # model_quotas / account_rate_windows 的 key_id 字段
+                          # 均用此逻辑序号，与 api_key_id_to_logical 的输出一致；
+                          # 与 key_id（account_api_keys.id 自增主键）不是同一含义。
 
 
 class AliasRouter:
@@ -123,13 +128,17 @@ class AliasRouter:
             # 每个活跃 Key 展开为一个独立候选；模型不可用判断需精确到 key，
             # 因为全局额度是按 (account_id, key_id) 计数的（某个 key 耗尽其
             # 上游日额度不应连累同供应商的其它 key）。
+            # key_idx 为该 Key 在「账号全部 Key 按 (sort_order, id) 排序」后的
+            # 0 基逻辑序号，与 api_key_id_to_logical 保持一致；即使中途跳过
+            # frozen/unavailable 的 Key，逻辑序号也按完整列表计算，确保与读侧
+            # 聚合（request_logs / model_quotas / account_rate_windows）对齐。
             acc_id = account_dict["account_id"]
-            for kr in key_records:
+            for key_idx, kr in enumerate(key_records):
                 if kr.get("status") == "frozen":
                     continue
                 if model_name in unavailable_map.get((acc_id, kr["id"]), set()):
                     continue
-                candidates.append((account_dict, model_name, kr))
+                candidates.append((account_dict, model_name, kr, key_idx))
 
         return candidates
 
@@ -201,13 +210,14 @@ class AliasRouter:
             )
 
         results = []
-        for account_dict, model_name, key_record in ordered:
+        for account_dict, model_name, key_record, key_idx in ordered:
             ms_account = self._to_ms_account(account_dict)
             results.append(RoutingResult(
                 account=ms_account,
                 model_name=model_name,
                 key_id=key_record["id"],
                 key_string=key_record["api_key"],
+                key_index=key_idx,
             ))
 
         logger.info(
@@ -248,7 +258,7 @@ class AliasRouter:
     @staticmethod
     def _identity(candidate: tuple) -> Tuple[int, str]:
         """候选的身份键 ``(key_id, model_name)``。"""
-        _account_dict, model_name, key_record = candidate
+        _account_dict, model_name, key_record, _key_idx = candidate
         return (key_record["id"], model_name)
 
     def _conn_count(self, key: Tuple[int, str]) -> int:

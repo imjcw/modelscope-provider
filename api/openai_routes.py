@@ -299,6 +299,9 @@ async def stream_response_with_logging(
     stream_failed = False
     stream_interrupted = False
     interrupt_reason = None
+    # 自增主键（account_api_keys.id），供 circuit_breaker / alias_router 在途计数；
+    # key_id 参数此处为逻辑序号（account._key_id），二者不可混用。
+    raw_key_id = getattr(account, "_raw_key_id", key_id) or 0
 
     try:
         async for chunk_data in stream_response(response, _capture_headers=True):
@@ -361,7 +364,7 @@ async def stream_response_with_logging(
         if circuit_breaker is not None:
             try:
                 circuit_breaker.record_failure(
-                    key_id, account.account_id, actual_model_id or model_name, -1,
+                    raw_key_id, account.account_id, actual_model_id or model_name, -1,
                 )
             except Exception:
                 pass
@@ -370,14 +373,14 @@ async def stream_response_with_logging(
         # Release in-flight connection slot
         if alias_router is not None:
             try:
-                alias_router.release(key_id, actual_model_id or model_name)
+                alias_router.release(raw_key_id, actual_model_id or model_name)
             except Exception:
                 pass
 
         # Circuit-breaker success recorded here; empty stream is a failure
         if not stream_failed and len(raw_chunks) > 0 and circuit_breaker is not None:
             try:
-                circuit_breaker.record_success(key_id, actual_model_id or model_name,)
+                circuit_breaker.record_success(raw_key_id, actual_model_id or model_name,)
             except Exception:
                 pass
 
@@ -386,7 +389,7 @@ async def stream_response_with_logging(
         if stream_failed and not stream_interrupted and circuit_breaker is not None:
             try:
                 circuit_breaker.record_failure(
-                    key_id, account.account_id, actual_model_id or model_name, 502,
+                    raw_key_id, account.account_id, actual_model_id or model_name, 502,
                 )
             except Exception:
                 pass
@@ -417,7 +420,7 @@ async def stream_response_with_logging(
             if circuit_breaker is not None:
                 try:
                     circuit_breaker.record_failure(
-                        key_id, account.account_id, actual_model_id or model_name, 502,
+                        raw_key_id, account.account_id, actual_model_id or model_name, 502,
                     )
                 except Exception:
                     pass
@@ -502,6 +505,9 @@ async def stream_response_with_logging_anthropic_upstream(
     stream_failed = False
     stream_interrupted = False
     interrupt_reason = None
+    # 自增主键（account_api_keys.id），供 circuit_breaker / alias_router 在途计数；
+    # key_id 参数此处为逻辑序号（account._key_id），二者不可混用。
+    raw_key_id = getattr(account, "_raw_key_id", key_id) or 0
 
     try:
         async for chunk_data in _stream_openai_from_anthropic(response, actual_model_id, _capture_headers=True):
@@ -539,7 +545,7 @@ async def stream_response_with_logging_anthropic_upstream(
         interrupt_reason = str(stream_exc)
         if circuit_breaker is not None:
             try:
-                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id or model_name, -1)
+                circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id or model_name, -1)
             except Exception:
                 pass
         raise
@@ -548,19 +554,19 @@ async def stream_response_with_logging_anthropic_upstream(
 
         if alias_router is not None:
             try:
-                alias_router.release(key_id, actual_model_id or model_name)
+                alias_router.release(raw_key_id, actual_model_id or model_name)
             except Exception:
                 pass
 
         if not stream_failed and len(raw_chunks) > 0 and circuit_breaker is not None:
             try:
-                circuit_breaker.record_success(key_id, actual_model_id or model_name)
+                circuit_breaker.record_success(raw_key_id, actual_model_id or model_name)
             except Exception:
                 pass
 
         if stream_failed and not stream_interrupted and circuit_breaker is not None:
             try:
-                circuit_breaker.record_failure(key_id, account.account_id, actual_model_id or model_name, 502)
+                circuit_breaker.record_failure(raw_key_id, account.account_id, actual_model_id or model_name, 502)
             except Exception:
                 pass
 
@@ -1035,6 +1041,9 @@ async def _try_candidate(
         )
 
     key_id = getattr(account, "_key_id", 0) or 0
+    # 自增主键（account_api_keys.id），仅供 circuit_breaker 记录与
+    # alias_router.release 使用；二者按自增主键计，与 key_id（逻辑序号）区分。
+    raw_key_id = getattr(account, "_raw_key_id", key_id) or 0
     api_key = getattr(account, "_key_string", None) or account.api_key
 
     # Pre-request rate-limit check
@@ -1101,7 +1110,7 @@ async def _try_candidate(
         if circuit_breaker is not None:
             try:
                 circuit_breaker.record_failure(
-                    key_id, account.account_id, actual_model_id, -1,
+                    raw_key_id, account.account_id, actual_model_id, -1,
                 )
             except Exception:
                 pass
@@ -1122,7 +1131,7 @@ async def _try_candidate(
         if circuit_breaker is not None:
             try:
                 circuit_breaker.record_failure(
-                    key_id, account.account_id, actual_model_id, error_code,
+                    raw_key_id, account.account_id, actual_model_id, error_code,
                 )
             except Exception:
                 pass
@@ -1157,7 +1166,7 @@ async def _try_candidate(
                 if circuit_breaker is not None:
                     try:
                         circuit_breaker.record_failure(
-                            key_id, account.account_id, actual_model_id, 502,
+                            raw_key_id, account.account_id, actual_model_id, 502,
                         )
                     except Exception:
                         pass
@@ -1188,7 +1197,7 @@ async def _try_candidate(
                     if circuit_breaker is not None:
                         try:
                             circuit_breaker.record_failure(
-                                key_id, account.account_id, actual_model_id, 502,
+                                raw_key_id, account.account_id, actual_model_id, 502,
                             )
                         except Exception:
                             pass
@@ -1218,7 +1227,7 @@ async def _try_candidate(
                     if circuit_breaker is not None:
                         try:
                             circuit_breaker.record_failure(
-                                key_id, account.account_id, actual_model_id, 502,
+                                raw_key_id, account.account_id, actual_model_id, 502,
                             )
                         except Exception:
                             pass
@@ -1329,7 +1338,7 @@ async def _try_candidate(
         # Circuit breaker success
         if circuit_breaker is not None:
             try:
-                circuit_breaker.record_success(key_id, actual_model_id)
+                circuit_breaker.record_success(raw_key_id, actual_model_id)
             except Exception:
                 pass
         if alias_router is not None:
@@ -1343,7 +1352,7 @@ async def _try_candidate(
         # generator's finally instead, so the two never double-release.)
         if alias_router is not None:
             try:
-                alias_router.release(key_id, actual_model_id)
+                alias_router.release(raw_key_id, actual_model_id)
             except Exception:
                 pass
 
@@ -1429,8 +1438,15 @@ async def chat_completions(data: ChatCompletionRequest, fastapi_request: Request
                     account = candidate.account
                     actual_model_id = candidate.model_name
 
-                    # Store key identity on the account for _try_candidate
-                    account._key_id = candidate.key_id
+                    # Store key identity on the account for _try_candidate.
+                    # _key_id 用逻辑 Key 序号（key_index），供 request_logs /
+                    # model_quotas / account_rate_windows / 限流窗口使用；读侧
+                    # api_key_id_to_logical 也把它当逻辑序号解析。
+                    # _raw_key_id 用 account_api_keys.id（自增主键），供 circuit_breaker
+                    # 与 alias_router 在途计数——这两者按自增主键计（前端「按 Key」
+                    # 过滤、熔断徽标匹配也都用自增主键），两者不可混用。
+                    account._key_id = candidate.key_index
+                    account._raw_key_id = candidate.key_id
                     account._key_string = candidate.key_string
 
                     # Check circuit breaker — skip frozen candidates
@@ -1547,6 +1563,7 @@ async def chat_completions(data: ChatCompletionRequest, fastapi_request: Request
 
         # In the non-candidate fallback path the key_id is 0 (primary key).
         selected_account._key_id = 0
+        selected_account._raw_key_id = 0
         selected_account._key_string = selected_account.api_key
 
         if circuit_breaker is not None and not circuit_breaker.check(
