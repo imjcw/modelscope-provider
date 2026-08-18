@@ -70,6 +70,7 @@ class AnthropicMessagesRequest(BaseModel):
     tools: Optional[List[Any]] = None
     tool_choice: Optional[Any] = None
     metadata: Optional[dict] = None
+    thinking: Optional[Any] = None
 
 
 # ── Anthropic ↔ OpenAI adapters ─────────────────────────────────────────
@@ -93,6 +94,15 @@ def _openai_assistant_to_anthropic_content(message: dict) -> dict:
     if not isinstance(message, dict):
         return {"content": []}
     blocks = []
+    reasoning = message.get("reasoning") or message.get("reasoning_content") or ""
+    if not isinstance(reasoning, str):
+        reasoning = str(reasoning) if reasoning is not None else ""
+    if reasoning:
+        # A `signature` is required by the Anthropic schema for thinking blocks.
+        # We synthesize thinking from OpenAI reasoning without a real upstream
+        # signature, so use an empty placeholder; request-side stripping (see
+        # _strip_thinking_blocks) prevents these from being sent back upstream.
+        blocks.append({"type": "thinking", "thinking": reasoning, "signature": ""})
     content = message.get("content", "") or ""
     if content:
         blocks.append({"type": "text", "text": content})
@@ -272,9 +282,9 @@ def _openai_to_anthropic_response(resp_json: dict, model_name: str) -> dict:
     }
 
     if cached_tokens > 0:
-        result["usage"]["cache_creation_input_tokens"] = cached_tokens
+        result["usage"]["cache_read_input_tokens"] = cached_tokens
     if prompt_partial_cached > 0:
-        result["usage"]["cache_read_input_tokens"] = prompt_partial_cached
+        result["usage"]["cache_creation_input_tokens"] = prompt_partial_cached
 
     return result
 
@@ -301,7 +311,11 @@ async def stream_response_anthropic(
     saw_done = False
     yielded_any = False
     total_output_tokens = 0
+    total_input_tokens = 0
+    total_cache_read = 0
+    total_cache_creation = 0
     block_types = []
+    opened_tool_ids = set()
     _closed = False
 
     if _capture_headers:
@@ -319,10 +333,16 @@ async def stream_response_anthropic(
                 saw_done = True
                 if not saw_finish:
                     if block_types:
-                        yield emit_sse_event("content_block_stop", {"index": block_idx})
+                        for _stop_idx in range(block_idx, -1, -1):
+                            yield emit_sse_event("content_block_stop", {"index": _stop_idx})
                     yield emit_sse_event("message_delta", {
                         "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                        "usage": {"output_tokens": total_output_tokens},
+                        "usage": {
+                            "output_tokens": total_output_tokens,
+                            "input_tokens": total_input_tokens,
+                            "cache_read_input_tokens": total_cache_read,
+                            "cache_creation_input_tokens": total_cache_creation,
+                        },
                     })
                     yield emit_sse_event("message_stop", {})
                 if not yielded_any:
@@ -352,11 +372,30 @@ async def stream_response_anthropic(
             if not isinstance(chunk, dict):
                 continue
 
+            # Surface upstream OpenAI stream errors as Anthropic error events
+            # instead of silently dropping them (an error chunk has no `choices`).
+            err = chunk.get("error")
+            if isinstance(err, dict):
+                yield emit_sse_event("error", {
+                    "type": "error",
+                    "error": {
+                        "type": err.get("type", "api_error"),
+                        "message": err.get("message", "Upstream streaming error"),
+                        "param": err.get("param"),
+                        "code": err.get("code"),
+                    },
+                })
+                return
+
             choices = chunk.get("choices")
             usage = chunk.get("usage")
 
             if usage and isinstance(usage, dict):
                 total_output_tokens = usage.get("completion_tokens", total_output_tokens) or total_output_tokens
+                total_input_tokens = usage.get("prompt_tokens", total_input_tokens) or total_input_tokens
+                _ptd = usage.get("prompt_tokens_details") or {}
+                if isinstance(_ptd, dict):
+                    total_cache_read = _ptd.get("cached_tokens", total_cache_read) or total_cache_read
 
             if not choices:
                 continue
@@ -378,39 +417,49 @@ async def stream_response_anthropic(
                         "role": "assistant",
                         "content": [],
                         "model": actual_model_id,
-                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                        "usage": {"input_tokens": total_input_tokens, "output_tokens": 0},
                     },
                 })
                 first_delta = False
                 yielded_any = True
 
-            if finish_reason:
-                if not saw_finish:
-                    saw_finish = True
-                    if block_types:
-                        yield emit_sse_event("content_block_stop", {"index": block_idx})
-                    yield emit_sse_event("message_delta", {
-                        "delta": {"stop_reason": openai_finish_to_anthropic_stop(finish_reason),
-                                  "stop_sequence": None},
-                        "usage": {"output_tokens": total_output_tokens},
-                    })
-                    yield emit_sse_event("message_stop", {})
-                continue
+            # ── Map OpenAI delta → Anthropic content blocks ──
+            # OpenAI reasoning models surface chain-of-thought in
+            # ``reasoning_content`` (DeepSeek) or ``reasoning`` (o-series compat);
+            # forward it as an Anthropic ``thinking`` block. A single assistant
+            # turn may combine thinking + text + tool_use — we open one block per
+            # type and emit a matching content_block_stop for every open block at
+            # finish (see the finish / [DONE] branches).
+            reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
+            if not isinstance(reasoning, str):
+                reasoning = str(reasoning) if reasoning is not None else ""
 
-            # content_block_start when role=assistant and no block yet
-            if delta.get("role") == "assistant" and not block_types:
-                yield emit_sse_event("content_block_start", {
-                    "type": "content_block_start",
+            # thinking block
+            if reasoning:
+                if (not block_types) or block_types[-1] != "thinking":
+                    if block_types:
+                        block_idx += 1
+                    yield emit_sse_event("content_block_start", {
+                        "type": "content_block_start",
+                        "index": block_idx,
+                        "content_block": {"type": "thinking", "thinking": ""},
+                    })
+                    block_types.append("thinking")
+                yield emit_sse_event("content_block_delta", {
+                    "type": "content_block_delta",
                     "index": block_idx,
-                    "content_block": {"type": "text", "text": ""},
+                    "delta": {"type": "thinking_delta", "thinking": reasoning},
                 })
-                block_types.append("text")
                 yielded_any = True
 
+            # text block
             text = delta.get("content", "") or ""
+            if not isinstance(text, str):
+                text = str(text) if text is not None else ""
             if text:
-                if block_types and block_types[-1] != "text":
-                    block_idx += 1
+                if (not block_types) or block_types[-1] != "text":
+                    if block_types:
+                        block_idx += 1
                     yield emit_sse_event("content_block_start", {
                         "type": "content_block_start",
                         "index": block_idx,
@@ -424,6 +473,7 @@ async def stream_response_anthropic(
                 })
                 yielded_any = True
 
+            # tool_use blocks
             tool_calls = delta.get("tool_calls")
             if tool_calls and isinstance(tool_calls, list):
                 for tc in tool_calls:
@@ -434,19 +484,32 @@ async def stream_response_anthropic(
                     tc_args = fc.get("arguments", "") or ""
 
                     if tc_name:
-                        block_idx += 1
-                        yield emit_sse_event("content_block_start", {
-                            "type": "content_block_start",
-                            "index": block_idx,
-                            "content_block": {
-                                "type": "tool_use",
-                                "id": tc.get("id", f"toolu_{uuid.uuid4().hex[:24]}"),
-                                "name": tc_name,
-                                "input": {},
-                            },
-                        })
-                        block_types.append("tool_use")
-                        yielded_any = True
+                        # Open a block once per distinct tool call. Some upstreams
+                        # repeat `name` in every incremental chunk of the same
+                        # call, so dedupe by id/index to avoid duplicate blocks.
+                        tc_id = tc.get("id")
+                        tc_key = tc_id if tc_id is not None else tc.get("index")
+                        is_new = (
+                            (tc_key is not None and tc_key not in opened_tool_ids)
+                            or (tc_key is None and (not block_types or block_types[-1] != "tool_use"))
+                        )
+                        if is_new:
+                            if tc_key is not None:
+                                opened_tool_ids.add(tc_key)
+                            if block_types:
+                                block_idx += 1
+                            yield emit_sse_event("content_block_start", {
+                                "type": "content_block_start",
+                                "index": block_idx,
+                                "content_block": {
+                                    "type": "tool_use",
+                                    "id": tc.get("id", f"toolu_{uuid.uuid4().hex[:24]}"),
+                                    "name": tc_name,
+                                    "input": {},
+                                },
+                            })
+                            block_types.append("tool_use")
+                            yielded_any = True
 
                     if tc_args:
                         yield emit_sse_event("content_block_delta", {
@@ -455,6 +518,27 @@ async def stream_response_anthropic(
                             "delta": {"type": "input_json_delta", "partial_json": tc_args},
                         })
                         yielded_any = True
+
+            # Finish handling comes AFTER content emission so a chunk that carries
+            # both tool_call deltas and finish_reason still opens its blocks.
+            if finish_reason:
+                if not saw_finish:
+                    saw_finish = True
+                    if block_types:
+                        for _stop_idx in range(block_idx, -1, -1):
+                            yield emit_sse_event("content_block_stop", {"index": _stop_idx})
+                    yield emit_sse_event("message_delta", {
+                        "delta": {"stop_reason": openai_finish_to_anthropic_stop(finish_reason),
+                                  "stop_sequence": None},
+                        "usage": {
+                            "output_tokens": total_output_tokens,
+                            "input_tokens": total_input_tokens,
+                            "cache_read_input_tokens": total_cache_read,
+                            "cache_creation_input_tokens": total_cache_creation,
+                        },
+                    })
+                    yield emit_sse_event("message_stop", {})
+                continue
 
     except GeneratorExit:
         # Client disconnected mid-stream. Yield is illegal inside the
@@ -828,6 +912,18 @@ async def _stream_anthropic_with_logging(
                     if isinstance(obj, dict) and event_type == "message_delta":
                         usage = obj.get("usage", {})
                         output_tokens = usage.get("output_tokens", 0) or output_tokens
+                        # Upstream usage (input/cache) arrives on the final delta;
+                        # message_start is emitted before usage is known, so read
+                        # it here and fall back to the message_start values.
+                        _msg_input = usage.get("input_tokens", 0) or 0
+                        if _msg_input:
+                            input_tokens = _msg_input
+                        _cr = usage.get("cache_read_input_tokens", 0) or 0
+                        if _cr:
+                            cached_tokens = _cr
+                        _cc = usage.get("cache_creation_input_tokens", 0) or 0
+                        if _cc:
+                            prompt_partial_cached = _cc
                     elif isinstance(obj, dict) and event_type == "message_start":
                         message = obj.get("message", {})
                         usage = message.get("usage", {}) or {}
@@ -936,6 +1032,8 @@ async def _stream_anthropic_direct_with_logging(
     """
     output_tokens = 0
     input_tokens = 0
+    cached_tokens = 0
+    prompt_partial_cached = 0
     response_headers = {}
     raw_chunks = []
     first_response = None
@@ -979,9 +1077,24 @@ async def _stream_anthropic_direct_with_logging(
                     try:
                         obj, _ = decoder.raw_decode(data_str)
                         if isinstance(obj, dict):
+                            # Some upstreams emit data-only SSE (no `event:` line);
+                            # fall back to the `type` field so usage is still read.
+                            if event_type is None:
+                                event_type = obj.get("type")
                             if event_type == "message_delta":
                                 usage = obj.get("usage", {})
                                 output_tokens = usage.get("output_tokens", 0) or output_tokens
+                                # Upstream usage (input/cache) arrives on the
+                                # final delta; fall back to message_start values.
+                                _msg_input = usage.get("input_tokens", 0) or 0
+                                if _msg_input:
+                                    input_tokens = _msg_input
+                                _cr = usage.get("cache_read_input_tokens", 0) or 0
+                                if _cr:
+                                    cached_tokens = _cr
+                                _cc = usage.get("cache_creation_input_tokens", 0) or 0
+                                if _cc:
+                                    prompt_partial_cached = _cc
                             elif event_type == "message_start":
                                 message = obj.get("message", {})
                                 usage = message.get("usage", {}) or {}
@@ -1052,6 +1165,7 @@ async def _stream_anthropic_direct_with_logging(
                     raw_request=json.dumps(request_body, ensure_ascii=False),
                     raw_response=raw_response,
                     request_start=request_start, first_response=first_response, end_time=end_time,
+                    cached_tokens=cached_tokens, prompt_partial_cached=prompt_partial_cached,
                     client_key_name=client_key_name,
                     response_headers=json.dumps(response_headers if response_headers else {}, ensure_ascii=False),
                     api_key_id=key_id,
@@ -1310,11 +1424,37 @@ async def messages(data: AnthropicMessagesRequest, fastapi_request: Request):
                       "type": "api_error", "param": None, "code": "internal_error"}})
 
 
+def _strip_thinking_blocks(messages: Any) -> Any:
+    """Drop synthesized ``thinking`` blocks (no valid signature) from outgoing messages.
+
+    We synthesize thinking blocks (from OpenAI reasoning) with an empty
+    ``signature`` placeholder, which an upstream would reject if resent. Drop
+    only those — blocks carrying a real signature (e.g. a client echoing a
+    prior legitimate turn) are preserved so native upstreams can use them.
+    """
+    if not isinstance(messages, list):
+        return messages
+    cleaned = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            cleaned.append(msg)
+            continue
+        content = msg.get("content")
+        if isinstance(content, list):
+            msg = dict(msg)
+            msg["content"] = [
+                b for b in content
+                if not (isinstance(b, dict) and b.get("type") == "thinking" and not b.get("signature"))
+            ]
+        cleaned.append(msg)
+    return cleaned
+
+
 async def _build_anthropic_body(data: AnthropicMessagesRequest, actual_model_id: str) -> dict:
     """Build a direct Anthropic-format request body (for Anthropic upstreams)."""
     body = {
         "model": actual_model_id,
-        "messages": data.messages,
+        "messages": _strip_thinking_blocks(data.messages),
         "max_tokens": data.max_tokens,
     }
     if data.system is not None:
@@ -1333,6 +1473,8 @@ async def _build_anthropic_body(data: AnthropicMessagesRequest, actual_model_id:
         body["tool_choice"] = data.tool_choice
     if data.metadata is not None:
         body["metadata"] = data.metadata
+    if data.thinking is not None:
+        body["thinking"] = data.thinking
     if data.stream:
         body["stream"] = True
     return body
