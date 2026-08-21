@@ -72,3 +72,25 @@ _version.py
 # Temporary scratch scripts
 tmp_*.mjs
 tmp_*.js
+
+# One-off diagnostic scripts
+_diag*.py
+_diagnose*.py
+
+# Design demo / exploration pages
+demo/
+
+# Tool-specific working directories
+.workbuddy/
+
+# One-time analysis documents
+PROJECT_ANALYSIS.md
+
+# Redundant build spec
+AIProvider.exe.spec
+
+# AI assistant config (optional, uncomment to keep)
+CLAUDE.md
+
+# Generated icon PNGs (source is SVG)
+web/public/icons/*.png
