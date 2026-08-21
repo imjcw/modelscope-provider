@@ -212,7 +212,7 @@
           :class="{ 'invisible': sidebarCollapsed }"
           :style="sidebarCollapsed ? { 'pointer-events': 'none' } : {}">
           <FormField label="协议">
-            <div class="flex rounded-lg border border-ls-border overflow-hidden text-xs font-medium">
+            <div class="flex rounded-lg border border-ls-border overflow-hidden text-xs font-medium protocol-switch">
               <button type="button" @click="form.protocol = 'openai'"
                 class="flex-1 py-1.5 transition-colors"
                 :class="form.protocol === 'openai' ? 'bg-blue-600 text-white' : 'text-ls-muted hover:text-ls-text'">
@@ -890,6 +890,11 @@ onBeforeRouteLeave(() => {
 @keyframes breathing-text-dark {
   0%, 100% { color: #2a2d3e; }
   50% { color: #818cf8; }
+}
+
+/* 协议切换按钮：激活态固定白字，避免 main.css 全局 .text-white → var(--text) 在亮色主题下变深灰 */
+.protocol-switch .bg-blue-600 {
+  color: #fff;
 }
 
 /* 侧边栏：折叠时 translateX + width 同步动画，视觉上向右滑出同时布局空间释放 */

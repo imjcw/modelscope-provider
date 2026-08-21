@@ -359,11 +359,19 @@ function toggleResponseReasoning() {
 //      (each shows: tool type, name, id, 入参)
 //   2. tool role messages → merge into the matching tool_call card by tool_call_id,
 //      becoming the 出参.
+//
+// Both OpenAI (messages[].content = string / tool_calls[]) and Anthropic
+// (messages[].content = blocks; tool_use / tool_result / thinking blocks; top-level
+// `system`) request shapes are normalized to the same intermediate structure
+// first, so the merge logic below only needs to know one shape.
 const conversationMessages = computed(() => {
   if (!props.modelValue?.raw_request) return []
   try {
     const parsed = JSON.parse(props.modelValue.raw_request)
-    const messages = parsed.messages || []
+    const isAnthropic = isAnthropicRequest(parsed)
+    const messages = isAnthropic
+      ? normalizeAnthropicRequest(parsed)
+      : (parsed.messages || [])
     const out = []
 
     // Pass 1: flatten all messages, split assistant tool_calls into individual entries
@@ -439,6 +447,146 @@ const conversationMessages = computed(() => {
     return []
   }
 })
+
+/**
+ * Detect whether a parsed request body uses the Anthropic message format.
+ * Reliable checks: top-level `system` (list of blocks), or content blocks with
+ * Anthropic-specific types (tool_use, tool_result, thinking).
+ */
+function isAnthropicRequest(parsed) {
+  if (parsed.system !== undefined) return true
+  if (Array.isArray(parsed.messages)) {
+    for (const m of parsed.messages) {
+      if (Array.isArray(m.content)) {
+        for (const c of m.content) {
+          if (c && typeof c === 'object' && ['tool_use', 'tool_result', 'thinking'].includes(c.type)) {
+            return true
+          }
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Normalize an Anthropic-format request body into the OpenAI-style messages
+ * array expected by the Pass 1 & Pass 2 merge logic.
+ *
+ * Anthropic differences:
+ *   1. System prompt lives at top-level `system` (array of text blocks).
+ *   2. messages[].content is an array of blocks: text, thinking, image,
+ *      tool_use (assistant) or tool_result (user).
+ *   3. tool_use blocks carry {id, name, input}; tool_result blocks carry
+ *      {tool_use_id, content}.
+ *   4. Reasoning/thinking blocks live inside content, not as a separate field.
+ *   5. Images use {type: "image", source: {type: "base64", media_type, data}}
+ *      instead of {type: "image_url", image_url: {url}}.
+ */
+function normalizeAnthropicRequest(parsed) {
+  const out = []
+
+  // 1. Top-level system → prepend a system message
+  if (parsed.system != null) {
+    const sysText = Array.isArray(parsed.system)
+      ? parsed.system.filter(b => b && b.type === 'text').map(b => b.text || '').join('\n')
+      : String(parsed.system || '')
+    if (sysText) {
+      out.push({ role: 'system', content: sysText })
+    }
+  }
+
+  // 2. Normalize each message
+  for (const m of parsed.messages || []) {
+    const blocks = m.content
+    if (!Array.isArray(blocks)) {
+      // String content — pass through unchanged
+      out.push(m)
+      continue
+    }
+
+    if (m.role === 'assistant') {
+      // Assistant: extract text, thinking, and tool_use blocks
+      const textParts = []
+      const thinkingParts = []
+      const toolUses = []
+      for (const b of blocks) {
+        if (!b || typeof b !== 'object') continue
+        if (b.type === 'text') textParts.push(b.text || '')
+        else if (b.type === 'thinking') thinkingParts.push(b.thinking || '')
+        else if (b.type === 'tool_use') toolUses.push(b)
+      }
+      const content = textParts.join('')
+      const reasoning = thinkingParts.join('\n')
+      if (toolUses.length > 0) {
+        // Push text+thinking first, then tool_call entries
+        if (content || reasoning) {
+          out.push({ role: 'assistant', content, reasoning_content: reasoning, tool_calls: null })
+        }
+        for (const tu of toolUses) {
+          let args = '{}'
+          try { args = JSON.stringify(tu.input ?? {}) } catch {}
+          out.push({
+            role: 'tool_call',
+            toolName: tu.name || 'unknown',
+            toolId: tu.id || '',
+            toolArguments: args,
+            toolResult: '',
+          })
+        }
+      } else {
+        out.push({ role: 'assistant', content, reasoning_content: reasoning, tool_calls: null })
+      }
+    } else {
+      // User or other: extract text+image blocks, then emit tool_result separately
+      const textParts = []
+      let imageBlocks = []
+      const toolResults = []
+      for (const b of blocks) {
+        if (!b || typeof b !== 'object') continue
+        if (b.type === 'text') textParts.push(b.text || '')
+        else if (b.type === 'image' && b.source) {
+          // Convert Anthropic base64 image to the data-URL style MessageCard supports
+          const src = b.source
+          if (src.type === 'base64' && src.data) {
+            imageBlocks.push({
+              type: 'image_url',
+              image_url: { url: `data:${src.media_type || 'image/png'};base64,${src.data}` },
+            })
+          }
+        } else if (b.type === 'image_url' && b.image_url?.url) {
+          imageBlocks.push(b)
+        } else if (b.type === 'tool_result') {
+          const resultContent = typeof b.content === 'string'
+            ? b.content
+            : (b.content ? JSON.stringify(b.content) : '')
+          toolResults.push({ role: 'tool', tool_call_id: b.tool_use_id || '', content: resultContent })
+        }
+      }
+
+      // Emit user message with text content + images
+      if (textParts.length > 0 || imageBlocks.length > 0) {
+        const content = textParts.join('')
+        if (textParts.length > 0 && imageBlocks.length === 0) {
+          out.push({ role: m.role, content })
+        } else {
+          // Mixed content: keep as array for MessageCard rendering
+          const arr = []
+          if (textParts.length > 0) arr.push({ type: 'text', text: textParts.join('') })
+          arr.push(...imageBlocks)
+          out.push({ role: m.role, content: arr })
+        }
+      }
+
+      // Emit tool results separately (they match assistant tool_use by id)
+      for (const tr of toolResults) {
+        out.push(tr)
+      }
+    }
+  }
+
+  return out
+}
 
 const isExpanded = (idx) => collapsedMsgs.value[String(idx)] !== true
 const isHistoryExpanded = (idx) => historyCollapsed.value[String(idx)] !== true

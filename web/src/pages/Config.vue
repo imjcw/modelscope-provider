@@ -44,6 +44,17 @@
         </div>
       </CCard>
 
+      <!-- Desktop Widget -->
+      <CCard title="桌面卡片" body-class="p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-ls-text">桌面显示今日 Token 卡片</p>
+            <p class="text-xs text-ls-muted mt-0.5">应用启动后自动在桌面显示今日 Token 消耗小卡片，关闭后不再显示</p>
+          </div>
+          <CCheckbox v-model="config.desktopWidget" />
+        </div>
+      </CCard>
+
       <!-- Load Balancer -->
       <CCard title="负载均衡策略" body-class="p-5 space-y-4">
         <FormField label="策略" plain>
@@ -198,6 +209,7 @@ const DEFAULTS = {
   logRetentionHours: 1,
   lbStrategy: 'round_robin', timeoutMs: 30000,
   autoDisable: true, autoReset: true,
+  desktopWidget: true,
 }
 
 // Snapshot of the last successfully loaded config (used by "取消")
@@ -222,6 +234,7 @@ const applyBackendConfig = (data) => {
     autoDisable: (m('auto_disable_on_quota') || 'true').toLowerCase() === 'true',
     autoReset: (m('auto_reset_daily') || 'true').toLowerCase() === 'true',
     logRetentionHours: Number(m('log_retention_hours')) || 1,
+    desktopWidget: (m('desktop_widget_enabled') || 'true').toLowerCase() === 'true',
   })
   // Frontend-only fields keep their defaults if backend has nothing
 }
@@ -272,6 +285,7 @@ const saveConfig = async () => {
     auto_disable_on_quota: String(config.autoDisable),
     auto_reset_daily: String(config.autoReset),
     log_retention_hours: String(config.logRetentionHours),
+    desktop_widget_enabled: String(config.desktopWidget),
   }
   try {
     await apiUpdateConfig(payload)

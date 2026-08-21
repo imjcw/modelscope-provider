@@ -101,6 +101,7 @@ except Exception as _e:
 _TRAY_ID_OPEN = 1001
 _TRAY_ID_EXIT = 1002
 _TRAY_ID_LOGS = 1003
+_TRAY_ID_WIDGET = 1004  # 桌面卡片显示/隐藏
 _TRAY_MSG = 0x1000 + 1  # WM_USER + 1
 
 
@@ -152,15 +153,34 @@ class TrayRunner:
         self.icon_hicon = None
         self._menu = None
         self._exiting = False
+        self.widget = None  # DesktopWidget（可用时）
 
     def run(self):
         try:
             self._create_window()
             self._register_icon()
+            self._start_widget()
             self._browser_timer()
             self._pump()
         except Exception as _e:
             logger.error("tray runner failed: %s", _e, exc_info=_e)
+
+    def _start_widget(self):
+        """启动桌面卡片（单独线程），失败时静默降级。"""
+        try:
+            from core.desktop_widget import DesktopWidget, WIDGET_AVAILABLE
+            if not WIDGET_AVAILABLE:
+                return
+            self.widget = DesktopWidget(
+                base_url=f"http://127.0.0.1:{self.port}",
+                data_dir=_DATA_DIR,
+                port=self.port,
+            )
+            threading.Thread(target=self.widget.run, daemon=True, name="desktop-widget").start()
+            logger.info("desktop widget thread started")
+        except Exception as _e:
+            logger.warning("desktop widget start failed: %s", _e)
+            self.widget = None
 
     def _create_window(self):
         W = _win32gui
@@ -207,6 +227,8 @@ class TrayRunner:
                 self._open()
             elif cmd_id == _TRAY_ID_LOGS:
                 self._open_logs()
+            elif cmd_id == _TRAY_ID_WIDGET:
+                self._toggle_widget()
             elif cmd_id == _TRAY_ID_EXIT:
                 self._exit()
         return _win32gui.DefWindowProc(hwnd, msg, wParam, lParam)
@@ -246,6 +268,13 @@ class TrayRunner:
             menu = _win32gui.CreatePopupMenu()
             _win32gui.AppendMenu(menu, _win32con.MF_STRING, _TRAY_ID_OPEN, "打开应用")
             _win32gui.AppendMenu(menu, _win32con.MF_STRING, _TRAY_ID_LOGS, "查看日志")
+            _win32gui.AppendMenu(
+                menu,
+                _win32con.MF_STRING | (
+                    _win32con.MF_CHECKED if self._widget_visible() else _win32con.MF_UNCHECKED
+                ),
+                _TRAY_ID_WIDGET, "桌面卡片",
+            )
             _win32gui.AppendMenu(menu, _win32con.MF_SEPARATOR, 0, "")
             _win32gui.AppendMenu(menu, _win32con.MF_STRING, _TRAY_ID_EXIT, "退出")
             # 以系统原生样式弹出：先把宿主窗口设为前台（否则菜单会以经典
@@ -301,8 +330,27 @@ class TrayRunner:
         except Exception as _e:
             logger.warning("failed to open logs dir %s: %s", target, _e)
 
+    def _toggle_widget(self):
+        """桌面卡片显示/隐藏（已关闭时重新拉起）。"""
+        if self.widget is None or not self.widget.is_alive():
+            self._start_widget()
+        else:
+            self.widget.toggle_visible()
+
+    def _widget_visible(self) -> bool:
+        try:
+            return bool(self.widget and self.widget.is_visible())
+        except Exception:
+            return False
+
     def _exit(self):
         self._exiting = True
+        # 关闭桌面卡片窗口
+        if self.widget is not None:
+            try:
+                self.widget.destroy()
+            except Exception:
+                pass
         # 优雅关闭 uvicorn
         try:
             self.server.should_exit = True
