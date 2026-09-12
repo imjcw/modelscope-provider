@@ -20,13 +20,16 @@ Protocol reference: https://docs.anthropic.com/en/api/messages
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
-from typing import Optional, List, AsyncGenerator, Any
+from typing import Optional, List, AsyncGenerator, Any, Union
 import copy
 import json
 import asyncio
 import logging
 from datetime import datetime, timezone
 import uuid
+
+from models.account import normalize_stream_protocol
+from services.usage import normalize_cache_usage
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,88 @@ from .anthropic_adapters import (
 )
 
 router = APIRouter()
+
+
+# ── Upstream protocol for Anthropic requests (per supplier) ────────────────
+# Some suppliers serve an Anthropic-shaped ``/v1/messages`` whose *streaming*
+# path returns ``200`` + ``content-type: text/event-stream`` and then EOFs with
+# a zero-byte body — SenseTime / 商汤 does exactly this for its DeepSeek
+# models. Anthropic clients read that as "streaming response ended before any
+# complete data", re-send the request non-streaming, and the request ends up
+# billed twice. The OpenAI endpoint of the very same supplier streams those
+# models correctly, so the upstream path is selectable per supplier via
+# ``accounts.anthropic_stream_protocol``.
+#
+# In ``auto`` mode the native path is kept until a model's stream comes back
+# empty repeatedly; the switch is then remembered for that model in this
+# process. The memory is deliberately not persisted: the column stays ``auto``
+# and the same switch is re-derived after a restart.
+EMPTY_STREAM_LIMIT = 2
+# Both dicts are only touched on the event-loop thread (the helpers below are
+# synchronous, so each read-modify-write runs to completion between awaits) —
+# no locking needed. A multi-worker deployment re-derives this memory per
+# process, which is part of why it is not persisted.
+_empty_stream_counts: dict[tuple[str, str], int] = {}
+_stream_protocol_overrides: dict[tuple[str, str], str] = {}
+
+
+def _effective_stream_protocol(account, actual_model_id: str) -> str:
+    """Resolve the upstream protocol to use for one Anthropic request."""
+    configured = normalize_stream_protocol(
+        getattr(account, "anthropic_stream_protocol", None))
+    if configured != "auto":
+        return configured
+    return _stream_protocol_overrides.get(
+        (account.account_id, actual_model_id)) or "native"
+
+
+def _can_convert_to_openai(account) -> bool:
+    """Whether this supplier has an OpenAI endpoint we could fall back onto."""
+    return (getattr(account, "provider_type", "") or "") != "anthropic" and bool(
+        getattr(account, "base_url", "")
+    )
+
+
+def _note_stream_result(account, actual_model_id: str, was_empty: bool) -> None:
+    """Track consecutive empty native Anthropic streams for one model.
+
+    Resets on the first successful (non-empty) stream, so the switch only fires
+    for a sustained failure and not for two stragglers days apart.
+    """
+    if normalize_stream_protocol(
+            getattr(account, "anthropic_stream_protocol", None)) != "auto":
+        # Manual mode: the operator decided which path to use, and
+        # _effective_stream_protocol ignores the override memory below anyway.
+        # Without this check the warning would still fire and claim the model
+        # was routed through OpenAI — while the request kept hitting
+        # /v1/messages.
+        return
+
+    key = (account.account_id, actual_model_id)
+    if not was_empty:
+        _empty_stream_counts.pop(key, None)
+        return
+    hits = _empty_stream_counts.get(key, 0) + 1
+    _empty_stream_counts[key] = hits
+    if hits < EMPTY_STREAM_LIMIT:
+        return
+    if not _can_convert_to_openai(account):
+        return
+    if _stream_protocol_overrides.get(key) == "openai":
+        return
+    _stream_protocol_overrides[key] = "openai"
+    logger.warning(
+        "Anthropic upstream returned %d consecutive empty streams for "
+        "account=%s model=%s — routing this model through the OpenAI upstream "
+        "path for the rest of this process",
+        EMPTY_STREAM_LIMIT, account.account_id, actual_model_id,
+    )
+
+
+def reset_stream_protocol_overrides() -> None:
+    """Drop the in-memory auto-switch state (tests only)."""
+    _empty_stream_counts.clear()
+    _stream_protocol_overrides.clear()
 
 
 # ── Request schema (mirrors SDK MessageCreateParams TypedDict) ────────────
@@ -75,17 +160,43 @@ class AnthropicMessagesRequest(BaseModel):
 
 # ── Anthropic ↔ OpenAI adapters ─────────────────────────────────────────
 
-def _anthropic_content_to_openai(content: Any) -> str:
-    """Convert Anthropic content (str or block array) to OpenAI content string."""
+def _anthropic_content_to_openai(content: Any) -> Union[str, list]:
+    """Convert Anthropic content (str or block array) to OpenAI content.
+
+    Text-only input stays a plain string (the shape most OpenAI-compatible
+    upstreams expect). When the blocks contain images they become an OpenAI
+    vision content-part array — ``image_url`` parts with ``data:`` URLs for
+    base64 sources — so image prompts survive the conversion instead of being
+    silently dropped.
+    """
     if isinstance(content, str):
         return content
     if isinstance(content, list):
         parts = []
+        has_image = False
         for block in content:
-            if isinstance(block, dict):
-                if block.get("type") == "text":
-                    parts.append(block.get("text", ""))
-        return "\n".join(parts) if parts else ""
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                parts.append({"type": "text", "text": block.get("text", "")})
+            elif block.get("type") == "image":
+                source = block.get("source") or {}
+                if source.get("type") == "base64":
+                    media_type = source.get("media_type") or "image/png"
+                    parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{source.get('data', '')}"},
+                    })
+                    has_image = True
+                elif source.get("type") == "url":
+                    parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": source.get("url", "")},
+                    })
+                    has_image = True
+        if not has_image:
+            return "\n".join(p["text"] for p in parts) if parts else ""
+        return parts
     return str(content) if content else ""
 
 
@@ -143,9 +254,20 @@ async def _anthropic_to_openai_body(data: AnthropicMessagesRequest, actual_model
 
     openai_messages = []
 
-    # Top-level system prompt
+    # Top-level system prompt. Anthropic allows a string or an array of blocks
+    # (with ``cache_control`` etc.); the OpenAI side takes one system message of
+    # plain text, so join the text of the text blocks instead of serialising
+    # the block array as JSON.
     if data.system is not None:
-        sys_content = data.system if isinstance(data.system, str) else json.dumps(data.system)
+        if isinstance(data.system, str):
+            sys_content = data.system
+        elif isinstance(data.system, list):
+            sys_content = "\n".join(
+                b.get("text", "") for b in data.system
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        else:
+            sys_content = str(data.system)
         openai_messages.append({"role": "system", "content": sys_content})
 
     for msg in data.messages:
@@ -205,11 +327,14 @@ async def _anthropic_to_openai_body(data: AnthropicMessagesRequest, actual_model
                         "tool_call_id": tool_call_id,
                         "content": str(content_val),
                     })
-            if text_parts:
-                openai_messages.append({
-                    "role": "user",
-                    "content": "\n".join(text_parts),
-                })
+            # Text-only blocks stay a joined string; image-bearing blocks go
+            # through the vision converter so they reach the upstream as
+            # image_url parts instead of being silently dropped.
+            converted = _anthropic_content_to_openai(content)
+            if isinstance(converted, list):
+                openai_messages.append({"role": "user", "content": converted})
+            elif converted:
+                openai_messages.append({"role": "user", "content": converted})
             continue
 
         openai_messages.append({
@@ -243,6 +368,8 @@ async def _anthropic_to_openai_body(data: AnthropicMessagesRequest, actual_model
             elif tc_type == "any":
                 # Anthropic "any" → OpenAI "required" (force tool call)
                 body["tool_choice"] = "required"
+            elif tc_type == "none":
+                body["tool_choice"] = "none"
             elif tc_type == "tool" and tc.get("name"):
                 body["tool_choice"] = {"type": "function", "function": {"name": tc["name"]}}
         elif tc == "auto":
@@ -250,6 +377,10 @@ async def _anthropic_to_openai_body(data: AnthropicMessagesRequest, actual_model
         elif tc == "none":
             body["tool_choice"] = "none"
 
+    # ``thinking`` is intentionally dropped: most OpenAI-compatible gateways
+    # reject the Anthropic shape, and the DeepSeek-style endpoints emit
+    # ``reasoning_content`` by default anyway (surfaced as thinking blocks on
+    # the way back out).
     return body
 
 
@@ -318,6 +449,36 @@ async def stream_response_anthropic(
     opened_tool_ids = set()
     _closed = False
 
+    def _usage_payload():
+        return {
+            "output_tokens": total_output_tokens,
+            "input_tokens": total_input_tokens,
+            "cache_read_input_tokens": total_cache_read,
+            "cache_creation_input_tokens": total_cache_creation,
+        }
+
+    def _close_events(stop_reason):
+        """The message_delta + message_stop pair that ends the stream."""
+        return [
+            emit_sse_event("message_delta", {
+                "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                "usage": _usage_payload(),
+            }),
+            emit_sse_event("message_stop", {}),
+        ]
+
+    # OpenAI tool-call identity → the Anthropic block index it opened. Keyed by
+    # ("id", call_id) and ("idx", streaming_index): argument fragments may carry
+    # either, both, or neither, and must land on their own call's block — not on
+    # whichever block was opened last.
+    tool_block_ids = {}
+    # Finish seen but message_delta/message_stop not yet emitted: the OpenAI
+    # spec streams the usage chunk AFTER the finish chunk
+    # (stream_options.include_usage), so the close sequence waits for it and is
+    # flushed on the usage chunk, [DONE], or stream end — whichever comes first.
+    pending_stop_reason = None
+    usage_seen = False
+
     if _capture_headers:
         hdrs = {}
         try:
@@ -335,16 +496,14 @@ async def stream_response_anthropic(
                     if block_types:
                         for _stop_idx in range(block_idx, -1, -1):
                             yield emit_sse_event("content_block_stop", {"index": _stop_idx})
-                    yield emit_sse_event("message_delta", {
-                        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                        "usage": {
-                            "output_tokens": total_output_tokens,
-                            "input_tokens": total_input_tokens,
-                            "cache_read_input_tokens": total_cache_read,
-                            "cache_creation_input_tokens": total_cache_creation,
-                        },
-                    })
-                    yield emit_sse_event("message_stop", {})
+                    for _ev in _close_events("end_turn"):
+                        yield _ev
+                elif pending_stop_reason is not None:
+                    # Spec-order stream: the usage chunk never arrived, so the
+                    # close sequence deferred at finish is flushed here.
+                    for _ev in _close_events(pending_stop_reason):
+                        yield _ev
+                    pending_stop_reason = None
                 if not yielded_any:
                     error_data = {
                         "type": "error",
@@ -396,6 +555,13 @@ async def stream_response_anthropic(
                 _ptd = usage.get("prompt_tokens_details") or {}
                 if isinstance(_ptd, dict):
                     total_cache_read = _ptd.get("cached_tokens", total_cache_read) or total_cache_read
+                usage_seen = True
+                # Spec-order stream: usage arrives after the finish chunk —
+                # flush the deferred close sequence now that totals are final.
+                if pending_stop_reason is not None:
+                    for _ev in _close_events(pending_stop_reason):
+                        yield _ev
+                    pending_stop_reason = None
 
             if not choices:
                 continue
@@ -482,13 +648,14 @@ async def stream_response_anthropic(
                     fc = tc.get("function", {})
                     tc_name = fc.get("name", "")
                     tc_args = fc.get("arguments", "") or ""
+                    tc_id = tc.get("id")
+                    tc_index = tc.get("index")
 
                     if tc_name:
                         # Open a block once per distinct tool call. Some upstreams
                         # repeat `name` in every incremental chunk of the same
                         # call, so dedupe by id/index to avoid duplicate blocks.
-                        tc_id = tc.get("id")
-                        tc_key = tc_id if tc_id is not None else tc.get("index")
+                        tc_key = tc_id if tc_id is not None else tc_index
                         is_new = (
                             (tc_key is not None and tc_key not in opened_tool_ids)
                             or (tc_key is None and (not block_types or block_types[-1] != "tool_use"))
@@ -496,6 +663,10 @@ async def stream_response_anthropic(
                         if is_new:
                             if tc_key is not None:
                                 opened_tool_ids.add(tc_key)
+                            # A later repeat that carries only the streaming
+                            # index (no id) must dedupe against this call too.
+                            if tc_index is not None:
+                                opened_tool_ids.add(tc_index)
                             if block_types:
                                 block_idx += 1
                             yield emit_sse_event("content_block_start", {
@@ -509,12 +680,27 @@ async def stream_response_anthropic(
                                 },
                             })
                             block_types.append("tool_use")
+                            # Remember which Anthropic block this call maps to,
+                            # under both identities: with parallel calls the
+                            # fragments interleave, and later fragments often
+                            # carry only the streaming index (no id).
+                            if tc_id is not None:
+                                tool_block_ids[("id", tc_id)] = block_idx
+                            if tc_index is not None:
+                                tool_block_ids[("idx", tc_index)] = block_idx
                             yielded_any = True
 
                     if tc_args:
+                        target_idx = None
+                        if tc_id is not None:
+                            target_idx = tool_block_ids.get(("id", tc_id))
+                        if target_idx is None and tc_index is not None:
+                            target_idx = tool_block_ids.get(("idx", tc_index))
+                        if target_idx is None:
+                            target_idx = block_idx
                         yield emit_sse_event("content_block_delta", {
                             "type": "content_block_delta",
-                            "index": block_idx,
+                            "index": target_idx,
                             "delta": {"type": "input_json_delta", "partial_json": tc_args},
                         })
                         yielded_any = True
@@ -527,17 +713,18 @@ async def stream_response_anthropic(
                     if block_types:
                         for _stop_idx in range(block_idx, -1, -1):
                             yield emit_sse_event("content_block_stop", {"index": _stop_idx})
-                    yield emit_sse_event("message_delta", {
-                        "delta": {"stop_reason": openai_finish_to_anthropic_stop(finish_reason),
-                                  "stop_sequence": None},
-                        "usage": {
-                            "output_tokens": total_output_tokens,
-                            "input_tokens": total_input_tokens,
-                            "cache_read_input_tokens": total_cache_read,
-                            "cache_creation_input_tokens": total_cache_creation,
-                        },
-                    })
-                    yield emit_sse_event("message_stop", {})
+                    # OpenAI streams usage in a separate chunk AFTER the finish
+                    # chunk (stream_options.include_usage). If usage has not
+                    # been seen yet, defer message_delta/message_stop so the
+                    # client gets the real totals — flushing happens on the
+                    # usage chunk, [DONE], or stream end.
+                    if usage_seen:
+                        for _ev in _close_events(
+                                openai_finish_to_anthropic_stop(finish_reason)):
+                            yield _ev
+                    else:
+                        pending_stop_reason = openai_finish_to_anthropic_stop(
+                            finish_reason)
                 continue
 
     except GeneratorExit:
@@ -552,6 +739,12 @@ async def stream_response_anthropic(
         raise
     finally:
         await safe_aclose(response)
+        if not _closed and pending_stop_reason is not None:
+            # Upstream closed after finish without [DONE]/usage — still close
+            # the message so clients see a complete event sequence.
+            for _ev in _close_events(pending_stop_reason):
+                yield _ev
+            pending_stop_reason = None
         if not _closed and not yielded_any and not saw_done and not saw_finish:
             error_data = {
                 "type": "error",
@@ -621,6 +814,10 @@ async def _try_anthropic_candidate(
         body["model"] = actual_model_id
         if request.stream:
             body["stream"] = True
+            # Ask for the trailing usage chunk: OpenAI omits usage in streams
+            # unless requested, and the SSE converter defers the Anthropic
+            # close sequence until it arrives so the client gets real totals.
+            body["stream_options"] = {"include_usage": True}
     # For Anthropic upstream, the body already has the correct format
 
     # Dual-protocol suppliers may expose OpenAI and Anthropic endpoints at
@@ -753,6 +950,16 @@ async def _try_anthropic_candidate(
         input_tokens = usage.get("input_tokens", 0) or 0
         output_tokens = usage.get("output_tokens", 0) or 0
         cached_tokens, prompt_partial_cached = extract_cache_usage(usage)
+
+        # Non-streaming is the one Anthropic path that had no cache normalisation.
+        # It must sit before both the log row and the quota update below:
+        # /v1/messages reports input_tokens as the uncached remainder, so without
+        # this the quota is under-counted by an order of magnitude. Same rule as
+        # the two streaming paths below; log_request re-applies it harmlessly.
+        input_tokens, cached_tokens, prompt_partial_cached = normalize_cache_usage(
+            input_tokens, cached_tokens, prompt_partial_cached
+        )
+
         end_time = datetime.now(timezone.utc).isoformat()
 
         if admin_service:
@@ -806,11 +1013,6 @@ async def _try_anthropic_candidate(
                 pass
         if alias_router is not None:
             try:
-                alias_router.record_usage(actual_model_id, client_key_name or "")
-            except Exception:
-                pass
-        if alias_router is not None:
-            try:
                 alias_router.release(raw_key_id, actual_model_id)
             except Exception:
                 pass
@@ -824,7 +1026,7 @@ async def _try_anthropic_candidate(
             response, account, request.model, body, actual_model_id,
             admin_service, request_start, quota_updater=quota_updater,
             client_key_name=client_key_name, circuit_breaker=circuit_breaker,
-            alias_router=alias_router, key_id=key_id,
+            alias_router=alias_router, key_id=key_id, raw_key_id=raw_key_id,
         )
     else:
         # Anthropic upstream → pass through SSE directly
@@ -832,7 +1034,7 @@ async def _try_anthropic_candidate(
             response, account, request.model, body, actual_model_id,
             admin_service, request_start, quota_updater=quota_updater,
             client_key_name=client_key_name, circuit_breaker=circuit_breaker,
-            alias_router=alias_router, key_id=key_id,
+            alias_router=alias_router, key_id=key_id, raw_key_id=raw_key_id,
         )
 
     return StreamingResponse(
@@ -851,7 +1053,7 @@ async def _stream_anthropic_with_logging(
     response, account, model_name, request_body, actual_model_id,
     admin_service, request_start,
     quota_updater=None, client_key_name=None,
-    circuit_breaker=None, alias_router=None, key_id: int = 0,
+    circuit_breaker=None, alias_router=None, key_id: int = 0, raw_key_id: int = 0,
 ):
     """Log and track quota for an Anthropic-converted SSE stream (OpenAI upstream)."""
     output_tokens = 0
@@ -971,12 +1173,26 @@ async def _stream_anthropic_with_logging(
 
         end_time = datetime.now(timezone.utc).isoformat()
         _stream_ended = stream_interrupted or stream_failed
-        _is_empty = len(raw_chunks) == 0
-        log_status = -1 if (_stream_ended or _is_empty) else stream_status_code
+        # Same empty-stream rule as the native path below: a 200 +
+        # text/event-stream that closed without a single event is not a clean
+        # success, and it does not count as evidence for the auto switch either.
+        _was_empty = not _stream_ended and len(raw_chunks) == 0
+        log_status = -1 if (_stream_ended or _was_empty) else stream_status_code
         log_error = (
-            f"Streaming interrupted: {interrupt_reason}"
-            if interrupt_reason
-            else (f"Stream ended: status={log_status}" if not stream_failed else None)
+            f"Streaming interrupted: {interrupt_reason}" if interrupt_reason
+            else ("Upstream stream ended without any event" if _was_empty else None)
+        )
+
+        try:
+            _note_stream_result(account, actual_model_id, _was_empty)
+        except Exception as e:
+            logger.warning(f"Failed to note stream result: {e}")
+
+        # DeepSeek 的 Anthropic 兼容端点把 input_tokens 报成「未命中部分」，
+        # cache_read_input_tokens 在 input 之外；归一化后再写日志和配额，
+        # 否则命中率会超过 100%、配额也会严重少记。幂等。
+        input_tokens, cached_tokens, prompt_partial_cached = normalize_cache_usage(
+            input_tokens, cached_tokens, prompt_partial_cached
         )
 
         try:
@@ -1021,7 +1237,7 @@ async def _stream_anthropic_direct_with_logging(
     response, account, model_name, request_body, actual_model_id,
     admin_service, request_start,
     quota_updater=None, client_key_name=None,
-    circuit_breaker=None, alias_router=None, key_id: int = 0,
+    circuit_breaker=None, alias_router=None, key_id: int = 0, raw_key_id: int = 0,
 ):
     """Pass through an Anthropic-native SSE stream directly with logging/quota tracking.
 
@@ -1149,8 +1365,28 @@ async def _stream_anthropic_direct_with_logging(
 
         end_time = datetime.now(timezone.utc).isoformat()
         _stream_ended = stream_interrupted or stream_failed
-        log_status = -1 if _stream_ended else stream_status_code
-        log_error = f"Streaming interrupted: {interrupt_reason}" if interrupt_reason else None
+        # The upstream answered 200 + text/event-stream and then closed without
+        # sending a single SSE event. Anthropic clients read that as "streaming
+        # response ended before any complete data" and retry the whole request
+        # non-streaming, so it must not be logged as a clean 200.
+        _was_empty = not _stream_ended and len(raw_chunks) == 0
+        log_status = -1 if (_stream_ended or _was_empty) else stream_status_code
+        log_error = (
+            f"Streaming interrupted: {interrupt_reason}" if interrupt_reason
+            else ("Upstream stream ended without any event" if _was_empty else None)
+        )
+
+        try:
+            _note_stream_result(account, actual_model_id, _was_empty)
+        except Exception as e:
+            logger.warning(f"Failed to note stream result: {e}")
+
+        # DeepSeek 的 Anthropic 兼容端点把 input_tokens 报成「未命中部分」，
+        # cache_read_input_tokens 在 input 之外；归一化后再写日志和配额，
+        # 否则命中率会超过 100%、配额也会严重少记。幂等。
+        input_tokens, cached_tokens, prompt_partial_cached = normalize_cache_usage(
+            input_tokens, cached_tokens, prompt_partial_cached
+        )
 
         try:
             if admin_service:
@@ -1282,19 +1518,14 @@ async def messages(data: AnthropicMessagesRequest, fastapi_request: Request):
                         except Exception:
                             pass
 
-                    # The client reached the Anthropic entry point, so we ALWAYS
-                    # speak the Anthropic protocol to the upstream here.
-                    # ``provider_type`` is the supplier's *type* (rate limiting /
-                    # display), not the protocol — a single supplier can expose
-                    # both OpenAI and Anthropic endpoints. The Anthropic endpoint
-                    # is ``anthropic_base_url`` (falling back to ``base_url``).
-                    # The auth scheme follows the supplier's declared
-                    # ``anthropic_auth_style`` (native ``x-api-key`` by default;
-                    # ``bearer`` for suppliers whose /v1/messages still wants
-                    # ``Authorization: Bearer``, e.g. SenseTime).
-                    body = await _build_anthropic_body(data, actual_model_id)
-                    auth_style = getattr(account, "anthropic_auth_style", "anthropic") or "anthropic"
-                    url_path = "v1/messages"
+                    # The client reached the Anthropic entry point, so we speak
+                    # the Anthropic protocol to the CLIENT. Which upstream *path*
+                    # we use is per supplier (``anthropic_stream_protocol``):
+                    # some suppliers serve /v1/messages with a streaming path
+                    # that returns an empty body, in which case we convert and
+                    # hit /v1/chat/completions instead.
+                    body, auth_style, url_path = await _build_upstream_request(
+                        data, account, actual_model_id)
 
                     try:
                         body_copy = copy.deepcopy(body)
@@ -1395,16 +1626,12 @@ async def messages(data: AnthropicMessagesRequest, fastapi_request: Request):
                     }
                 })
 
-            # The client reached the Anthropic entry point, so we ALWAYS speak
-            # the Anthropic protocol to the upstream here. ``provider_type`` is
-            # the supplier's *type*, not the protocol — the Anthropic endpoint is
-            # ``anthropic_base_url`` (falling back to ``base_url``). The auth
-            # scheme follows the supplier's declared ``anthropic_auth_style``
-            # (native ``x-api-key`` by default; ``bearer`` for suppliers whose
-            # /v1/messages still wants ``Authorization: Bearer``, e.g. SenseTime).
-            body = await _build_anthropic_body(data, actual_model_id)
-            auth_style = getattr(account, "anthropic_auth_style", "anthropic") or "anthropic"
-            url_path = "v1/messages"
+            # Same per-supplier protocol choice as the candidate loop above:
+            # ``provider_type`` is the supplier's *type* (rate limiting /
+            # display), not the protocol — a single supplier can expose both
+            # OpenAI and Anthropic endpoints.
+            body, auth_style, url_path = await _build_upstream_request(
+                data, account, actual_model_id)
 
             return await _try_anthropic_candidate(
                 request=data, account=account,
@@ -1486,3 +1713,31 @@ async def _build_anthropic_body(data: AnthropicMessagesRequest, actual_model_id:
     if data.stream:
         body["stream"] = True
     return body
+
+
+async def _build_upstream_request(
+    data: AnthropicMessagesRequest, account, actual_model_id: str,
+) -> tuple:
+    """Pick the upstream protocol for an Anthropic request and build its body.
+
+    Returns ``(body, auth_style, url_path)``:
+
+    - ``native`` → Anthropic body, the supplier's own ``anthropic_auth_style``,
+      ``"v1/messages"``.
+    - ``openai`` → OpenAI body, ``"bearer"``, ``"chat/completions"``.
+
+    ``_try_anthropic_candidate`` assumes the body already matches ``url_path``,
+    so the protocol choice and the body conversion must be made together here.
+    """
+    protocol = _effective_stream_protocol(account, actual_model_id)
+    if protocol == "openai":
+        return (
+            await _anthropic_to_openai_body(data, actual_model_id),
+            "bearer",
+            "chat/completions",
+        )
+    return (
+        await _build_anthropic_body(data, actual_model_id),
+        getattr(account, "anthropic_auth_style", "anthropic") or "anthropic",
+        "v1/messages",
+    )

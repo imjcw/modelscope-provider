@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List, Literal
 
-from models.account import DEFAULT_PROVIDER_TYPE
+from models.account import DEFAULT_ANTHROPIC_STREAM_PROTOCOL, DEFAULT_PROVIDER_TYPE
 
 router = APIRouter()
 
@@ -64,6 +64,7 @@ class SupplierCreate(BaseModel):
     api_key_records: List[dict] = Field(default_factory=list, description="API key records with status (id, api_key, status)")
     anthropic_base_url: str = Field(default="", description="Optional separate Anthropic-native base URL (e.g. https://api.anthropic.com). Used for the /anthropic entry point; falls back to base_url when empty.")
     anthropic_auth_style: str = Field(default="anthropic", description="Auth scheme for this supplier's Anthropic endpoint: 'anthropic' (x-api-key, native) or 'bearer' (Authorization: Bearer, e.g. SenseTime).")
+    anthropic_stream_protocol: str = Field(default=DEFAULT_ANTHROPIC_STREAM_PROTOCOL, description="Upstream protocol for Anthropic requests: 'native' (hit /v1/messages), 'openai' (convert and hit /v1/chat/completions), or 'auto' (native, switching to 'openai' for a model whose stream comes back empty).")
 
 
 class SupplierUpdate(BaseModel):
@@ -75,6 +76,7 @@ class SupplierUpdate(BaseModel):
     api_key_records: Optional[List[dict]] = None
     anthropic_base_url: Optional[str] = None
     anthropic_auth_style: Optional[str] = None
+    anthropic_stream_protocol: Optional[str] = None
 
 
 class MappingUpsert(BaseModel):
@@ -289,6 +291,7 @@ def create_supplier(body: SupplierCreate, request: Request, service=Depends(get_
             api_key_records=body.api_key_records,
             anthropic_base_url=body.anthropic_base_url,
             anthropic_auth_style=body.anthropic_auth_style,
+            anthropic_stream_protocol=body.anthropic_stream_protocol,
         )
         _refresh_after_account_change(request)
         return result

@@ -53,6 +53,11 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    # Newer OpenAI clients (o-series, gpt-5 era SDKs) send this INSTEAD of
+    # max_tokens; it must survive the rebuild or the output cap is silently
+    # dropped and upstreams generate unbounded.
+    max_completion_tokens: Optional[int] = None
+    reasoning_effort: Optional[str] = None
     top_p: Optional[float] = None
     stop: Optional[Union[str, List[str]]] = None
     n: Optional[int] = None
@@ -641,6 +646,10 @@ async def _build_request_body(data: ChatCompletionRequest, actual_model_id: str)
         body["temperature"] = data.temperature
     if data.max_tokens is not None:
         body["max_tokens"] = data.max_tokens
+    if data.max_completion_tokens is not None:
+        body["max_completion_tokens"] = data.max_completion_tokens
+    if data.reasoning_effort is not None:
+        body["reasoning_effort"] = data.reasoning_effort
     if data.top_p is not None:
         body["top_p"] = data.top_p
     if data.stop is not None:
@@ -680,6 +689,23 @@ async def _build_request_body(data: ChatCompletionRequest, actual_model_id: str)
 # ── OpenAI ↔ Anthropic conversion (for Anthropic upstreams) ─────────────
 
 
+def _openai_image_url_to_anthropic_source(url: str) -> Optional[dict]:
+    """Map an OpenAI ``image_url`` to an Anthropic image ``source``.
+
+    ``data:`` URLs (base64-embedded images, the common OpenAI SDK form) become
+    a base64 source — a plain ``url`` source carrying a ``data:`` URI would be
+    rejected by real Anthropic upstreams. http(s) URLs pass through as-is.
+    """
+    if isinstance(url, str) and url.startswith("data:"):
+        try:
+            header, data = url.split(",", 1)
+        except ValueError:
+            return None
+        media_type = header[len("data:"):].split(";", 1)[0] or "image/png"
+        return {"type": "base64", "media_type": media_type, "data": data}
+    return {"type": "url", "url": url}
+
+
 def _openai_message_to_anthropic(msg: dict) -> dict:
     """Convert one OpenAI message to Anthropic format."""
     if not isinstance(msg, dict):
@@ -702,7 +728,9 @@ def _openai_message_to_anthropic(msg: dict) -> dict:
                     elif block.get("type") == "image_url":
                         url_data = block.get("image_url", {})
                         url = url_data if isinstance(url_data, str) else url_data.get("url", "")
-                        anthro_parts.append({"type": "image", "source": {"type": "url", "url": url}})
+                        source = _openai_image_url_to_anthropic_source(url)
+                        if source:
+                            anthro_parts.append({"type": "image", "source": source})
             tool_content = anthro_parts if anthro_parts else ""
         blocks = [{"type": "tool_result", "tool_use_id": tool_call_id or "",
                    "content": [{"type": "text", "text": str(tool_content)}] if isinstance(tool_content, str) else tool_content}]
@@ -741,10 +769,11 @@ def _openai_message_to_anthropic(msg: dict) -> dict:
                     blocks.append({"type": "text", "text": item.get("text", "")})
                 elif item.get("type") == "image_url":
                     url_data = item.get("image_url", {})
-                    if isinstance(url_data, str):
-                        blocks.append({"type": "image", "source": {"type": "url", "url": url_data}})
-                    elif isinstance(url_data, dict):
-                        blocks.append({"type": "image", "source": {"type": "url", "url": url_data.get("url", "")}})
+                    url = url_data if isinstance(url_data, str) else (
+                        url_data.get("url", "") if isinstance(url_data, dict) else "")
+                    source = _openai_image_url_to_anthropic_source(url)
+                    if source:
+                        blocks.append({"type": "image", "source": source})
             else:
                 blocks.append({"type": "text", "text": str(item)})
     else:
@@ -1341,12 +1370,6 @@ async def _try_candidate(
                 circuit_breaker.record_success(raw_key_id, actual_model_id)
             except Exception:
                 pass
-        if alias_router is not None:
-            try:
-                alias_router.record_usage(actual_model_id, client_key_name or "")
-            except Exception:
-                pass
-
         # Release the least_conn in-flight slot for this now-completed
         # non-streaming request. (The streaming path releases inside the
         # generator's finally instead, so the two never double-release.)

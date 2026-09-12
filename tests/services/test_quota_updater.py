@@ -125,7 +125,7 @@ def test_custom_header_names():
     }
     updater.update_quota_after_request(account, headers, "hy3", header_config)
     mock_repo.update_quota.assert_called_once_with("acct", 50, 500, key_id=0)
-    mock_repo.update_model_quota.assert_called_once_with("acct", "hy3", 10, 200)
+    mock_repo.update_model_quota.assert_called_once_with("acct", "hy3", 10, 200, key_id=0)
 
 
 def test_used_header_derives_remaining():

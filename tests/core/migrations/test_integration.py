@@ -1,8 +1,16 @@
 """Integration tests: full migration flow end-to-end."""
 
+from pathlib import Path
+
 import pytest
 from provider.core.database import DatabaseManager
 from provider.core.migrations import Migrator, get_all_migrations
+
+
+# Derived from the migration directory instead of a literal: this suite was
+# already broken when migration 028 landed without bumping the hardcoded 27.
+_MIGRATION_DIR = Path(__file__).resolve().parents[3] / "core" / "migrations" / "migrations"
+MIGRATION_COUNT = len(list(_MIGRATION_DIR.glob("[0-9][0-9][0-9]_*.py")))
 
 
 @pytest.fixture
@@ -21,7 +29,7 @@ class TestFreshInstall:
         migrator.run()
 
         status = migrator.status()
-        assert len(status) == 27
+        assert len(status) == MIGRATION_COUNT
         assert all(s["applied"] for s in status)
 
     def test_idempotent_on_fresh_install(self, db):
@@ -31,7 +39,7 @@ class TestFreshInstall:
         migrator.run()  # second run no-op
 
         status = migrator.status()
-        assert len(status) == 27
+        assert len(status) == MIGRATION_COUNT
         assert all(s["applied"] for s in status)
 
 
@@ -92,7 +100,7 @@ class TestOldDatabaseUpgrade:
         migrator.run()
 
         status = migrator.status()
-        assert len(status) == 27
+        assert len(status) == MIGRATION_COUNT
         assert all(s["applied"] for s in status)
 
         with db.get_connection() as conn:
@@ -112,6 +120,6 @@ class TestOldDatabaseUpgrade:
 class TestMigrationCount:
     def test_all_migrations_registered(self):
         migrations = get_all_migrations()
-        assert len(migrations) == 27
+        assert len(migrations) == MIGRATION_COUNT
         versions = [m.version for m in migrations]
-        assert versions == list(range(1, 28))
+        assert versions == list(range(1, MIGRATION_COUNT + 1))

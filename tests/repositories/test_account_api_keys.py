@@ -49,3 +49,25 @@ def test_accounts_isolated(repo):
     repo.add_api_key(a["id"], "ka2")
     assert repo.count_active_keys(a["account_id"]) == 2
     assert repo.count_active_keys(b["account_id"]) == 1
+
+
+def test_delete_api_key_returns_whether_deleted(repo):
+    """delete_api_key reports whether a row was actually removed.
+
+    The admin endpoint relies on this to distinguish success from 404.
+    """
+    acc = repo.create(name="Del", api_keys=["k1"], base_url="http://x")
+    k2 = repo.add_api_key(acc["id"], "k2")
+    assert repo.delete_api_key(k2["id"]) is True
+    assert repo.delete_api_key(k2["id"]) is False
+    assert repo.delete_api_key(999999) is False
+
+
+def test_api_key_id_to_logical_maps_sort_order(repo):
+    """account_api_keys.id maps to the 0-based logical index used in logs/quotas."""
+    acc = repo.create(name="Map", api_keys=["k1"], base_url="http://x")
+    k2 = repo.add_api_key(acc["id"], "k2")
+    k3 = repo.add_api_key(acc["id"], "k3")
+    assert repo.api_key_id_to_logical(k2["id"]) == 1
+    assert repo.api_key_id_to_logical(k3["id"]) == 2
+    assert repo.api_key_id_to_logical(999999) == 0

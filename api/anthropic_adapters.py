@@ -58,25 +58,35 @@ def resolve_upstream_base(account, protocol: str) -> str:
 # ── Usage extraction (shared by both routes) ────────────────────────────
 
 def extract_cache_usage(usage) -> tuple:
-    """Extract cache-related token counts from an OpenAI-format usage dict.
+    """Extract cache-related token counts from an upstream usage dict.
 
     Returns ``(cached_tokens, prompt_partial_cached)``.
 
-    Compatible with OpenAI-style ``prompt_tokens_details.cached_tokens`` /
-    ``prompt_partial_cached_tokens``, and DeepSeek-style top-level
-    ``prompt_cache_hit_tokens``.
+    Reads whichever convention the upstream uses: OpenAI's
+    ``prompt_tokens_details.cached_tokens`` / ``prompt_partial_cached_tokens``,
+    DeepSeek's OpenAI-compatible top-level ``prompt_cache_hit_tokens``, and
+    Anthropic's ``cache_read_input_tokens`` / ``cache_creation_input_tokens``.
+    The Anthropic keys matter here — ``/v1/messages`` returns them, and
+    ``_openai_to_anthropic_response`` produces them, so the non-streaming
+    branch of the Anthropic routes must find the cache regardless of which
+    upstream path served the request.
     """
     if not isinstance(usage, dict):
         return 0, 0
     details = usage.get("prompt_tokens_details")
     if not isinstance(details, dict):
         details = {}
-    cached = details.get("cached_tokens")
-    if not cached:
-        cached = usage.get("prompt_cache_hit_tokens", 0)
-    partial = details.get("prompt_partial_cached_tokens", 0) or 0
+    cached = (
+        details.get("cached_tokens")
+        or usage.get("prompt_cache_hit_tokens")
+        or usage.get("cache_read_input_tokens")
+    )
+    partial = (
+        details.get("prompt_partial_cached_tokens")
+        or usage.get("cache_creation_input_tokens")
+    )
     try:
-        return int(cached or 0), int(partial)
+        return int(cached or 0), int(partial or 0)
     except (TypeError, ValueError):
         return 0, 0
 
@@ -113,12 +123,18 @@ async def safe_aclose(response) -> None:
 # ── Finish reason / stop reason mapping ─────────────────────────────────
 
 def openai_finish_to_anthropic_stop(finish_reason: str) -> str:
-    """Map OpenAI ``finish_reason`` to Anthropic ``stop_reason``."""
+    """Map OpenAI ``finish_reason`` to Anthropic ``stop_reason``.
+
+    Values must come from the Anthropic enum (``end_turn`` / ``max_tokens`` /
+    ``stop_sequence`` / ``tool_use`` / ``pause_turn`` / ``refusal``); clients
+    reject unknown ones. ``content_filter`` has no exact equivalent — the
+    closest semantic is ``refusal``.
+    """
     mapping = {
         "stop": "end_turn",
         "length": "max_tokens",
         "tool_calls": "tool_use",
-        "content_filter": "stopped_by",
+        "content_filter": "refusal",
     }
     return mapping.get(finish_reason, "end_turn")
 
@@ -127,9 +143,10 @@ def anthropic_stop_to_openai_finish(stop_reason: str) -> str:
     """Map Anthropic ``stop_reason`` to OpenAI ``finish_reason``."""
     mapping = {
         "end_turn": "stop",
+        "stop_sequence": "stop",
         "max_tokens": "length",
         "tool_use": "tool_calls",
-        "stopped_by": "content_filter",
+        "refusal": "content_filter",
     }
     return mapping.get(stop_reason, "stop")
 

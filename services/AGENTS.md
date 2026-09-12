@@ -15,6 +15,7 @@
 | caching.py | 缓存穿透保护 | 缓存命中率统计 |
 | admin_service.py | 管理后台业务逻辑 | 日志清理、统计、配额管理 |
 | quota_updater.py | 配额更新器 | 请求完成后更新 Token 用量 |
+| usage.py | Token 用量口径归一化 | normalize_cache_usage:input_tokens 统一为完整 prompt 口径 |
 | response_converter.py | 响应格式转换 | OpenAI <-> Anthropic 协议转换 |
 | models_cache.py | 模型列表缓存 | 供应商模型列表的缓存管理 |
 | providers/ | 供应商适配层 | 各供应商的具体实现 |
@@ -23,7 +24,10 @@
 
 - 熔断器: 429(rate_limit) 不冻结,仅永久错误(auth_error/bad_request)冻结
 - 负载均衡: Round Robin 每请求前进 1 格,回绕不跳过冻结 Key
-- 缓存命中率在桌面 Widget 和 Dashboard 中展示
+- 缓存命中率在 Dashboard 中展示
+- Token 口径:落库前必须过 usage.normalize_cache_usage。input_tokens 恒为完整
+  prompt 大小;上游把缓存单独上报的(如 DeepSeek Anthropic 端),缓存要先折回来,
+  否则命中率超过 100%、配额少记一个数量级
 
 ## 常见陷阱
 

@@ -162,6 +162,14 @@
           </div>
         </FormField>
 
+        <FormField label="Anthropic 上游协议">
+          <CSelect v-model="newSupplier.anthropic_stream_protocol" :options="streamProtocolOptions" />
+          <p class="text-[11px] text-ls-muted mt-1">
+            仅影响 <span class="font-mono">/anthropic/...</span> 入口：自动会在该模型连续两次空流后改走 OpenAI 端；
+            上游 Anthropic 端流式返回 200 却无数据时选 OpenAI。
+          </p>
+        </FormField>
+
         <!-- ── 支持模型 ── -->
         <ModelListEditor :models="newSupplier.models" animate
           @add="addNewModel" @remove="removeNewModel" />
@@ -250,6 +258,14 @@
               {{ editingSupplier.status === 'active' ? '启用' : '禁用' }}
             </span>
           </div>
+        </FormField>
+
+        <FormField label="Anthropic 上游协议">
+          <CSelect v-model="editingSupplier.anthropic_stream_protocol" :options="streamProtocolOptions" />
+          <p class="text-[11px] text-ls-muted mt-1">
+            仅影响 <span class="font-mono">/anthropic/...</span> 入口：自动会在该模型连续两次空流后改走 OpenAI 端；
+            上游 Anthropic 端流式返回 200 却无数据时选 OpenAI。
+          </p>
         </FormField>
 
         <!-- ── 支持模型 ── -->
@@ -453,6 +469,15 @@ const providerTypeOptions = computed(() =>
 const ptMap = computed(() =>
   Object.fromEntries(providerTypes.value.map(pt => [pt.type_key, pt]))
 )
+
+// ── Anthropic 上游协议：native / openai / auto ──
+// 部分供应商的 Anthropic 端流式返回 200 却无任何事件，自动模式会在连续两次
+// 空流后把该模型的请求改走它的 OpenAI 端。
+const streamProtocolOptions = [
+  { label: '自动（连续空流后改用 OpenAI）', value: 'auto' },
+  { label: '原生 Anthropic（/v1/messages）', value: 'native' },
+  { label: 'OpenAI（/v1/chat/completions）', value: 'openai' },
+]
 const providerTypeLabel = (t) => ptMap.value[t]?.name || t || '—'
 const providerTypeColor = (t) => ptMap.value[t]?.color || 'var(--chart-blue)'
 
@@ -665,7 +690,7 @@ const openModelInfo = (acc) => {
 const showAddDrawer = ref(false)
 const adding = ref(false)
 const addNameInput = ref(null)
-const newSupplier = ref({ name: '', api_key: '', base_url: '', anthropic_base_url: '', provider_type: '', models: [], api_key_records: [] })
+const newSupplier = ref({ name: '', api_key: '', base_url: '', anthropic_base_url: '', provider_type: '', anthropic_stream_protocol: 'auto', models: [], api_key_records: [] })
 
 // ── Edit drawer ──
 const showEditDrawer = ref(false)
@@ -888,7 +913,7 @@ watch(modelInfoKeyFilter, () => {
 
 // ── Add (drawer) ──
 const openAdd = async () => {
-  newSupplier.value = { name: '', api_key: '', base_url: '', anthropic_base_url: '', provider_type: '', models: [], api_key_records: [] }
+  newSupplier.value = { name: '', api_key: '', base_url: '', anthropic_base_url: '', provider_type: '', anthropic_stream_protocol: 'auto', models: [], api_key_records: [] }
   showAddDrawer.value = true
   await nextTick()
   addNameInput.value?.focus()
@@ -916,6 +941,7 @@ const addSupplier = async () => {
       name: newSupplier.value.name,
       base_url: newSupplier.value.base_url,
       anthropic_base_url: newSupplier.value.anthropic_base_url || '',
+      anthropic_stream_protocol: newSupplier.value.anthropic_stream_protocol || 'auto',
       provider_type: newSupplier.value.provider_type,
       api_key_records: normalized,
     })
@@ -947,6 +973,7 @@ const openEdit = async (acc) => {
     api_key: acc.api_key,
     base_url: acc.base_url,
     anthropic_base_url: acc.anthropic_base_url || '',
+    anthropic_stream_protocol: acc.anthropic_stream_protocol || 'auto',
     provider_type: acc.provider_type || '',
     status: acc.status,
     models: [],
@@ -1001,6 +1028,7 @@ const saveEdit = async () => {
       api_key: editingSupplier.value.api_key,
       base_url: editingSupplier.value.base_url,
       anthropic_base_url: editingSupplier.value.anthropic_base_url || '',
+      anthropic_stream_protocol: editingSupplier.value.anthropic_stream_protocol || 'auto',
       provider_type: editingSupplier.value.provider_type,
       status: editingSupplier.value.status,
       api_key_records: records,

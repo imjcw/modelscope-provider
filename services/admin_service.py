@@ -18,7 +18,8 @@ from repositories.quota_repository import QuotaRepository
 from repositories.supplier_model_repository import SupplierModelRepository
 from services.providers import build_rate_limit_strategies, create_strategy
 from services.models_cache import invalidate as invalidate_models_cache
-from models.account import DEFAULT_PROVIDER_TYPE
+from services.usage import normalize_cache_usage
+from models.account import DEFAULT_ANTHROPIC_STREAM_PROTOCOL, DEFAULT_PROVIDER_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,8 @@ class AdminService:
                         provider_type: str = DEFAULT_PROVIDER_TYPE,
                         api_keys: list = None, api_key_records: list = None,
                         anthropic_base_url: str = "",
-                        anthropic_auth_style: str = "anthropic") -> dict:
+                        anthropic_auth_style: str = "anthropic",
+                        anthropic_stream_protocol: str = DEFAULT_ANTHROPIC_STREAM_PROTOCOL) -> dict:
         """Create a supplier. Requires at least one API key (stored in account_api_keys).
 
         ``anthropic_base_url`` optionally points the Anthropic-native protocol at
@@ -153,6 +155,8 @@ class AdminService:
         supplier's Anthropic endpoint (``x-api-key`` for native Anthropic,
         ``bearer`` for suppliers like SenseTime that expose an Anthropic-shaped
         ``/v1/messages`` but still require ``Authorization: Bearer``).
+        ``anthropic_stream_protocol`` selects the upstream protocol for Anthropic
+        requests (``native`` / ``openai`` / ``auto``).
         """
         if api_key_records:
             keys = [r.get("api_key", "").strip() for r in api_key_records
@@ -161,6 +165,7 @@ class AdminService:
                 name, base_url, provider_type=provider_type, api_keys=keys,
                 anthropic_base_url=anthropic_base_url,
                 anthropic_auth_style=anthropic_auth_style,
+                anthropic_stream_protocol=anthropic_stream_protocol,
             )
             if self.account_repo is not None:
                 self.account_repo.replace_api_keys_with_records(
@@ -175,6 +180,7 @@ class AdminService:
             name, base_url, provider_type=provider_type, api_keys=keys,
             anthropic_base_url=anthropic_base_url,
             anthropic_auth_style=anthropic_auth_style,
+            anthropic_stream_protocol=anthropic_stream_protocol,
         )
 
     def update_supplier(self, supplier_id: int, **kwargs) -> dict:
@@ -898,9 +904,11 @@ class AdminService:
                 error_count=err,
             ))
 
+        # input_tokens is the full prompt size (see normalize_cache_usage), so
+        # the denominator is input alone.
         cache_hit_rate = round(
-            totals["cache_tokens"] / (totals["cache_tokens"] + totals["input_tokens"]) * 100, 1
-        ) if (totals["cache_tokens"] + totals["input_tokens"]) > 0 else 0.0
+            totals["cache_tokens"] / totals["input_tokens"] * 100, 1
+        ) if totals["input_tokens"] > 0 else 0.0
 
         return {
             "alias": alias_name,
@@ -939,6 +947,14 @@ class AdminService:
                     error_source: str = None) -> str:
         """Log a request and return its request_id."""
         from datetime import datetime, timezone
+
+        # Defensive net for every caller: fold a cache portion that the upstream
+        # reported outside input_tokens back into it, so the aggregated cache
+        # hit rate can never exceed 100 %. No-op for upstreams that already
+        # include the cache in input_tokens.
+        input_tokens, cached_tokens, prompt_partial_cached = normalize_cache_usage(
+            input_tokens, cached_tokens, prompt_partial_cached
+        )
 
         request_id = f"req_{uuid.uuid4().hex[:8]}"
         # Primary request time at millisecond precision (UTC). The DB column
@@ -1685,9 +1701,10 @@ class AdminService:
             date_str = r["date"]
             daily_tokens.setdefault(date_str, {})[r["model"]] = r["tokens"] or 0
 
-        # Cache hit rate: cached / (cached + input)
-        denom = total_cached + total_input
-        cache_hit_rate = round(total_cached / denom * 100, 1) if denom > 0 else 0.0
+        # Cache hit rate: cached / input. input_tokens is the full prompt size —
+        # normalize_cache_usage folds any upstream-reported cache portion that
+        # sits outside input_tokens back in — so the denominator is input alone.
+        cache_hit_rate = round(total_cached / total_input * 100, 1) if total_input > 0 else 0.0
 
         return {
             "heatmap": heatmap,

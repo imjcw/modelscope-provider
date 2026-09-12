@@ -82,9 +82,6 @@ class FakeRouter:
     def release(self, *a, **k):
         return None
 
-    def record_usage(self, *a, **k):
-        return None
-
 
 def _make_dual_account():
     return build_ms_account(

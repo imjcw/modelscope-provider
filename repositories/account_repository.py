@@ -3,7 +3,11 @@ import uuid
 from typing import Dict, List, Optional
 
 from core.database import DatabaseManager
-from models.account import DEFAULT_PROVIDER_TYPE
+from models.account import (
+    DEFAULT_ANTHROPIC_STREAM_PROTOCOL,
+    DEFAULT_PROVIDER_TYPE,
+    normalize_stream_protocol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +77,8 @@ class AccountRepository:
                status: str = "active", provider_type: str = DEFAULT_PROVIDER_TYPE,
                api_keys: Optional[List[str]] = None,
                 anthropic_base_url: str = "",
-                anthropic_auth_style: str = "anthropic") -> dict:
+                anthropic_auth_style: str = "anthropic",
+                anthropic_stream_protocol: str = DEFAULT_ANTHROPIC_STREAM_PROTOCOL) -> dict:
         """Create a new account. account_id is auto-generated as UUID.
 
         All API keys are stored in ``account_api_keys`` (the legacy single
@@ -85,19 +90,25 @@ class AccountRepository:
         ``anthropic_auth_style`` is the auth scheme for that supplier's
         Anthropic endpoint (``x-api-key`` native, or ``bearer`` for suppliers
         like SenseTime).
+        ``anthropic_stream_protocol`` picks the upstream protocol used for
+        Anthropic requests (native / openai / auto — see
+        ``models.account.ANTHROPIC_STREAM_PROTOCOLS``).
         """
         keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
         if not keys:
             raise ValueError("At least one API key is required")
         account_id = uuid.uuid4().hex
+        stream_protocol = normalize_stream_protocol(anthropic_stream_protocol)
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO accounts
                    (account_id, name, base_url, provider_type, status,
-                    anthropic_base_url, anthropic_auth_style)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    anthropic_base_url, anthropic_auth_style,
+                    anthropic_stream_protocol)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (account_id, name, base_url, provider_type, status,
-                 anthropic_base_url or "", anthropic_auth_style or "anthropic"),
+                 anthropic_base_url or "", anthropic_auth_style or "anthropic",
+                 stream_protocol),
             )
             new_id = cursor.lastrowid
             for sort_order, key in enumerate(keys):
@@ -119,8 +130,12 @@ class AccountRepository:
         """
         # NOTE: "api_key" removed — the column no longer exists (migration 023).
         allowed = {"base_url", "status", "account_id", "name",
-                   "provider_type", "anthropic_base_url", "anthropic_auth_style"}
+                   "provider_type", "anthropic_base_url", "anthropic_auth_style",
+                   "anthropic_stream_protocol"}
         fields = {k: v for k, v in kwargs.items() if k in allowed}
+        if "anthropic_stream_protocol" in fields:
+            fields["anthropic_stream_protocol"] = normalize_stream_protocol(
+                fields["anthropic_stream_protocol"])
         if not fields:
             return None
 
@@ -301,6 +316,7 @@ class AccountRepository:
                 "DELETE FROM account_api_keys WHERE id = ?", (key_id,)
             )
             conn.commit()
+        return cursor.rowcount > 0
 
     def api_key_id_to_logical(self, api_key_id: int) -> int:
         """Convert an ``account_api_keys.id`` to the logical key index (0 = primary).
@@ -325,4 +341,3 @@ class AccountRepository:
                 if row["id"] == api_key_id:
                     return idx
             return 0
-            return cursor.rowcount > 0

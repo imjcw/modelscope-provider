@@ -19,21 +19,22 @@ const props = defineProps({
 
 const CIRCUMFERENCE = 2 * Math.PI * 48 // ≈ 301.6
 
-const hitRate = computed(() => {
+// 缓存占比：inputTokens 是完整 prompt 口径（后端 normalize_cache_usage 保证），
+// 但仍夹到 0–100，避免历史数据或上游异常把命中率显示成 >100% 或负数。
+const hitRatio = computed(() => {
   if (!props.inputTokens) return 0
-  return (props.cachedTokens / props.inputTokens) * 100
+  return Math.min(1, Math.max(0, props.cachedTokens / props.inputTokens))
 })
 
+const hitRate = computed(() => hitRatio.value * 100)
+
 /** 缓存命中弧长 */
-const hitLen = computed(() => {
-  if (!props.inputTokens) return 0
-  return (props.cachedTokens / props.inputTokens) * CIRCUMFERENCE
-})
+const hitLen = computed(() => hitRatio.value * CIRCUMFERENCE)
 
 /** 未命中弧长（剩余输入） */
 const missLen = computed(() => CIRCUMFERENCE - hitLen.value)
 
-const missTokens = computed(() => props.inputTokens - props.cachedTokens)
+const missTokens = computed(() => Math.max(0, props.inputTokens - props.cachedTokens))
 
 // ── 数值格式化（不带单位，使用千分位便于阅读）──
 function fmtToken(v) {

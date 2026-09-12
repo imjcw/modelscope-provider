@@ -5,6 +5,27 @@ from typing import List, Set, Optional
 # Centralized so the literal isn't duplicated as a magic string elsewhere.
 DEFAULT_PROVIDER_TYPE = "modelscope"
 
+# Upstream protocol used for Anthropic-protocol requests, per supplier.
+# See ``ModelScopeAccount.anthropic_stream_protocol`` for the semantics.
+# ``auto`` is the default: it stays on the native path but self-heals when an
+# upstream's Anthropic streaming path is broken (see migration 029), so no
+# manual config is needed to survive such a supplier.
+DEFAULT_ANTHROPIC_STREAM_PROTOCOL = "auto"
+ANTHROPIC_STREAM_PROTOCOLS = ("native", "openai", "auto")
+
+
+def normalize_stream_protocol(value: Optional[str]) -> str:
+    """Coerce a ``anthropic_stream_protocol`` value to one of the three modes.
+
+    Called both on write (repository) and on read (``build_ms_account``) so the
+    value that reaches the router is always one of
+    :data:`ANTHROPIC_STREAM_PROTOCOLS`, even for rows written before the
+    column existed (migration 029) or edited with a typo.
+    """
+    if value in ANTHROPIC_STREAM_PROTOCOLS:
+        return value
+    return DEFAULT_ANTHROPIC_STREAM_PROTOCOL
+
 
 @dataclass
 class ModelScopeAccount:
@@ -30,6 +51,20 @@ class ModelScopeAccount:
     # Anthropic-compatible ``/v1/messages`` but still require ``Authorization:
     # Bearer``, in which case this is ``"bearer"``.
     anthropic_auth_style: str = "anthropic"
+    # Which upstream protocol to speak for this supplier when the client used
+    # the Anthropic entry point. The gateway must not hardcode
+    # ``/v1/messages``: some suppliers (e.g. SenseTime / 商汤) serve an
+    # Anthropic-shaped endpoint whose *streaming* path returns 200 +
+    # ``text/event-stream`` and then EOFs with an empty body, which makes
+    # Anthropic clients retry the whole request non-streaming — billing it
+    # twice — while their OpenAI endpoint streams the same models fine.
+    #   "native" → hit ``/v1/messages`` unchanged.
+    #   "openai" → convert the request to OpenAI format, hit
+    #              ``/v1/chat/completions``, convert the response back.
+    #   "auto"   → native first, but remember a switch to "openai" for a given
+    #              model once its stream comes back empty repeatedly.
+    #              (default — no config needed to survive a broken supplier)
+    anthropic_stream_protocol: str = DEFAULT_ANTHROPIC_STREAM_PROTOCOL
     provider_type: str = DEFAULT_PROVIDER_TYPE
     name: str = ""
     quota_limit: int = 0
@@ -81,6 +116,9 @@ def build_ms_account(
         base_url=account_dict["base_url"],
         anthropic_base_url=account_dict.get("anthropic_base_url", "") or "",
         anthropic_auth_style=account_dict.get("anthropic_auth_style", "anthropic") or "anthropic",
+        anthropic_stream_protocol=normalize_stream_protocol(
+            account_dict.get("anthropic_stream_protocol")
+        ),
         provider_type=account_dict.get("provider_type", DEFAULT_PROVIDER_TYPE),
         api_key_records=api_key_records if api_key_records is not None
         else account_dict.get("api_key_records"),
