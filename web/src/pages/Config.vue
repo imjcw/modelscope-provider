@@ -4,24 +4,8 @@
 
     <div class="flex-1 overflow-y-auto min-h-0 px-6 md:px-8 py-6 grid grid-cols-1 md:grid-cols-2 gap-6">
 
-      <!-- Server Settings -->
-      <CCard title="服务设置" body-class="p-5 space-y-4">
-        <FormField label="监听地址" plain hint="(读取配置文件)">
-          <input v-model="config.listenHost" type="text" disabled class="form-input font-mono cursor-not-allowed">
-        </FormField>
-        <FormField label="监听端口" plain hint="(读取配置文件)">
-          <input v-model.number="config.listenPort" type="number" disabled class="form-input font-mono cursor-not-allowed">
-        </FormField>
-        <FormField label="API 前缀" plain hint="(读取配置文件)">
-          <input v-model="config.apiPrefix" type="text" disabled class="form-input font-mono cursor-not-allowed">
-        </FormField>
-      </CCard>
-
       <!-- Database Settings -->
       <CCard title="数据库设置" body-class="p-5 space-y-4">
-        <FormField label="数据库路径" plain hint="(读取配置文件)">
-          <input v-model="config.dbPath" type="text" disabled class="form-input font-mono cursor-not-allowed">
-        </FormField>
         <FormField label="数据库大小" plain>
           <p class="text-sm text-ls-dim font-mono">{{ info.dbSize || '—' }}</p>
         </FormField>
@@ -41,17 +25,6 @@
             <p class="text-xs text-ls-muted mt-0.5">将请求日志写入数据库</p>
           </div>
           <CCheckbox v-model="config.persistLogs" disabled />
-        </div>
-      </CCard>
-
-      <!-- Desktop Widget -->
-      <CCard title="桌面卡片" body-class="p-5 space-y-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm text-ls-text">桌面显示今日 Token 卡片</p>
-            <p class="text-xs text-ls-muted mt-0.5">应用启动后自动在桌面显示今日 Token 消耗小卡片，关闭后不再显示</p>
-          </div>
-          <CCheckbox v-model="config.desktopWidget" />
         </div>
       </CCard>
 
@@ -204,12 +177,10 @@ const LB_STRATEGY_OPTIONS = [
 ]
 
 const DEFAULTS = {
-  listenHost: '0.0.0.0', listenPort: 8000, apiPrefix: '/api',
-  dbPath: 'modelscope_proxy.db', logLevel: 'INFO', persistLogs: true,
+  logLevel: 'INFO', persistLogs: true,
   logRetentionHours: 1,
   lbStrategy: 'round_robin', timeoutMs: 30000,
   autoDisable: true, autoReset: true,
-  desktopWidget: true,
 }
 
 // Snapshot of the last successfully loaded config (used by "取消")
@@ -234,7 +205,6 @@ const applyBackendConfig = (data) => {
     autoDisable: (m('auto_disable_on_quota') || 'true').toLowerCase() === 'true',
     autoReset: (m('auto_reset_daily') || 'true').toLowerCase() === 'true',
     logRetentionHours: Number(m('log_retention_hours')) || 1,
-    desktopWidget: (m('desktop_widget_enabled') || 'true').toLowerCase() === 'true',
   })
   // Frontend-only fields keep their defaults if backend has nothing
 }
@@ -285,7 +255,6 @@ const saveConfig = async () => {
     auto_disable_on_quota: String(config.autoDisable),
     auto_reset_daily: String(config.autoReset),
     log_retention_hours: String(config.logRetentionHours),
-    desktop_widget_enabled: String(config.desktopWidget),
   }
   try {
     await apiUpdateConfig(payload)

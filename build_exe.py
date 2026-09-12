@@ -28,7 +28,10 @@ def build_frontend():
     print(">>> 构建前端...")
     dist_dir = WEB / "dist"
     try:
-        subprocess.run(["npm", "run", "build"], cwd=str(WEB), check=True)
+        # npm 在 Windows 上是 npm.cmd 脚本，subprocess 不带 shell 解析不到，
+        # 需用 shutil.which（按 PATHEXT）定位真实可执行文件。
+        npm = shutil.which("npm") or shutil.which("npm.cmd")
+        subprocess.run([npm or "npm", "run", "build"], cwd=str(WEB), check=True)
         print("    前端构建完成。")
     except Exception as exc:
         if dist_dir.exists():
@@ -188,7 +191,7 @@ def build_exe():
     print(f"    1. 将 {NAME}.exe 复制到目标电脑")
     print("    2. 双击运行（首次启动自动创建 data/ 目录）")
     print("    3. 程序运行在系统托盘，右键图标可打开后台或退出")
-    print(f"    4. 浏览器自动打开 http://localhost:8000")
+    print(f"    4. 浏览器自动打开 http://localhost:38000")
     print()
 
 

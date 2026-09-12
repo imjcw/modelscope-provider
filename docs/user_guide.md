@@ -68,16 +68,16 @@ MODELSCOPE_ACCOUNTS_JSON='[
 bash start.sh
 
 # 或手动启动
-python3 -m uvicorn provider.main:app --host 0.0.0.0 --port 8000
+python3 -m uvicorn provider.main:app --host 0.0.0.0 --port 37000
 ```
 
-启动后服务监听 `0.0.0.0:8000`，浏览器打开 `http://127.0.0.1:8000/#/` 进入管理后台。
+启动后服务监听 `0.0.0.0:37000`，浏览器打开 `http://127.0.0.1:37000/#/` 进入管理后台。
 
 ### 1.4 验证运行
 
 ```bash
 # 健康检查
-curl http://127.0.0.1:8000/api/health
+curl http://127.0.0.1:37000/api/health
 # 返回: {"status":"healthy"}
 ```
 
@@ -123,7 +123,7 @@ curl http://127.0.0.1:8000/api/health
 **使用示例（curl）**：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/chat/completions \
+curl -X POST http://127.0.0.1:37000/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "hy3",
@@ -138,7 +138,7 @@ from openai import OpenAI
 
 client = OpenAI(
     api_key="任意值",              # 代理不需要真实 OpenAI key
-    base_url="http://127.0.0.1:8000/api/v1",
+    base_url="http://127.0.0.1:37000/api/v1",
 )
 
 response = client.chat.completions.create(
@@ -171,7 +171,7 @@ for chunk in client.chat.completions.create(
 **使用示例（curl）**：
 
 ```bash
-curl http://127.0.0.1:8000/api/v1/models
+curl http://127.0.0.1:37000/api/v1/models
 ```
 
 **响应示例**：
@@ -224,7 +224,7 @@ curl http://127.0.0.1:8000/api/v1/models
 
 ## 3. Web 管理后台
 
-浏览器打开 `http://127.0.0.1:8000/#/` 进入管理后台。侧边栏提供 7 个功能页面。
+浏览器打开 `http://127.0.0.1:37000/#/` 进入管理后台。侧边栏提供 7 个功能页面。
 
 ### 3.1 仪表盘（Dashboard）
 
@@ -349,7 +349,7 @@ curl http://127.0.0.1:8000/api/v1/models
 
 ```bash
 # OpenAI / ModelScope 兼容供应商（provider_type 省略即默认）
-curl -X POST http://127.0.0.1:8000/api/admin/suppliers \
+curl -X POST http://127.0.0.1:37000/api/admin/suppliers \
   -H "Content-Type: application/json" \
   -d '{
     "name": "供应商A",
@@ -358,7 +358,7 @@ curl -X POST http://127.0.0.1:8000/api/admin/suppliers \
   }'
 
 # Anthropic 原生供应商
-curl -X POST http://127.0.0.1:8000/api/admin/suppliers \
+curl -X POST http://127.0.0.1:37000/api/admin/suppliers \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Anthropic官方",
@@ -370,7 +370,7 @@ curl -X POST http://127.0.0.1:8000/api/admin/suppliers \
 # 同一供应商、OpenAI 与 Anthropic 接口地址不同（双地址）
 #   base_url          → OpenAI 端（客户端走 /openai/... 时命中）
 #   anthropic_base_url → Anthropic 端（客户端走 /anthropic/... 时命中）
-curl -X POST http://127.0.0.1:8000/api/admin/suppliers \
+curl -X POST http://127.0.0.1:37000/api/admin/suppliers \
   -H "Content-Type: application/json" \
   -d '{
     "name": "双协议供应商",
@@ -391,7 +391,7 @@ curl -X POST http://127.0.0.1:8000/api/admin/suppliers \
 **更新供应商**：
 
 ```bash
-curl -X PUT http://127.0.0.1:8000/api/admin/suppliers/1 \
+curl -X PUT http://127.0.0.1:37000/api/admin/suppliers/1 \
   -H "Content-Type: application/json" \
   -d '{"status": "disabled"}'
 ```
@@ -399,7 +399,7 @@ curl -X PUT http://127.0.0.1:8000/api/admin/suppliers/1 \
 **切换状态**：
 
 ```bash
-curl -X PATCH http://127.0.0.1:8000/api/admin/suppliers/1/status
+curl -X PATCH http://127.0.0.1:37000/api/admin/suppliers/1/status
 ```
 
 ### 4.2 模型映射（Mappings）
@@ -413,7 +413,7 @@ curl -X PATCH http://127.0.0.1:8000/api/admin/suppliers/1/status
 **批量更新映射**：
 
 ```bash
-curl -X PUT http://127.0.0.1:8000/api/admin/mappings/bulk \
+curl -X PUT http://127.0.0.1:37000/api/admin/mappings/bulk \
   -H "Content-Type: application/json" \
   -d '{
     "mappings": {
@@ -433,7 +433,7 @@ curl -X PUT http://127.0.0.1:8000/api/admin/mappings/bulk \
 **更新配置**：
 
 ```bash
-curl -X PUT http://127.0.0.1:8000/api/admin/config \
+curl -X PUT http://127.0.0.1:37000/api/admin/config \
   -H "Content-Type: application/json" \
   -d '{
     "config": {
@@ -467,13 +467,13 @@ curl -X PUT http://127.0.0.1:8000/api/admin/config \
 
 ```bash
 # 查询第 1 页，每页 20 条
-curl "http://127.0.0.1:8000/api/admin/logs?page=0&page_size=20"
+curl "http://127.0.0.1:37000/api/admin/logs?page=0&page_size=20"
 
 # 按状态码筛选（只看 429）
-curl "http://127.0.0.1:8000/api/admin/logs?status_code=429"
+curl "http://127.0.0.1:37000/api/admin/logs?status_code=429"
 
 # 按时间范围筛选
-curl "http://127.0.0.1:8000/api/admin/logs?start_time=2026-07-16T00:00:00&end_time=2026-07-16T23:59:59"
+curl "http://127.0.0.1:37000/api/admin/logs?start_time=2026-07-16T00:00:00&end_time=2026-07-16T23:59:59"
 ```
 
 ### 4.5 统计（Stats）
@@ -484,7 +484,7 @@ curl "http://127.0.0.1:8000/api/admin/logs?start_time=2026-07-16T00:00:00&end_ti
 
 ```bash
 # 默认查询 30 天
-curl "http://127.0.0.1:8000/api/admin/stats?days=30"
+curl "http://127.0.0.1:37000/api/admin/stats?days=30"
 ```
 
 ### 4.6 告警（Alerts）
@@ -494,13 +494,13 @@ curl "http://127.0.0.1:8000/api/admin/stats?days=30"
 | GET | `/api/admin/alerts?days=7` | 查询告警历史 |
 
 ```bash
-curl "http://127.0.0.1:8000/api/admin/alerts?days=7"
+curl "http://127.0.0.1:37000/api/admin/alerts?days=7"
 ```
 
 ### 4.7 健康检查
 
 ```bash
-curl http://127.0.0.1:8000/api/health
+curl http://127.0.0.1:37000/api/health
 # 返回: {"status": "healthy"}
 ```
 

@@ -7,7 +7,7 @@
 cd /d "%~dp0"
 
 if "%HOST%"=="" set HOST=0.0.0.0
-if "%PORT%"=="" set PORT=8000
+if "%PORT%"=="" set PORT=38000
 
 echo.
 echo >>> 启动 AI Provider...

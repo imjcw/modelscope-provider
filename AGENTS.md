@@ -4,18 +4,18 @@ AI API 网关/代理服务,统一管理多家 AI 供应商(OpenAI、Anthropic、
 
 ## 启动方式
 
-- **开发:** `python run.py` (默认 127.0.0.1:8000)
-- **生产:** `start.sh` 或 `start.bat` (支持 PORT/HOST 环境变量)
-- **构建 exe:** `python build_exe.py` (自动递增版本号,需先 `npm run build` 前端)
+- **开发:** `python run.py` (默认 127.0.0.1:37000)
+- **生产:** `start.sh` 或 `start.bat` (支持 PORT/HOST 环境变量,默认 38000)
+- **构建 exe:** `python build_exe.py` (自动递增版本号,需先 `npm run build` 前端;exe 默认端口 38000)
 
 ## 关键文件
 
 | 文件 | 职责 |
 |------|------|
-| `run.py` | 应用入口,启动 uvicorn 服务 + 托盘图标 + 桌面 Widget |
+| `run.py` | 应用入口,启动 uvicorn 服务 + 系统托盘 |
 | `main.py` | FastAPI 应用工厂,注册路由、中间件、CORS、启动/关闭事件 |
 | `build_exe.py` | PyInstaller 打包脚本,自动生成版本号 |
-| `conftest.py` | pytest 全局 fixture,提供测试用数据库、HTTP 客户端、测试数据 |
+| `conftest.py` | pytest 根配置:注册 `provider` 命名空间包;`tests/conftest.py` 为每个测试提供独立临时 SQLite(建表 + 跑全量迁移) |
 | `pyproject.toml` | 项目元数据与依赖声明 |
 | `requirements.txt` | pip 依赖锁定 |
 | `start.sh` / `start.bat` | 启动脚本,清 `__pycache__` 后启动服务 |
@@ -24,8 +24,8 @@ AI API 网关/代理服务,统一管理多家 AI 供应商(OpenAI、Anthropic、
 
 ```
 api/           — FastAPI 路由层
-core/          — 核心逻辑(数据库、配置、HTTP 客户端、桌面 Widget)
-models/        — SQLAlchemy 数据模型
+core/          — 核心逻辑(数据库、配置、HTTP 客户端)
+models/        — 数据模型(dataclass,项目无 ORM)
 repositories/  — 数据访问层(Repository 模式)
 services/      — 业务逻辑层(熔断器、负载均衡、路由等)
 config/        — 配置文件
@@ -44,7 +44,6 @@ scripts/       — 工具脚本
 
 ## 常见陷阱
 
-- 不要 kill 8000 端口上的 AIProvider.exe,否则用户服务会挂
+- 不要 kill 正式端口(38000)上的 AIProvider.exe,否则用户服务会挂;旧版 exe 曾用 8000
 - 启动前清 `__pycache__` (start.sh 已自动执行)
 - 数据库为 SQLite,路径 `data/ai_provider.db`
-- 桌面 Widget 仅 Windows 可用(依赖 pywin32)

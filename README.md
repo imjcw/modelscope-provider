@@ -64,7 +64,7 @@ LOG_LEVEL="INFO"
 # ⚠️ 启动前确保 web/dist/ 已存在（运行 npm run build）
 
 # 推荐：使用 main.py（带管理后台 API + 静态文件托管）
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 37000 --reload
 
 # 或直接运行（main.py 内置 uvicorn 启动）
 python main.py
@@ -72,7 +72,7 @@ python main.py
 
 ## 访问管理后台
 
-打开浏览器访问：`http://localhost:8000/#/`
+打开浏览器访问：`http://localhost:37000/#/`
 
 页面说明：
 - `/` 仪表盘 — 配额概览、账户/模型状态、统计趋势（"使用统计"已并入仪表盘）
@@ -89,13 +89,13 @@ python main.py
 ### 健康检查
 
 ```bash
-curl http://localhost:8000/api/health
+curl http://localhost:37000/api/health
 ```
 
 ### 聊天完成
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat/completions \
+curl -X POST http://localhost:37000/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "hy3",
@@ -107,16 +107,16 @@ curl -X POST http://localhost:8000/api/v1/chat/completions \
 
 ```bash
 # 查询所有账户
-curl http://localhost:8000/api/admin/accounts
+curl http://localhost:37000/api/admin/accounts
 
 # 查询日志
-curl http://localhost:8000/api/admin/logs?page=0&page_size=20
+curl http://localhost:37000/api/admin/logs?page=0&page_size=20
 
 # 查询窗口统计（仪表盘使用）
-curl http://localhost:8000/api/admin/stats/window
+curl http://localhost:37000/api/admin/stats/window
 
 # 查询所有账户配额信息
-curl http://localhost:8000/api/admin/quota
+curl http://localhost:37000/api/admin/quota
 ```
 
 ## 测试

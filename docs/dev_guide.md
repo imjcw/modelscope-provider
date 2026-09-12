@@ -28,10 +28,10 @@ DATABASE_URL="sqlite:///modelscope_proxy_test.db"
 ```bash
 # 本地开发（使用 test.db）
 cd /mnt/d/workspace/third
-python3 -m uvicorn provider.main:app --host 0.0.0.0 --port 8000
+python3 -m uvicorn provider.main:app --host 0.0.0.0 --port 37000
 
 # 正式启动（使用正式 db，通过环境变量覆盖）
-DATABASE_URL="sqlite:///modelscope_proxy.db" python3 -m uvicorn provider.main:app --host 0.0.0.0 --port 8000
+DATABASE_URL="sqlite:///modelscope_proxy.db" python3 -m uvicorn provider.main:app --host 0.0.0.0 --port 37000
 ```
 
 ### 测试隔离规则
@@ -128,12 +128,12 @@ DATABASE_URL="sqlite:///modelscope_proxy.db" python3 -m uvicorn provider.main:ap
 python -c "open('payload.json','w',encoding='utf-8').write('{\"model\":\"GLM5.2\",\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}],\"max_tokens\":1024}')"
 
 # 2) 发送（二选一即可）
-curl -X POST http://127.0.0.1:8000/anthropic/v1/messages \
+curl -X POST http://127.0.0.1:37000/anthropic/v1/messages \
   -H "Authorization: Bearer <CLIENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d @payload.json
 
-curl -X POST http://127.0.0.1:8000/anthropic/v1/messages \
+curl -X POST http://127.0.0.1:37000/anthropic/v1/messages \
   -H "x-api-key: <CLIENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d @payload.json
@@ -146,7 +146,7 @@ import anthropic
 
 client = anthropic.Anthropic(
     api_key="<CLIENT_API_KEY>",
-    base_url="http://127.0.0.1:8000/anthropic",  # 注意：写到 /anthropic，SDK 会补 /v1/messages
+    base_url="http://127.0.0.1:37000/anthropic",  # 注意：写到 /anthropic，SDK 会补 /v1/messages
 )
 
 resp = client.messages.create(

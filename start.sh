@@ -24,7 +24,7 @@ else
 fi
 
 HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8000}"
+PORT="${PORT:-38000}"
 
 echo ">>> 启动 AI Provider..."
 echo "    地址: http://${HOST}:${PORT}"
@@ -36,5 +36,5 @@ echo ""
 find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 export HOST="${HOST:-0.0.0.0}"
-export PORT="${PORT:-8000}"
+export PORT="${PORT:-38000}"
 $PY run.py
